@@ -1,0 +1,148 @@
+(ns tahto.store.model
+  (:require [std.foundation :refer :all]))
+
+(def state-protocol "tahto.object-vault-state/1")
+(def object-protocol "tahto.object/1")
+(def chunk-manifest-protocol "tahto.chunk-manifest/1")
+
+(def default-limits
+  {:max-object-bytes 1073741824
+   :max-upload-chunk-bytes 8388608
+   :max-range-bytes 8388608
+   :max-manifest-chunks 16384
+   :max-closure-objects 100000
+   :default-namespace-quota-bytes 1073741824})
+
+(def hex-digits
+  #{"0" "1" "2" "3" "4" "5" "6" "7" "8" "9"
+    "a" "b" "c" "d" "e" "f"})
+
+(def root-kinds
+  #{"application" "head" "backup" "retention"})
+
+(defn value-or
+  [m key fallback]
+  (if (and (map? m) (contains? m key))
+    (get m key)
+    fallback))
+
+(defn non-empty-string?
+  [value]
+  (and (string? value)
+       (> (count value) 0)))
+
+(defn non-negative-integer?
+  [value]
+  (and (integer? value)
+       (>= value 0)))
+
+(defn positive-integer?
+  [value]
+  (and (integer? value)
+       (> value 0)))
+
+(defn canonical-digest?
+  [value]
+  (and
+   (string? value)
+   (= 71 (count value))
+   (= "sha256:" (str/subs value 0 7))
+   (loop [index 7]
+     (if (= index 71)
+       true
+       (if (contains? hex-digits (str/subs value index (inc index)))
+         (recur (inc index))
+         false)))))
+
+(defn namespace-key
+  [application namespace]
+  [application namespace])
+
+(defn empty-state
+  ([]
+   (empty-state {}))
+  ([limits]
+   {:protocol state-protocol
+    :limits (merge default-limits limits)
+    :objects {}
+    :uploads {}
+    :quotas {}
+    :references {}
+    :manifests {}
+    :roots {}}))
+
+(defn object
+  [state digest]
+  (value-or (get state :objects) digest nil))
+
+(defn upload
+  [state upload-id]
+  (value-or (get state :uploads) upload-id nil))
+
+(defn namespace-references
+  [state application namespace]
+  (value-or
+   (get state :references)
+   (namespace-key application namespace)
+   #{}))
+
+(defn namespace-quota
+  [state application namespace]
+  (value-or
+   (get state :quotas)
+   (namespace-key application namespace)
+   (get (get state :limits) :default-namespace-quota-bytes)))
+
+(defn object-size
+  [state digest]
+  (let [record (object state digest)]
+    (if (nil? record)
+      0
+      (get record :size))))
+
+(defn namespace-usage
+  [state application namespace]
+  (reduce
+   (fn [total digest]
+     (+ total (object-size state digest)))
+   0
+   (namespace-references state application namespace)))
+
+(defn namespace-reservations
+  [state application namespace]
+  (reduce
+   (fn [total entry]
+     (let [candidate (val entry)]
+       (if (and (contains? #{"open" "verifying"} (get candidate :status))
+                (= application (get candidate :application))
+                (= namespace (get candidate :namespace)))
+         (+ total (get candidate :size))
+         total)))
+   0
+   (get state :uploads)))
+
+(defn namespace-capacity?
+  [state application namespace additional-bytes]
+  (<= (+ (namespace-usage state application namespace)
+         (namespace-reservations state application namespace)
+         additional-bytes)
+      (namespace-quota state application namespace)))
+
+(defn ok
+  ([state value]
+   (ok state value []))
+  ([state value effects]
+   {:ok true
+    :state state
+    :value value
+    :effects effects}))
+
+(defn fail
+  ([state code]
+   (fail state code {}))
+  ([state code details]
+   {:ok false
+    :state state
+    :error {:code code
+            :details details}
+    :effects []}))
