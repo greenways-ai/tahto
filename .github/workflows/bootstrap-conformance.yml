@@ -1,0 +1,19 @@
+name: Tahto bootstrap conformance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate repository and route boundaries
+        run: python3 conformance/check-bootstrap.py
+      - name: Check Python syntax
+        run: python3 -m py_compile conformance/check-bootstrap.py

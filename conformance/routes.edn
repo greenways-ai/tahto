@@ -1,0 +1,13 @@
+{:tahto/conformance "bootstrap-routes/1"
+ :canonical
+ [{:method :get :path "/.well-known/tahto" :handler :descriptor}
+  {:method :get :path "/tahto/v1/health" :handler :health}
+  {:method :get :path "/tahto/v1/status" :handler :status}]
+ :compatibility
+ [{:method :get :path "/.well-known/greenways-beacon" :handler :beacon-descriptor}
+  {:method :get :path "/beacon/v1/health" :handler :health}
+  {:method :get :path "/beacon/v1/status" :handler :status}]
+ :forbidden-core
+ [{:path-prefix "/space/"}
+  {:request-selected-upstream true}
+  {:remote-executable-catalogue true}]}
