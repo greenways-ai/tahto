@@ -1,0 +1,70 @@
+(ns tahto.protocol.descriptor)
+
+(def protocol "tahto.node/1")
+(def health-protocol "tahto.health/1")
+(def status-protocol "tahto.status/1")
+
+(defn descriptor
+  []
+  {"protocol" protocol
+   "id" "greenways.tahto"
+   "name" "Tahto"
+   "role" "application-state-fabric"
+   "runtime"
+   {"applicationServer" "Hoplite"
+    "language" "Hara"
+    "namespace" "tahto.node.app"
+    "edge" "Nginx"}
+   "authority"
+   {"installation" "greenways-os"
+    "consent" "greenways-os"
+    "privateKeys" "greenways-os"
+    "custody" "tahto"
+    "meaning" "application"}
+   "boundaries"
+   {"conflicts" "preserve-divergent-heads"
+    "remoteExecutableCatalogue" false
+    "hostedSpaceRequired" false}
+   "routes"
+   {"discovery" "/.well-known/tahto"
+    "health" "/tahto/v1/health"
+    "status" "/tahto/v1/status"}
+   "components"
+   {"controlPlane" "bootstrap"
+    "objects" "deferred:TAHTO-3"
+    "headsAndBackups" "deferred:TAHTO-4"
+    "deviceSync" "deferred:TAHTO-5"
+    "servicesAndJobs" "deferred:TAHTO-6"}
+   "compatibility"
+   {"greenwaysBeacon" "one-release-route-alias"}})
+
+(defn health
+  []
+  {"protocol" health-protocol
+   "status" "ready"
+   "runtime" "hoplite"
+   "scope" "control-plane-only"})
+
+(defn status
+  []
+  {"protocol" status-protocol
+   "node"
+   {"status" "ready"
+    "phase" "bootstrap"
+    "mode" "local"}
+   "fabric"
+   {"objectVault" "not-installed"
+    "commitStore" "not-installed"
+    "backupStore" "not-installed"
+    "deviceSync" "not-installed"
+    "workerRegistry" "not-installed"}
+   "hostedSpace"
+   {"required" false
+    "adapter" "optional"}})
+
+(defn beacon-compatibility
+  []
+  {"protocol" "greenways-beacon/1"
+   "status" "compatibility-only"
+   "canonical" "/.well-known/tahto"
+   "replacement" (descriptor)})

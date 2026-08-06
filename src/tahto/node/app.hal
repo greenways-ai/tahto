@@ -1,0 +1,87 @@
+(ns tahto.node.app
+  (:require [hoplite.core :as h]
+            [std.json :as json]
+            [tahto.protocol.descriptor :as descriptor]))
+
+(def public-headers
+  {"content-type" "application/json; charset=utf-8"
+   "cache-control" "no-store"
+   "access-control-allow-origin" "*"
+   "access-control-allow-methods" "GET, OPTIONS"
+   "access-control-allow-headers" "authorization, content-type"
+   "x-content-type-options" "nosniff"})
+
+(defn json-response
+  [status value]
+  {:status status
+   :headers public-headers
+   :body (json/write value)})
+
+(defn root
+  [_request]
+  (json-response 200 (descriptor/descriptor)))
+
+(defn health
+  [_request]
+  (json-response 200 (descriptor/health)))
+
+(defn status
+  [_request]
+  (json-response 200 (descriptor/status)))
+
+(defn beacon-compatibility
+  [_request]
+  (json-response 200 (descriptor/beacon-compatibility)))
+
+(defn preflight
+  [_request]
+  {:status 204
+   :headers public-headers
+   :body ""})
+
+(def app
+  (h/app
+    {:name "tahto"
+     :resources
+     [["/"
+       {:get {:name :tahto/root
+              :summary "Describe this Tahto node"
+              :handler #'root}
+        :options {:name :tahto/root-options
+                  :handler #'preflight}}]
+      ["/.well-known/tahto"
+       {:get {:name :tahto/discovery
+              :summary "Discover the local Tahto node"
+              :handler #'root}
+        :options {:name :tahto/discovery-options
+                  :handler #'preflight}}]
+      ["/tahto/v1/health"
+       {:get {:name :tahto/health
+              :summary "Report Tahto control-plane readiness"
+              :handler #'health}
+        :options {:name :tahto/health-options
+                  :handler #'preflight}}]
+      ["/tahto/v1/status"
+       {:get {:name :tahto/status
+              :summary "Report installed Tahto fabric components"
+              :handler #'status}
+        :options {:name :tahto/status-options
+                  :handler #'preflight}}]
+      ["/.well-known/greenways-beacon"
+       {:get {:name :tahto.compat/beacon-discovery
+              :summary "Describe the Beacon to Tahto compatibility route"
+              :handler #'beacon-compatibility}
+        :options {:name :tahto.compat/beacon-discovery-options
+                  :handler #'preflight}}]
+      ["/beacon/v1/health"
+       {:get {:name :tahto.compat/beacon-health
+              :summary "Compatibility alias for Tahto health"
+              :handler #'health}
+        :options {:name :tahto.compat/beacon-health-options
+                  :handler #'preflight}}]
+      ["/beacon/v1/status"
+       {:get {:name :tahto.compat/beacon-status
+              :summary "Compatibility alias for Tahto status"
+              :handler #'status}
+        :options {:name :tahto.compat/beacon-status-options
+                  :handler #'preflight}}]]}))

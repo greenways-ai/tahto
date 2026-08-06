@@ -1,0 +1,70 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+HOPLITE=${HOPLITE:-hoplite}
+ORIGIN=${TAHTO_ORIGIN:-http://127.0.0.1:58100}
+ACTION=${1:-run}
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+case "$ACTION" in
+  run|foreground)
+    exec "$HOPLITE" serve foreground --profile server --mode prod "$ROOT"
+    ;;
+  dev)
+    exec "$HOPLITE" serve foreground --profile server --mode dev "$ROOT"
+    ;;
+  check)
+    exec "$HOPLITE" serve check --profile server --mode prod "$ROOT"
+    ;;
+  build)
+    exec "$HOPLITE" serve build --profile server --mode prod "$ROOT"
+    ;;
+  start|status|reload|stop|install|uninstall)
+    exec "$HOPLITE" serve "$ACTION" --profile server --mode prod "$ROOT"
+    ;;
+  doctor)
+    curl --fail --silent --show-error "$ORIGIN/tahto/v1/health"
+    printf '\n'
+    curl --fail --silent --show-error "$ORIGIN/tahto/v1/status"
+    printf '\n'
+    ;;
+  open)
+    URL="$ORIGIN/"
+    if command -v open >/dev/null 2>&1; then
+      exec open "$URL"
+    elif command -v xdg-open >/dev/null 2>&1; then
+      exec xdg-open "$URL"
+    else
+      printf '%s\n' "$URL"
+    fi
+    ;;
+  help|-h|--help)
+    cat <<'EOF'
+Tahto · Greenways application-state fabric
+
+Usage:
+  tahto run       Run the node control plane in the foreground
+  tahto dev       Run the development profile
+  tahto check     Validate the Hara/Hoplite project
+  tahto build     Build Hoplite and Nginx configuration
+  tahto start     Start the Hoplite service
+  tahto status    Inspect the Hoplite process
+  tahto reload    Reload the service
+  tahto stop      Stop the service
+  tahto install   Install the macOS LaunchAgent
+  tahto uninstall Remove the macOS LaunchAgent
+  tahto doctor    Read local health and status
+  tahto open      Open the local Tahto descriptor
+
+Set HOPLITE to select the Hoplite executable and TAHTO_ORIGIN when operating a
+non-default listener.
+EOF
+    ;;
+  *)
+    printf 'tahto: unknown command: %s\n' "$ACTION" >&2
+    exit 2
+    ;;
+esac

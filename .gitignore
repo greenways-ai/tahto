@@ -1,0 +1,10 @@
+.DS_Store
+.target/
+target/
+node_modules/
+metadata.sqlite
+objects/
+backups/
+jobs/
+receipts/
+replicas/

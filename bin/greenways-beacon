@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+printf '%s\n' 'greenways-beacon is deprecated; invoking tahto for one compatibility release.' >&2
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec "$ROOT/bin/tahto" "$@"
