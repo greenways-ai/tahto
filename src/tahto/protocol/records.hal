@@ -1,0 +1,66 @@
+(ns tahto.protocol.records)
+
+(def signature-profile "tahto-signature/1")
+(def canonical-json-profile "tahto-canonical-json/1")
+
+(def core-protocols
+  #{"tahto.node/1"
+    "tahto.device/1"
+    "tahto.application/1"
+    "tahto.namespace/1"
+    "tahto.collection/1"
+    "tahto.object/1"
+    "tahto.commit/1"
+    "tahto.head/1"
+    "tahto.backup/1"
+    "tahto.receipt/1"
+    "tahto.service/1"
+    "tahto.job/1"})
+
+(def collection-modes
+  #{"snapshot/1"
+    "event-log/1"
+    "object-graph/1"
+    "git-dag/1"
+    "derived/1"})
+
+(def collection-authorities
+  #{"source"
+    "rebuildable"})
+
+(def service-operations
+  #{"read"
+    "write"
+    "sync"
+    "backup"
+    "restore"
+    "service"
+    "job"})
+
+(def job-states
+  #{"queued"
+    "running"
+    "blocked"
+    "completed"
+    "failed"
+    "cancelled"})
+
+(defn core-protocol?
+  [value]
+  (contains? core-protocols value))
+
+(defn collection-mode?
+  [value]
+  (contains? collection-modes value))
+
+(defn collection-authority?
+  [value]
+  (contains? collection-authorities value))
+
+(defn service-operation?
+  [value]
+  (contains? service-operations value))
+
+(defn job-state?
+  [value]
+  (contains? job-states value))

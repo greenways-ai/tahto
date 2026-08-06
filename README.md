@@ -20,7 +20,7 @@ Applications retain semantic ownership. Historia defines an archive, Hestia defi
 
 ## Bootstrap boundary
 
-This first repository slice establishes the Hara/Hoplite node shell and canonical Tahto discovery surface:
+The first repository slice establishes the Hara/Hoplite node shell and canonical Tahto discovery surface:
 
 ```text
 GET /.well-known/tahto
@@ -47,7 +47,7 @@ src/tahto/store/      object-vault boundary (TAHTO-3)
 src/tahto/sync/       device and replication boundary (TAHTO-5/8)
 src/tahto/backup/     immutable backup and restore boundary (TAHTO-4/9/10)
 src/tahto/service/    inert service descriptors and durable jobs (TAHTO-6)
-protocol/             normative protocol documents
+protocol/             normative protocol documents and schemas
 conformance/          executable fixtures and architecture checks
 adapters/             optional integrations outside Tahto core
 ```
@@ -72,6 +72,8 @@ curl http://127.0.0.1:58100/tahto/v1/status
 
 ## Current implementation status
 
-The bootstrap serves only discovery, health, and status. Content-addressed objects, signed commits, atomic heads, backups, device enrolment, incremental sync, workers, and durable jobs arrive in separate reviewable PRs. The status document reports those components as deferred rather than claiming they are active.
+The node currently serves discovery, health, and status. TAHTO-2 defines the stable application-neutral record envelopes and executable conformance fixtures in [`protocol/records.md`](protocol/records.md).
+
+Content-addressed objects, atomic heads, backups, device enrolment, incremental sync, workers, and durable jobs remain separate implementation PRs. The status document reports those components as deferred rather than claiming they are active.
 
 See [`LINEAGE.md`](LINEAGE.md) for the extracted Beacon history and [`protocol/tahto.md`](protocol/tahto.md) for the authority boundary.
