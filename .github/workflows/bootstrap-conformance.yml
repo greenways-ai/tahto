@@ -1,4 +1,4 @@
-name: Tahto protocol conformance
+name: Tahto conformance
 
 on:
   pull_request:
@@ -13,11 +13,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Validate repository and route boundaries
         run: python3 conformance/check-bootstrap.py
       - name: Validate stable fabric records and fixtures
         run: python3 conformance/check-protocol.py
+      - name: Validate the streaming object vault
+        env:
+          PYTHONPATH: src-python
+        run: python3 -m unittest discover -s test-python -v
       - name: Check conformance script syntax
         run: |
           python3 -m py_compile conformance/check-bootstrap.py
           python3 -m py_compile conformance/check-protocol.py
+          python3 -m compileall -q src-python test-python

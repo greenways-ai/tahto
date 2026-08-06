@@ -43,12 +43,14 @@ The compatibility routes describe Tahto; they do not preserve Beacon's former as
 ```text
 src/tahto/node/       Hoplite control-plane application
 src/tahto/protocol/   application-neutral descriptors and wire contracts
-src/tahto/store/      object-vault boundary (TAHTO-3)
+src/tahto/store/      control/data-plane object-vault boundary
+src-python/tahto/     operational node-local vault implementation
 src/tahto/sync/       device and replication boundary (TAHTO-5/8)
 src/tahto/backup/     immutable backup and restore boundary (TAHTO-4/9/10)
 src/tahto/service/    inert service descriptors and durable jobs (TAHTO-6)
 protocol/             normative protocol documents and schemas
-conformance/          executable fixtures and architecture checks
+conformance/          protocol and architecture checks
+test-python/          executable object-vault conformance
 adapters/             optional integrations outside Tahto core
 ```
 
@@ -70,10 +72,25 @@ curl http://127.0.0.1:58100/tahto/v1/status
 
 `bin/greenways-beacon` is a warning compatibility wrapper that invokes `tahto`.
 
+## Operate the local object vault
+
+The TAHTO-3 data-plane library uses only the Python standard library. Initialize and inspect a local vault with:
+
+```sh
+bin/tahto-vault --root ~/.greenways/tahto init
+bin/tahto-vault --root ~/.greenways/tahto quota-set app.example profile.primary 1073741824
+bin/tahto-vault --root ~/.greenways/tahto put app.example profile.primary ./archive.pack
+bin/tahto-vault --root ~/.greenways/tahto gc
+```
+
+The object destination is always derived from a validated SHA-256 digest. The `put` path is a local source file and cannot select a destination inside the vault.
+
 ## Current implementation status
 
-The node currently serves discovery, health, and status. TAHTO-2 defines the stable application-neutral record envelopes and executable conformance fixtures in [`protocol/records.md`](protocol/records.md).
+TAHTO-2 defines the stable application-neutral record envelopes and executable protocol fixtures in [`protocol/records.md`](protocol/records.md).
 
-Content-addressed objects, atomic heads, backups, device enrolment, incremental sync, workers, and durable jobs remain separate implementation PRs. The status document reports those components as deferred rather than claiming they are active.
+TAHTO-3 provides a streaming filesystem/SQLite content-addressed vault with resumable uploads, digest verification, atomic installation, existence negotiation, range reads, application/namespace quotas, bounded chunk manifests, closure verification, root pins, and dry-run-first garbage collection. Its normative profile is [`protocol/object-vault.md`](protocol/object-vault.md).
+
+The Hara/Hoplite node still serves only discovery, health, and status. Its status record therefore reports the object-vault library as ready and the native HTTP data-plane binding as not yet wired. Atomic heads, immutable backups, device enrolment, incremental sync, workers, and durable jobs remain separate implementation PRs.
 
 See [`LINEAGE.md`](LINEAGE.md) for the extracted Beacon history and [`protocol/tahto.md`](protocol/tahto.md) for the authority boundary.

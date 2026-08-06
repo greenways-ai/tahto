@@ -31,7 +31,8 @@
     "status" "/tahto/v1/status"}
    "components"
    {"controlPlane" "bootstrap"
-    "objects" "deferred:TAHTO-3"
+    "objects" "library-ready:TAHTO-3"
+    "objectTransport" "deferred:HOPLITE-1"
     "headsAndBackups" "deferred:TAHTO-4"
     "deviceSync" "deferred:TAHTO-5"
     "servicesAndJobs" "deferred:TAHTO-6"}
@@ -50,10 +51,12 @@
   {"protocol" status-protocol
    "node"
    {"status" "ready"
-    "phase" "bootstrap"
+    "phase" "object-vault"
     "mode" "local"}
    "fabric"
-   {"objectVault" "not-installed"
+   {"objectVault" "library-ready"
+    "objectStorage" "filesystem+sqlite"
+    "objectTransport" "not-wired"
     "commitStore" "not-installed"
     "backupStore" "not-installed"
     "deviceSync" "not-installed"
