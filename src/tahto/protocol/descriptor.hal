@@ -28,7 +28,9 @@
     "largeObjectBodies" "native-host-handles"
     "signedRecords" "verified-provider-proofs"
     "devicePairing" "identity-only-no-admin-grant"
-    "requestReplay" "durable-nonce-and-idempotency-evidence"}
+    "requestReplay" "durable-nonce-and-idempotency-evidence"
+    "serviceDescriptors" "inert-digest-pinned-metadata"
+    "workerExecution" "application-owned-installed-provider"}
    "routes"
    {"discovery" "/.well-known/tahto"
     "health" "/tahto/v1/health"
@@ -41,9 +43,10 @@
     "commitsHeadsBackups" "hara-kernel-ready:TAHTO-4"
     "deviceIdentityReplay" "hara-kernel-ready:TAHTO-5"
     "deviceSyncPlanning" "hara-kernel-ready:TAHTO-5"
+    "servicesAndJobs" "hara-kernel-ready:TAHTO-6"
+    "serviceExecutor" "not-wired"
     "signatureProvider" "not-wired"
-    "durableMetadataProvider" "not-wired"
-    "servicesAndJobs" "deferred:TAHTO-6"}
+    "durableMetadataProvider" "not-wired"}
    "compatibility"
    {"greenwaysBeacon" "one-release-route-alias"}})
 
@@ -59,7 +62,7 @@
   {"protocol" status-protocol
    "node"
    {"status" "ready"
-    "phase" "device-sync-kernel"
+    "phase" "services-jobs-kernel"
     "mode" "local"}
    "fabric"
    {"objectVault" "hara-kernel-ready"
@@ -69,10 +72,12 @@
     "deviceIdentity" "hara-kernel-ready"
     "requestReplay" "hara-kernel-ready"
     "syncPlanning" "hara-kernel-ready"
+    "serviceRegistry" "hara-kernel-ready"
+    "jobLedger" "hara-kernel-ready"
     "objectDataPlane" "not-wired"
     "metadataPersistence" "not-wired"
     "signatureProvider" "not-wired"
-    "workerRegistry" "not-installed"}
+    "workerExecution" "not-wired"}
    "hostedSpace"
    {"required" false
     "adapter" "optional"}})
