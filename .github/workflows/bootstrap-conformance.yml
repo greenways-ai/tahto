@@ -52,10 +52,10 @@ jobs:
           ref: 5ef7762c8b97d77f9976f7037bafed81499b42c5
           path: .hara
           persist-credentials: false
-      - name: Install the Hara Rust toolchain
+      - name: Install the Cargo toolchain required by the locked graph
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.78.0
+          toolchain: 1.85.0
       - name: Build the reviewed Hara CLI
         run: cargo build --locked --release --manifest-path .hara/core/rust/Cargo.toml --bin hara
       - name: Run the Hara object, history and backup conformance suites
