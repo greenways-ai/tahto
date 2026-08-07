@@ -30,6 +30,7 @@
     "devicePairing" "identity-only-no-admin-grant"
     "requestReplay" "durable-nonce-and-idempotency-evidence"
     "metadataTransactions" "deterministic-plan-provider-cas"
+    "metadataHost" "fixed-installed-service-no-request-selection"
     "serviceDescriptors" "inert-digest-pinned-metadata"
     "workerExecution" "application-owned-installed-provider"}
    "routes"
@@ -46,10 +47,14 @@
     "deviceSyncPlanning" "hara-kernel-ready:TAHTO-5"
     "servicesAndJobs" "hara-kernel-ready:TAHTO-6"
     "atomicMetadataPlan" "hara-kernel-ready:TAHTO-7"
+    "metadataProviderContract" "ready:tahto-metadata-store/1"
+    "sqliteMetadataProvider" "native-provider-ready"
+    "metadataHostContract" "hara-kernel-ready:TAHTO-8"
+    "metadataHostRuntime" "not-wired"
     "serviceExecutor" "not-wired"
     "signatureProvider" "not-wired"
     "resultVerificationProvider" "not-wired"
-    "durableMetadataProvider" "not-wired"}
+    "durableMetadataProvider" "native-provider-ready:not-host-wired"}
    "compatibility"
    {"greenwaysBeacon" "one-release-route-alias"}})
 
@@ -58,14 +63,14 @@
   {"protocol" health-protocol
    "status" "ready"
    "runtime" "hoplite"
-   "scope" "control-plane-and-state-kernels"})
+   "scope" "control-plane-state-kernels-and-provider-contracts"})
 
 (defn status
   []
   {"protocol" status-protocol
    "node"
    {"status" "ready"
-    "phase" "atomic-metadata-plan"
+    "phase" "metadata-host-contract"
     "mode" "local"}
    "fabric"
    {"objectVault" "hara-kernel-ready"
@@ -78,6 +83,9 @@
     "serviceRegistry" "hara-kernel-ready"
     "jobLedger" "hara-kernel-ready"
     "atomicMetadataPlan" "hara-kernel-ready"
+    "metadataProviderContract" "ready"
+    "sqliteMetadataProvider" "native-provider-ready"
+    "metadataHostContract" "hara-kernel-ready"
     "objectDataPlane" "not-wired"
     "metadataPersistence" "not-wired"
     "signatureProvider" "not-wired"
