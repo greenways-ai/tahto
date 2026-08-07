@@ -1,0 +1,575 @@
+(ns tahto.service.state
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.records :as records]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.graph :as graph]
+            [tahto.store.model :as model]))
+
+(def service-protocol "tahto.service/1")
+(def job-protocol "tahto.job/1")
+
+(def default-limits
+  {:max-services 4096
+   :max-service-collections 256
+   :max-service-operations 7
+   :max-service-memory-bytes 17179869184
+   :max-service-cpu-millis 86400000
+   :max-service-output-bytes 1073741824
+   :max-jobs 100000
+   :max-job-input-roots 4096
+   :max-job-output-roots 4096
+   :max-job-attempts 32
+   :max-job-error-message-bytes 4096})
+
+(def service-statuses
+  #{"registered" "disabled"})
+
+(def error-job-states
+  #{"blocked" "failed"})
+
+(def terminal-job-states
+  #{"completed" "cancelled"})
+
+(def allowed-job-transitions
+  {"queued" #{"running" "cancelled"}
+   "running" #{"blocked" "completed" "failed" "cancelled"}
+   "blocked" #{"queued" "cancelled"}
+   "failed" #{"queued" "cancelled"}
+   "completed" #{}
+   "cancelled" #{}})
+
+(defn configured-limit
+  [state key]
+  (model/value-or (get state :limits)
+                  key
+                  (get default-limits key)))
+
+(defn state-table
+  [state key]
+  (model/value-or state key {}))
+
+(defn service-key
+  [application service]
+  (str (count application) ":" application
+       ":" (count service) ":" service))
+
+(defn job-key
+  [application service job]
+  (str (service-key application service)
+       ":" (count job) ":" job))
+
+(defn job-idempotency-key
+  [application service idempotency-key]
+  (str (service-key application service)
+       ":idempotency:"
+       (count idempotency-key) ":" idempotency-key))
+
+(defn services
+  [state]
+  (state-table state :services))
+
+(defn jobs
+  [state]
+  (state-table state :jobs))
+
+(defn job-idempotency
+  [state]
+  (state-table state :job-idempotency))
+
+(defn job-coordinates
+  [state]
+  (state-table state :job-coordinates))
+
+(defn service-record
+  [state application service]
+  (model/value-or (services state)
+                  (service-key application service)
+                  nil))
+
+(defn job-record
+  [state application service job]
+  (model/value-or (jobs state)
+                  (job-key application service job)
+                  nil))
+
+(defn job-coordinate
+  [state application service job]
+  (model/value-or (job-coordinates state)
+                  (job-key application service job)
+                  nil))
+
+(defn job-idempotency-record
+  [state application service key]
+  (model/value-or (job-idempotency state)
+                  (job-idempotency-key application service key)
+                  nil))
+
+(defn bounded-text?
+  [value maximum]
+  (and (model/non-empty-string? value)
+       (<= (count value) maximum)
+       (not (string? nil))))
+
+(def resource-policy-fields
+  #{:max-memory-bytes :max-cpu-millis :max-output-bytes})
+
+(defn resource-policy?
+  [value]
+  (and
+   (validate/exact-record? value resource-policy-fields #{})
+   (model/positive-integer? (get value :max-memory-bytes))
+   (model/positive-integer? (get value :max-cpu-millis))
+   (model/non-negative-integer? (get value :max-output-bytes))))
+
+(defn identifier-vector?
+  [values]
+  (and (validate/distinct-vector? values)
+       (> (count values) 0)
+       (every? model/identifier? values)))
+
+(defn operation-vector?
+  [values]
+  (and (validate/distinct-vector? values)
+       (> (count values) 0)
+       (every? records/service-operation? values)))
+
+(def service-fields
+  #{:protocol :id :application :service-protocol
+    :worker-version :artifact-digest :collections
+    :operations :resources :status})
+
+(defn service?
+  [value]
+  (and
+   (validate/exact-record? value service-fields #{})
+   (= service-protocol (get value :protocol))
+   (model/identifier? (get value :id))
+   (model/identifier? (get value :application))
+   (model/identifier? (get value :service-protocol))
+   (bounded-text? (get value :worker-version) 255)
+   (model/canonical-digest? (get value :artifact-digest))
+   (identifier-vector? (get value :collections))
+   (operation-vector? (get value :operations))
+   (resource-policy? (get value :resources))
+   (has? service-statuses (get value :status))))
+
+(def job-error-fields
+  #{:code :message})
+
+(defn job-error?
+  [value maximum]
+  (and
+   (validate/exact-record? value job-error-fields #{})
+   (model/identifier? (get value :code))
+   (bounded-text? (get value :message) maximum)))
+
+(def job-required-fields
+  #{:protocol :id :application :service :state
+    :input-roots :output-roots :attempt :idempotency-key
+    :created-at :updated-at})
+
+(defn job?
+  ([value]
+   (job? value (get default-limits :max-job-error-message-bytes)))
+  ([value maximum-error-message-bytes]
+   (and
+    (validate/exact-record? value job-required-fields #{:error})
+    (= job-protocol (get value :protocol))
+    (model/identifier? (get value :id))
+    (model/identifier? (get value :application))
+    (model/identifier? (get value :service))
+    (records/job-state? (get value :state))
+    (validate/digest-vector? (get value :input-roots))
+    (validate/digest-vector? (get value :output-roots))
+    (model/non-negative-integer? (get value :attempt))
+    (validate/opaque-token? (get value :idempotency-key))
+    (validate/timestamp? (get value :created-at))
+    (validate/timestamp? (get value :updated-at))
+    (if (has? error-job-states (get value :state))
+      (and (has? value :error)
+           (job-error? (get value :error)
+                       maximum-error-message-bytes))
+      (not (has? value :error)))
+    (or (= "completed" (get value :state))
+        (empty? (get value :output-roots)))))))
+
+(defn authorized-context?
+  [context operation]
+  (and (validate/device-request-context? context)
+       (= "pending" (get context :status))
+       (= operation (get context :operation))))
+
+(defn collection-allowed?
+  [service collection]
+  (has? (into #{} (get service :collections)) collection))
+
+(defn operation-allowed?
+  [service operation]
+  (has? (into #{} (get service :operations)) operation))
+
+(defn service-within-limits?
+  [state service]
+  (let [resources (get service :resources)]
+    (and
+     (<= (count (get service :collections))
+         (configured-limit state :max-service-collections))
+     (<= (count (get service :operations))
+         (configured-limit state :max-service-operations))
+     (<= (get resources :max-memory-bytes)
+         (configured-limit state :max-service-memory-bytes))
+     (<= (get resources :max-cpu-millis)
+         (configured-limit state :max-service-cpu-millis))
+     (<= (get resources :max-output-bytes)
+         (configured-limit state :max-service-output-bytes)))))
+
+(defn service-result
+  [record]
+  {:service record
+   :receipt-action "service.register"
+   :subject (service-key (get record :application)
+                         (get record :id))})
+
+(defn register-service
+  [state context record]
+  (let [application (get context :application)
+        service (get record :id)
+        key (service-key application service)
+        existing (service-record state application service)]
+    (cond
+      (not (authorized-context? context "service.register"))
+      (model/fail state "tahto.service/context-not-authorized")
+
+      (not (service? record))
+      (model/fail state "tahto.service/descriptor-invalid")
+
+      (not (= application (get record :application)))
+      (model/fail state "tahto.service/application-mismatch")
+
+      (not (collection-allowed? record (get context :collection)))
+      (model/fail state "tahto.service/collection-not-allowed")
+
+      (not (= "registered" (get record :status)))
+      (model/fail state "tahto.service/registration-status-invalid")
+
+      (not (service-within-limits? state record))
+      (model/fail state "tahto.service/resource-policy-out-of-bounds")
+
+      (not (nil? existing))
+      (if (= existing record)
+        (model/ok state (service-result existing))
+        (model/fail state "tahto.service/descriptor-conflict"
+                    {:service service}))
+
+      (>= (count (services state))
+          (configured-limit state :max-services))
+      (model/fail state "tahto.service/service-limit-reached")
+
+      :else
+      (let [next-state
+            (assoc state
+                   :services
+                   (assoc (services state) key record))]
+        (model/ok next-state (service-result record))))))
+
+(def service-disable-fields
+  #{:service :artifact-digest})
+
+(defn service-disable-request?
+  [request]
+  (and
+   (validate/exact-record? request service-disable-fields #{})
+   (model/identifier? (get request :service))
+   (model/canonical-digest? (get request :artifact-digest))))
+
+(defn disable-service
+  [state context request]
+  (let [application (get context :application)
+        service (get request :service)
+        key (service-key application service)
+        existing (service-record state application service)]
+    (cond
+      (not (authorized-context? context "service.disable"))
+      (model/fail state "tahto.service/context-not-authorized")
+
+      (not (service-disable-request? request))
+      (model/fail state "tahto.service/disable-request-invalid")
+
+      (nil? existing)
+      (model/fail state "tahto.service/service-missing"
+                  {:service service})
+
+      (not (collection-allowed? existing (get context :collection)))
+      (model/fail state "tahto.service/collection-not-allowed")
+
+      (not (= (get request :artifact-digest)
+              (get existing :artifact-digest)))
+      (model/fail state "tahto.service/artifact-mismatch")
+
+      (= "disabled" (get existing :status))
+      (model/ok state existing)
+
+      :else
+      (let [updated (assoc existing :status "disabled")
+            next-state
+            (assoc state
+                   :services
+                   (assoc (services state) key updated))]
+        (model/ok next-state updated)))))
+
+(defn complete-authorized-closure?
+  [state application namespace roots]
+  (let [report (graph/closure-report-value state roots)]
+    (and
+     (not (get report :overflow))
+     (get report :complete)
+     (every? (fn [root]
+               (graph/namespace-reachable?
+                state application namespace root))
+             roots))))
+
+(defn job-coordinate-value
+  [context service]
+  {:application (get context :application)
+   :namespace (get context :namespace)
+   :collection (get context :collection)
+   :service service
+   :created-by (get context :device)})
+
+(defn same-job-request?
+  [stored context job coordinate key]
+  (and (= key (get stored :job-key))
+       (= (get context :request-digest)
+          (get stored :request-digest))
+       (= job (get stored :job))
+       (= coordinate (get stored :coordinate))))
+
+(defn job-service-authorized?
+  [service context]
+  (and (not (nil? service))
+       (= "registered" (get service :status))
+       (collection-allowed? service (get context :collection))
+       (operation-allowed? service "job")))
+
+(defn enqueue-job
+  [state context job]
+  (let [application (get context :application)
+        service-id (get job :service)
+        job-id (get job :id)
+        key (job-key application service-id job-id)
+        coordinate (job-coordinate-value context service-id)
+        service (service-record state application service-id)
+        existing-job (job-record state application service-id job-id)
+        existing-coordinate (job-coordinate state application service-id job-id)
+        idempotency-key (get job :idempotency-key)
+        existing-idempotency
+        (job-idempotency-record state application service-id idempotency-key)
+        maximum-error-message
+        (configured-limit state :max-job-error-message-bytes)]
+    (cond
+      (not (authorized-context? context "job.enqueue"))
+      (model/fail state "tahto.job/context-not-authorized")
+
+      (not (job? job maximum-error-message))
+      (model/fail state "tahto.job/job-invalid")
+
+      (not (= application (get job :application)))
+      (model/fail state "tahto.job/application-mismatch")
+
+      (not (= idempotency-key (get context :idempotency-key)))
+      (model/fail state "tahto.job/idempotency-context-mismatch")
+
+      (not (job-service-authorized? service context))
+      (model/fail state "tahto.job/service-not-authorized")
+
+      (not (= "queued" (get job :state)))
+      (model/fail state "tahto.job/initial-state-invalid")
+
+      (not (= 0 (get job :attempt)))
+      (model/fail state "tahto.job/initial-attempt-invalid")
+
+      (> (count (get job :input-roots))
+         (configured-limit state :max-job-input-roots))
+      (model/fail state "tahto.job/input-roots-too-many")
+
+      (not (complete-authorized-closure?
+            state application (get context :namespace)
+            (get job :input-roots)))
+      (model/fail state "tahto.job/input-closure-not-authorized")
+
+      (not (nil? existing-idempotency))
+      (if (same-job-request? existing-idempotency
+                             context job coordinate key)
+        (if (and (= existing-job job)
+                 (= existing-coordinate coordinate))
+          (model/ok state
+                    {:job existing-job
+                     :coordinate existing-coordinate
+                     :replayed true})
+          (model/fail state "tahto.job/idempotency-state-corrupt"))
+        (model/fail state "tahto.job/idempotency-conflict"))
+
+      (not (nil? existing-job))
+      (model/fail state "tahto.job/job-conflict" {:job job-id})
+
+      (>= (count (jobs state))
+          (configured-limit state :max-jobs))
+      (model/fail state "tahto.job/job-limit-reached")
+
+      :else
+      (let [idempotency-entry
+            {:job-key key
+             :request-digest (get context :request-digest)
+             :job job
+             :coordinate coordinate}
+            next-state
+            (assoc
+             (assoc
+              (assoc state
+                     :jobs
+                     (assoc (jobs state) key job))
+              :job-coordinates
+              (assoc (job-coordinates state) key coordinate))
+             :job-idempotency
+             (assoc (job-idempotency state)
+                    (job-idempotency-key
+                     application service-id idempotency-key)
+                    idempotency-entry))]
+        (model/ok
+         next-state
+         {:job job
+          :coordinate coordinate
+          :replayed false
+          :receipt-action "job.transition"
+          :subject key})))))
+
+(defn immutable-job-identity
+  [job]
+  [(get job :protocol)
+   (get job :id)
+   (get job :application)
+   (get job :service)
+   (get job :input-roots)
+   (get job :idempotency-key)
+   (get job :created-at)])
+
+(defn transition-allowed?
+  [current next]
+  (has? (model/value-or allowed-job-transitions current #{}) next))
+
+(defn attempt-transition-valid?
+  [current next]
+  (let [current-state (get current :state)
+        next-state (get next :state)
+        current-attempt (get current :attempt)
+        next-attempt (get next :attempt)]
+    (if (and (= "queued" current-state)
+             (= "running" next-state))
+      (= (inc current-attempt) next-attempt)
+      (= current-attempt next-attempt))))
+
+(defn disabled-service-may-settle?
+  [service current next]
+  (or (= "registered" (get service :status))
+      (and (= "disabled" (get service :status))
+           (= "running" (get current :state))
+           (has? #{"blocked" "completed" "failed" "cancelled"}
+                 (get next :state)))))
+
+(defn transition-job
+  [state context next-job]
+  (let [application (get context :application)
+        service-id (get next-job :service)
+        job-id (get next-job :id)
+        key (job-key application service-id job-id)
+        current (job-record state application service-id job-id)
+        coordinate (job-coordinate state application service-id job-id)
+        service (service-record state application service-id)
+        maximum-error-message
+        (configured-limit state :max-job-error-message-bytes)]
+    (cond
+      (not (authorized-context? context "job.transition"))
+      (model/fail state "tahto.job/context-not-authorized")
+
+      (not (job? next-job maximum-error-message))
+      (model/fail state "tahto.job/job-invalid")
+
+      (not (= application (get next-job :application)))
+      (model/fail state "tahto.job/application-mismatch")
+
+      (nil? current)
+      (model/fail state "tahto.job/job-missing" {:job job-id})
+
+      (nil? coordinate)
+      (model/fail state "tahto.job/coordinate-missing" {:job job-id})
+
+      (nil? service)
+      (model/fail state "tahto.job/service-missing" {:service service-id})
+
+      (not (= (get coordinate :namespace)
+              (get context :namespace)))
+      (model/fail state "tahto.job/namespace-mismatch")
+
+      (not (= (get coordinate :collection)
+              (get context :collection)))
+      (model/fail state "tahto.job/collection-mismatch")
+
+      (not (collection-allowed? service (get context :collection)))
+      (model/fail state "tahto.job/service-collection-not-allowed")
+
+      (not (operation-allowed? service "job"))
+      (model/fail state "tahto.job/service-operation-not-allowed")
+
+      (not (= (immutable-job-identity current)
+              (immutable-job-identity next-job)))
+      (model/fail state "tahto.job/immutable-fields-changed")
+
+      (= current next-job)
+      (model/ok state
+                {:job current
+                 :coordinate coordinate
+                 :replayed true})
+
+      (has? terminal-job-states (get current :state))
+      (model/fail state "tahto.job/job-terminal"
+                  {:state (get current :state)})
+
+      (not (disabled-service-may-settle? service current next-job))
+      (model/fail state "tahto.job/service-disabled")
+
+      (not (transition-allowed? (get current :state)
+                                (get next-job :state)))
+      (model/fail state "tahto.job/transition-invalid"
+                  {:current (get current :state)
+                   :next (get next-job :state)})
+
+      (not (attempt-transition-valid? current next-job))
+      (model/fail state "tahto.job/attempt-invalid"
+                  {:current (get current :attempt)
+                   :next (get next-job :attempt)})
+
+      (> (get next-job :attempt)
+         (configured-limit state :max-job-attempts))
+      (model/fail state "tahto.job/attempt-limit-reached")
+
+      (> (count (get next-job :output-roots))
+         (configured-limit state :max-job-output-roots))
+      (model/fail state "tahto.job/output-roots-too-many")
+
+      (and (= "completed" (get next-job :state))
+           (not (complete-authorized-closure?
+                 state application (get context :namespace)
+                 (get next-job :output-roots))))
+      (model/fail state "tahto.job/output-closure-not-authorized")
+
+      :else
+      (let [next-state
+            (assoc state
+                   :jobs
+                   (assoc (jobs state) key next-job))]
+        (model/ok
+         next-state
+         {:job next-job
+          :coordinate coordinate
+          :replayed false
+          :receipt-action "job.transition"
+          :subject key})))))
