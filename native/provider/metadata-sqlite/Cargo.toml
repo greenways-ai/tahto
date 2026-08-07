@@ -1,0 +1,12 @@
+[package]
+name = "tahto-metadata-store-sqlite"
+version = "0.1.0"
+edition = "2021"
+license = "EPL-2.0"
+rust-version = "1.78"
+description = "SQLite compare-and-swap provider for Tahto metadata snapshots"
+
+[dependencies]
+tahto-metadata-store-abi = { path = "../../abi/metadata-store" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
