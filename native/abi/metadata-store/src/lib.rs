@@ -376,7 +376,10 @@ mod tests {
     fn public_values_must_be_revalidated_after_mutation() {
         let mut snapshot = Snapshot::new(0, b"HTA1state".to_vec(), digest('a')).unwrap();
         snapshot.state = b"json".to_vec();
-        assert_eq!(snapshot.validate().unwrap_err().code, "state-not-canonical-hta");
+        assert_eq!(
+            snapshot.validate().unwrap_err().code,
+            "state-not-canonical-hta"
+        );
 
         let mut plan = plan();
         plan.revision = 2;
