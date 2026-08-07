@@ -45,6 +45,7 @@ jobs:
           test -f test/tahto/service/state_test.hal
           test -f protocol/services.md
           test -f protocol/transactions.md
+          test -f protocol/metadata-store.md
           test -f native/Cargo.toml
           test -f native/README.md
           test -f native/abi/metadata-store/Cargo.toml
