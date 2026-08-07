@@ -1,0 +1,229 @@
+(ns tahto.store.graph-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.store.graph :as graph]
+            [tahto.store.host :as host]
+            [tahto.store.model :as model]
+            [tahto.store.vault :as vault]))
+
+(def digest-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def digest-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def digest-c
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def digest-d
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def digest-e
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn add-object
+  [state application namespace digest size]
+  (let [object (model/object-record digest size)
+        reference-key (model/namespace-key application namespace)
+        references (model/namespace-references state application namespace)]
+    (assoc
+     (assoc state :objects (assoc (get state :objects) digest object))
+     :references
+     (assoc (get state :references)
+            reference-key
+            (conj references digest)))))
+
+(defn fixture-state
+  ([]
+   (fixture-state {}))
+  ([limits]
+   (let [initial (model/empty-state limits)
+         with-a (add-object initial "app" "ns" digest-a 4)
+         with-b (add-object with-a "app" "ns" digest-b 1)
+         with-c (add-object with-b "app" "ns" digest-c 64)]
+     (add-object with-c "app" "ns" digest-d 3))))
+
+(def manifest-chunks
+  [{:digest digest-a :size 4}
+   {:digest digest-a :size 4}
+   {:digest digest-b :size 1}])
+
+(defn accept-fixture-manifest
+  [state chunks total-size]
+  (graph/accept-manifest
+   state
+   {:application "app" :namespace "ns" :digest digest-c}
+   {:protocol host/result-protocol
+    :operation "manifest/verify"
+    :verified true
+    :digest digest-c
+    :manifest-protocol model/chunk-manifest-protocol
+    :total-size total-size
+    :chunks chunks}))
+
+(test/print-results
+ [(test/check
+   "manifest verification is a bounded host effect without object bytes"
+   (let [requested
+         (graph/request-manifest
+          (fixture-state)
+          {:application "app" :namespace "ns" :digest digest-c})
+         effect (first (get requested :effects))]
+     [(get effect :operation)
+      (get-in effect [:request :max-chunks])
+      (has? (get effect :request) :bytes)
+      (host/effect? effect)])
+   ["manifest/verify" 16384 false true])
+
+  (test/check
+   "manifest planning does not disclose global object presence"
+   (let [state (fixture-state)
+         present-elsewhere
+         (graph/request-manifest
+          state
+          {:application "other" :namespace "private" :digest digest-c})
+         absent
+         (graph/request-manifest
+          state
+          {:application "other" :namespace "private" :digest digest-e})]
+     [(error-code present-elsewhere)
+      (error-code absent)
+      (get present-elsewhere :effects)
+      (get absent :effects)])
+   ["tahto.store/object-not-authorized"
+    "tahto.store/object-not-authorized"
+    [] []])
+
+  (test/check
+   "manifest proofs reject hidden transport fields in chunk records"
+   (let [rejected
+         (graph/accept-manifest
+          (fixture-state)
+          {:application "app" :namespace "ns" :digest digest-c}
+          {:protocol host/result-protocol
+           :operation "manifest/verify"
+           :verified true
+           :digest digest-c
+           :manifest-protocol model/chunk-manifest-protocol
+           :total-size 9
+           :chunks [{:digest digest-a :size 4 :path "/tmp/a"}
+                    {:digest digest-a :size 4}
+                    {:digest digest-b :size 1}]})]
+     [(get rejected :ok) (error-code rejected)])
+   [false "tahto.store/manifest-verification-failed"])
+
+  (test/check
+   "manifest metadata is accepted only from a matching trusted proof"
+   (let [rejected
+         (graph/accept-manifest
+          (fixture-state)
+          {:application "app" :namespace "ns" :digest digest-c}
+          {:protocol host/result-protocol
+           :operation "manifest/verify"
+           :verified true
+           :digest digest-d
+           :manifest-protocol model/chunk-manifest-protocol
+           :total-size 9
+           :chunks manifest-chunks})]
+     [(get rejected :ok) (error-code rejected)])
+   [false "tahto.store/manifest-verification-failed"])
+
+  (test/check
+   "chunk manifests preserve repeated children by ordinal"
+   (let [registered (accept-fixture-manifest
+                     (fixture-state) manifest-chunks 9)]
+     [(get registered :ok)
+      (get-in registered [:value :chunks])])
+   [true manifest-chunks])
+
+  (test/check
+   "manifest children must exist and be authorized in the namespace"
+   (let [detached
+         (vault/detach-object
+          (fixture-state)
+          {:application "app" :namespace "ns" :digest digest-b})
+         rejected
+         (accept-fixture-manifest (result-state detached) manifest-chunks 9)]
+     [(get rejected :ok) (error-code rejected)])
+   [false "tahto.store/manifest-child-invalid"])
+
+  (test/check
+   "closure verification reports a complete unique reachable set"
+   (let [registered (accept-fixture-manifest
+                     (fixture-state) manifest-chunks 9)
+         report (graph/closure-report (result-state registered) [digest-c])]
+     [(get-in report [:value :complete])
+      (into #{} (get-in report [:value :visited]))
+      (get-in report [:value :missing])])
+   [true #{digest-a digest-b digest-c} []])
+
+  (test/check
+   "closure traversal reports missing objects and stops at its bound"
+   (let [initial (fixture-state {:max-closure-objects 2})
+         state (assoc initial :manifests
+                      (assoc (get initial :manifests)
+                             digest-c
+                             [{:digest digest-a :size 4}
+                              {:digest digest-e :size 2}]))
+         report (graph/closure-report state [digest-c])]
+     [(get-in report [:value :complete])
+      (get-in report [:value :overflow])
+      (get-in report [:value :visited])])
+   [false true [digest-c digest-a]])
+
+  (test/check
+   "a pinned root preserves closure access after direct references detach"
+   (let [registered (accept-fixture-manifest
+                     (fixture-state) manifest-chunks 9)
+         pinned
+         (graph/pin-root
+          (result-state registered)
+          {:root-id "backup:1"
+           :kind "backup"
+           :application "app"
+           :namespace "ns"
+           :digest digest-c})
+         detached-a
+         (vault/detach-object
+          (result-state pinned)
+          {:application "app" :namespace "ns" :digest digest-a})
+         detached-b
+         (vault/detach-object
+          (result-state detached-a)
+          {:application "app" :namespace "ns" :digest digest-b})
+         detached-c
+         (vault/detach-object
+          (result-state detached-b)
+          {:application "app" :namespace "ns" :digest digest-c})
+         detached-d
+         (vault/detach-object
+          (result-state detached-c)
+          {:application "app" :namespace "ns" :digest digest-d})
+         state (result-state detached-d)
+         accounting (graph/namespace-accounting state "app" "ns")
+         limited
+         (vault/set-quota
+          state
+          {:application "app" :namespace "ns" :quota-bytes 68})
+         plan (graph/gc-plan state)]
+     [(graph/namespace-reachable? state "app" "ns" digest-a)
+      (get-in accounting [:value :bytes])
+      (error-code limited)
+      (get-in plan [:value :apply])
+      (get-in plan [:value :candidates])])
+   [true 69 "tahto.store/quota-below-usage" false [digest-d]])
+
+  (test/check
+   "garbage collection refuses an incomplete rooted closure"
+   (let [initial (fixture-state)
+         state (assoc initial :manifests
+                      (assoc (get initial :manifests)
+                             digest-c
+                             [{:digest digest-e :size 2}]))
+         plan (graph/gc-plan state)]
+     [(get plan :ok) (error-code plan)])
+   [false "tahto.store/gc-closure-incomplete"])])

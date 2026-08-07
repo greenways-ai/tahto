@@ -1,0 +1,582 @@
+(ns tahto.store.history
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.graph :as graph]
+            [tahto.store.model :as model]))
+
+(defn limits
+  [state]
+  (get state :limits))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn same-digests?
+  [left right]
+  (= (vec (sort left))
+     (vec (sort right))))
+
+(defn overlapping-digests?
+  [left right]
+  (let [right-set (into #{} right)]
+    (reduce (fn [found digest]
+              (or found (has? right-set digest)))
+            false
+            left)))
+
+(defn bounded-digest-vector?
+  [values maximum]
+  (and (validate/digest-vector? values)
+       (<= (count values) maximum)))
+
+(defn request-stored-record
+  [state request record-protocol]
+  (let [application (get request :application)
+        namespace (get request :namespace)
+        digest (get request :digest)
+        object (model/stored-object state digest)
+        maximum (get (limits state) :max-record-bytes)]
+    (cond
+      (not (model/identifier? application))
+      (model/fail state "tahto.history/application-invalid")
+
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.history/namespace-invalid")
+
+      (not (model/canonical-digest? digest))
+      (model/fail state "tahto.history/digest-invalid" {:digest digest})
+
+      (not (graph/namespace-reachable? state application namespace digest))
+      (model/fail state "tahto.history/record-not-authorized" {:digest digest})
+
+      (nil? object)
+      (model/fail state "tahto.history/record-not-authorized" {:digest digest})
+
+      (> (get object :size) maximum)
+      (model/fail state "tahto.history/record-too-large"
+                  {:digest digest
+                   :size (get object :size)
+                   :maximum maximum})
+
+      :else
+      (model/ok state
+                (validate/verification-request
+                 record-protocol digest maximum)))))
+
+(defn request-commit
+  [state request]
+  (request-stored-record state request model/commit-protocol))
+
+(defn request-backup
+  [state request]
+  (request-stored-record state request model/backup-protocol))
+
+(defn request-receipt
+  [state request]
+  (request-stored-record state request model/receipt-protocol))
+
+(defn request-head
+  [state digest]
+  (if (model/canonical-digest? digest)
+    (model/ok state
+              (validate/verification-request
+               model/head-protocol
+               digest
+               (get (limits state) :max-record-bytes)))
+    (model/fail state "tahto.history/digest-invalid" {:digest digest})))
+
+(defn commit-coordinate
+  [record]
+  [(get record :application)
+   (get record :namespace)
+   (get record :collection)])
+
+(defn parent-compatible?
+  [state record parent-root]
+  (let [parent (model/commit-record state parent-root)]
+    (and (not (nil? parent))
+         (= (commit-coordinate record)
+            (commit-coordinate parent)))))
+
+(defn commit-ancestry-value
+  [state roots]
+  (let [maximum (get (limits state) :max-history-commits)]
+    (loop [queue (vec roots)
+           index 0
+           seen #{}
+           commits []
+           missing []]
+      (if (= index (count queue))
+        {:complete (empty? missing)
+         :overflow false
+         :commits commits
+         :missing missing}
+        (let [root (nth queue index)]
+          (cond
+            (has? seen root)
+            (recur queue (inc index) seen commits missing)
+
+            (>= (count commits) maximum)
+            {:complete false
+             :overflow true
+             :commits commits
+             :missing missing}
+
+            :else
+            (let [record (model/commit-record state root)]
+              (if (nil? record)
+                (recur queue
+                       (inc index)
+                       (conj seen root)
+                       commits
+                       (conj missing root))
+                (recur (into queue (get record :parents))
+                       (inc index)
+                       (conj seen root)
+                       (conj commits root)
+                       missing)))))))))
+
+(defn namespace-authorization-value
+  [state application namespace]
+  (let [report (graph/namespace-closure-report-value
+                state application namespace)]
+    {:complete (get report :complete)
+     :overflow (get report :overflow)
+     :reachable (into #{} (get report :visited))
+     :missing (get report :missing)}))
+
+(defn accept-commit
+  [state context verification]
+  (let [record (validate/verified-record verification model/commit-protocol)
+        digest (get verification :canonical-digest)
+        application (get context :application)
+        namespace (get context :namespace)
+        existing (model/commit-record state digest)]
+    (cond
+      (nil? record)
+      (model/fail state "tahto.history/verification-invalid")
+
+      (not (validate/commit? record))
+      (model/fail state "tahto.history/commit-invalid")
+
+      (not (= digest (get record :root)))
+      (model/fail state "tahto.history/commit-digest-mismatch"
+                  {:digest digest :root (get record :root)})
+
+      (not (= application (get record :application)))
+      (model/fail state "tahto.history/application-mismatch")
+
+      (not (= namespace (get record :namespace)))
+      (model/fail state "tahto.history/namespace-mismatch")
+
+      (not (graph/namespace-reachable? state application namespace digest))
+      (model/fail state "tahto.history/record-not-authorized" {:digest digest})
+
+      (> (model/object-size state digest)
+         (get (limits state) :max-record-bytes))
+      (model/fail state "tahto.history/record-too-large"
+                  {:digest digest
+                   :size (model/object-size state digest)})
+
+      (not (nil? existing))
+      (if (= existing record)
+        (model/ok state existing)
+        (model/fail state "tahto.history/commit-conflict" {:root digest}))
+
+      (> (count (get record :parents))
+         (get (limits state) :max-commit-parents))
+      (model/fail state "tahto.history/commit-parents-too-many")
+
+      (> (count (get record :objects))
+         (get (limits state) :max-commit-objects))
+      (model/fail state "tahto.history/commit-objects-too-many")
+
+      (> (count (get record :tombstones))
+         (get (limits state) :max-commit-tombstones))
+      (model/fail state "tahto.history/commit-tombstones-too-many")
+
+      (overlapping-digests? (get record :objects)
+                            (get record :tombstones))
+      (model/fail state "tahto.history/object-tombstone-overlap")
+
+      (not (every? (fn [parent]
+                     (parent-compatible? state record parent))
+                   (get record :parents)))
+      (model/fail state "tahto.history/commit-parent-invalid")
+
+      :else
+      (let [current-sequence
+            (model/device-sequence state
+                                   application
+                                   namespace
+                                   (get record :collection)
+                                   (get record :device))
+            expected-sequence (inc current-sequence)
+            sequence (get record :sequence)
+            sequence-root
+            (model/sequence-root state
+                                 application
+                                 namespace
+                                 (get record :collection)
+                                 (get record :device)
+                                 sequence)]
+        (cond
+          (not (= expected-sequence sequence))
+          (model/fail state "tahto.history/sequence-not-next"
+                      {:expected expected-sequence
+                       :received sequence})
+
+          (and (not (nil? sequence-root))
+               (not (= sequence-root digest)))
+          (model/fail state "tahto.history/sequence-reused"
+                      {:sequence sequence
+                       :existing sequence-root})
+
+          :else
+          (let [authorization
+                (namespace-authorization-value state application namespace)
+                object-roots (get record :objects)
+                authorized?
+                (every? (fn [root]
+                          (has? (get authorization :reachable) root))
+                        object-roots)
+                object-report (graph/closure-report-value state object-roots)]
+            (cond
+              (get authorization :overflow)
+              (model/fail state "tahto.history/namespace-closure-overflow")
+
+              (not (get authorization :complete))
+              (model/fail state "tahto.history/namespace-closure-incomplete"
+                          {:missing (get authorization :missing)})
+
+              (not authorized?)
+              (model/fail state "tahto.history/object-not-authorized")
+
+              (get object-report :overflow)
+              (model/fail state "tahto.history/object-closure-overflow")
+
+              (not (get object-report :complete))
+              (model/fail state "tahto.history/object-closure-incomplete"
+                          {:missing (get object-report :missing)})
+
+              :else
+              (let [sequence-key
+                    (model/sequence-key application
+                                        namespace
+                                        (get record :collection)
+                                        (get record :device))
+                    slot-key
+                    (model/sequence-slot-key application
+                                             namespace
+                                             (get record :collection)
+                                             (get record :device)
+                                             sequence)
+                    children
+                    (vec (distinct (concat (get record :parents)
+                                           object-roots)))
+                    next-state
+                    (assoc
+                     (assoc
+                      (assoc
+                       (assoc state
+                              :commits
+                              (assoc (get state :commits) digest record))
+                       :sequences
+                       (assoc (get state :sequences)
+                              sequence-key sequence))
+                      :sequence-roots
+                      (assoc (get state :sequence-roots)
+                             slot-key digest))
+                     :edges
+                     (assoc (get state :edges)
+                            digest children))]
+                (model/ok
+                 next-state
+                 {:commit record
+                  :receipt-action "commit.accept"
+                  :subject digest})))))))))
+
+(defn commit-matches-head?
+  [state head root]
+  (let [commit (model/commit-record state root)]
+    (and (not (nil? commit))
+         (= (get head :application) (get commit :application))
+         (= (get head :namespace) (get commit :namespace))
+         (= (get head :collection) (get commit :collection)))))
+
+(defn internal-head-root-id
+  [head]
+  (str "head:"
+       (model/head-key (get head :application)
+                       (get head :namespace)
+                       (get head :collection)
+                       (get head :kind)
+                       (get head :name))))
+
+(defn update-head
+  [state verification]
+  (let [record (validate/verified-record verification model/head-protocol)
+        digest (get verification :canonical-digest)]
+    (cond
+      (nil? record)
+      (model/fail state "tahto.history/verification-invalid")
+
+      (not (validate/head? record))
+      (model/fail state "tahto.history/head-invalid")
+
+      (not (has? record :expected))
+      (model/fail state "tahto.history/head-expected-required")
+
+      (> (count (get record :commits))
+         (get (limits state) :max-head-commits))
+      (model/fail state "tahto.history/head-too-wide")
+
+      (not (every? (fn [root]
+                     (commit-matches-head? state record root))
+                   (get record :commits)))
+      (model/fail state "tahto.history/head-commit-invalid")
+
+      :else
+      (let [application (get record :application)
+            namespace (get record :namespace)
+            collection (get record :collection)
+            kind (get record :kind)
+            name (get record :name)
+            key (model/head-key application namespace collection kind name)
+            current (model/head-record state
+                                       application namespace collection kind name)
+            current-digest (model/head-digest state
+                                               application namespace collection kind name)
+            current-commits (if (nil? current) [] (get current :commits))]
+        (cond
+          (and (= current-digest digest)
+               (= current record))
+          (model/ok state current)
+
+          (not (same-digests? current-commits (get record :expected)))
+          (model/fail state "tahto.history/head-compare-failed"
+                      {:current current-commits
+                       :expected (get record :expected)})
+
+          :else
+          (let [ancestry (commit-ancestry-value state (get record :commits))
+                closure (graph/closure-report-value state (get record :commits))]
+            (cond
+              (get ancestry :overflow)
+              (model/fail state "tahto.history/head-history-overflow")
+
+              (not (get ancestry :complete))
+              (model/fail state "tahto.history/head-history-incomplete"
+                          {:missing (get ancestry :missing)})
+
+              (get closure :overflow)
+              (model/fail state "tahto.history/head-closure-overflow")
+
+              (not (get closure :complete))
+              (model/fail state "tahto.history/head-closure-incomplete"
+                          {:missing (get closure :missing)})
+
+              :else
+              (let [root-id (internal-head-root-id record)
+                    root {:id root-id
+                          :kind "head"
+                          :application application
+                          :namespace namespace
+                          :digests (vec (distinct (get record :commits)))}
+                    next-state
+                    (assoc
+                     (assoc
+                      (assoc state
+                             :heads
+                             (assoc (get state :heads) key record))
+                      :head-digests
+                      (assoc (get state :head-digests) key digest))
+                     :roots
+                     (assoc (get state :roots) root-id root))]
+                (model/ok
+                 next-state
+                 {:head record
+                  :verification-digest digest
+                  :previous current-commits
+                  :receipt-action "head.update"
+                  :subject key})))))))))
+
+(defn backup-commit-valid?
+  [state application root]
+  (let [commit (model/commit-record state root)]
+    (and (not (nil? commit))
+         (= application (get commit :application)))))
+
+(defn internal-backup-root-id
+  [backup-id]
+  (str "backup:" backup-id))
+
+(defn accept-backup
+  [state context verification]
+  (let [record (validate/verified-record verification model/backup-protocol)
+        digest (get verification :canonical-digest)
+        application (get context :application)
+        namespace (get context :namespace)
+        existing (model/backup-record state digest)]
+    (cond
+      (nil? record)
+      (model/fail state "tahto.history/verification-invalid")
+
+      (not (validate/backup? record))
+      (model/fail state "tahto.history/backup-invalid")
+
+      (not (= digest (get record :id)))
+      (model/fail state "tahto.history/backup-digest-mismatch")
+
+      (not (= application (get record :application)))
+      (model/fail state "tahto.history/application-mismatch")
+
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.history/namespace-invalid")
+
+      (not (graph/namespace-reachable? state application namespace digest))
+      (model/fail state "tahto.history/record-not-authorized" {:digest digest})
+
+      (> (model/object-size state digest)
+         (get (limits state) :max-record-bytes))
+      (model/fail state "tahto.history/record-too-large"
+                  {:digest digest
+                   :size (model/object-size state digest)})
+
+      (> (count (get record :roots))
+         (get (limits state) :max-backup-roots))
+      (model/fail state "tahto.history/backup-too-wide")
+
+      (not (every? (fn [root]
+                     (backup-commit-valid? state application root))
+                   (get record :roots)))
+      (model/fail state "tahto.history/backup-root-invalid")
+
+      (and (not (nil? existing))
+           (not (= existing record)))
+      (model/fail state "tahto.history/backup-conflict" {:id digest})
+
+      :else
+      (let [roots (get record :roots)
+            ancestry (commit-ancestry-value state roots)
+            temporary
+            (assoc
+             (assoc state
+                    :backups
+                    (assoc (get state :backups) digest record))
+             :edges
+             (assoc (get state :edges) digest (vec roots)))
+            closure (graph/closure-report-value temporary [digest])]
+        (cond
+          (get ancestry :overflow)
+          (model/fail state "tahto.history/backup-history-overflow")
+
+          (not (get ancestry :complete))
+          (model/fail state "tahto.history/backup-history-incomplete"
+                      {:missing (get ancestry :missing)})
+
+          (get closure :overflow)
+          (model/fail state "tahto.history/backup-closure-overflow")
+
+          (not (get closure :complete))
+          (model/fail state "tahto.history/backup-closure-incomplete"
+                      {:missing (get closure :missing)})
+
+          :else
+          (let [root-id (internal-backup-root-id digest)
+                root {:id root-id
+                      :kind "backup"
+                      :application application
+                      :namespace namespace
+                      :digests [digest]}
+                next-state (assoc temporary
+                                  :roots
+                                  (assoc (get temporary :roots)
+                                         root-id root))]
+            (model/ok
+             next-state
+             {:backup record
+              :receipt-action "backup.pin"
+              :subject digest})))))))
+
+(defn restore-plan
+  [state request]
+  (let [backup-id (get request :backup-id)
+        application (get request :application)
+        backup (model/backup-record state backup-id)]
+    (cond
+      (not (model/canonical-digest? backup-id))
+      (model/fail state "tahto.history/digest-invalid")
+
+      (nil? backup)
+      (model/fail state "tahto.history/backup-missing" {:id backup-id})
+
+      (not (= application (get backup :application)))
+      (model/fail state "tahto.history/backup-not-authorized" {:id backup-id})
+
+      :else
+      (let [closure (graph/closure-report-value state [backup-id])
+            visited (get closure :visited)
+            commit-roots
+            (reduce (fn [output digest]
+                      (if (nil? (model/commit-record state digest))
+                        output
+                        (conj output digest)))
+                    []
+                    visited)]
+        (model/ok
+         state
+         {:protocol validate/restore-manifest-protocol
+          :backup backup-id
+          :application application
+          :complete (get closure :complete)
+          :overflow (get closure :overflow)
+          :commits (vec (sort commit-roots))
+          :objects (vec (sort visited))
+          :missing (vec (sort (get closure :missing)))})))))
+
+(defn release-backup
+  [state request]
+  (let [backup-id (get request :backup-id)
+        application (get request :application)
+        backup (model/backup-record state backup-id)
+        root-id (internal-backup-root-id backup-id)]
+    (cond
+      (nil? backup)
+      (model/fail state "tahto.history/backup-missing" {:id backup-id})
+
+      (not (= application (get backup :application)))
+      (model/fail state "tahto.history/backup-not-authorized" {:id backup-id})
+
+      :else
+      (model/ok
+       (assoc state :roots (dissoc (get state :roots) root-id))
+       {:backup backup-id
+        :released true}))))
+
+(defn accept-receipt
+  [state verification]
+  (let [record (validate/verified-record verification model/receipt-protocol)
+        digest (get verification :canonical-digest)
+        existing (model/receipt-record state digest)]
+    (cond
+      (nil? record)
+      (model/fail state "tahto.history/verification-invalid")
+
+      (not (validate/receipt? record))
+      (model/fail state "tahto.history/receipt-invalid")
+
+      (not (= digest (get record :id)))
+      (model/fail state "tahto.history/receipt-digest-mismatch")
+
+      (not (nil? existing))
+      (if (= existing record)
+        (model/ok state existing)
+        (model/fail state "tahto.history/receipt-conflict" {:id digest}))
+
+      :else
+      (model/ok
+       (assoc state :receipts
+              (assoc (get state :receipts) digest record))
+       record))))

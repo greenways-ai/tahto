@@ -1,15 +1,36 @@
-# Object vault
+# Tahto state kernels
 
-TAHTO-3 is implemented as a deterministic Hara state machine in:
+This directory contains the Hara-owned TAHTO-3 and TAHTO-4 transition logic.
 
 ```text
-tahto.store.model
-tahto.store.host
-tahto.store.vault
+model.hal    canonical identity, limits and immutable state
+host.hal     closed opaque-handle byte effect/result boundary
+graph.hal    verified manifests, shared closure, roots and dry-run GC
+vault.hal    uploads, installation, namespace references, quotas and ranges
+history.hal  immutable commits, CAS heads, backups, restore and receipts
 ```
 
-Hara owns object identity, quota accounting, resumable-upload transitions, immutable metadata, namespace references, range validation, ordered chunk manifests, closure verification, root pins and garbage-collection planning.
+Record shape and signed verification contracts live in:
 
-Large bytes stay outside ordinary Hara values. The kernel emits a closed set of `tahto.store.host-effect/1` operations to a trusted native/Hoplite adapter, using opaque request-body handles. That adapter is responsible for bounded streaming, hashing, seeking, fsync and atomic installation.
+```text
+tahto.protocol.records
+tahto.protocol.validate
+```
 
-See [`protocol/object-vault.md`](../../../protocol/object-vault.md) for the normative profile and `test/tahto/store/vault_test.hal` for executable conformance.
+The kernels never accept a destination path, upstream URL, raw request body,
+private key, bearer credential or native command. Large bodies remain behind
+non-zero Hoplite resource handles. Signed history records enter only through a
+`tahto.record-verification/1` proof issued by a trusted installed provider.
+
+Reducer results contain a tentative next `:state` plus bounded effects or
+verification requests. A node executor commits the next metadata state only
+after the corresponding provider operation succeeds. Head comparison, head
+replacement and GC-root replacement must be one durable metadata transaction.
+
+Tahto preserves divergent valid commit roots. Applications, not the fabric,
+decide whether and how those roots are reconciled.
+
+Normative contracts:
+
+- [`protocol/object-vault.md`](../../../protocol/object-vault.md)
+- [`protocol/history.md`](../../../protocol/history.md)

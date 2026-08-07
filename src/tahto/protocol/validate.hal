@@ -1,0 +1,227 @@
+(ns tahto.protocol.validate
+  (:require [std.foundation :refer :all]
+            [std.foundation.string :as string]
+            [tahto.protocol.records :as records]
+            [tahto.store.model :as model]))
+
+(def verification-request-protocol "tahto.record-verification-request/1")
+(def verification-protocol "tahto.record-verification/1")
+(def restore-manifest-protocol "tahto.restore-manifest/1")
+
+(def signature-algorithms
+  #{"ed25519" "p256-sha256"})
+
+(def head-kinds
+  #{"device" "main"})
+
+(def receipt-actions
+  #{"object.store"
+    "commit.accept"
+    "head.update"
+    "backup.pin"
+    "restore.manifest"
+    "service.register"
+    "job.transition"})
+
+(def verifiable-record-protocols
+  #{model/commit-protocol
+    model/head-protocol
+    model/backup-protocol
+    model/receipt-protocol})
+
+(def decimal-digits
+  #{"0" "1" "2" "3" "4" "5" "6" "7" "8" "9"})
+
+(def timestamp-digit-indexes
+  [0 1 2 3 5 6 8 9 11 12 14 15 17 18])
+
+(defn exact-record?
+  [value required optional]
+  (and
+   (map? value)
+   (every? (fn [field]
+             (has? value field))
+           required)
+   (reduce (fn [valid entry]
+             (and valid
+                  (or (has? required (key entry))
+                      (has? optional (key entry)))))
+           true
+           value)))
+
+(defn distinct-vector?
+  [values]
+  (and (vector? values)
+       (= (count values)
+          (count (distinct values)))))
+
+(defn digest-vector?
+  [values]
+  (and (distinct-vector? values)
+       (every? model/canonical-digest? values)))
+
+(defn timestamp?
+  [value]
+  (and
+   (string? value)
+   (let [length (count value)]
+     (and
+      (>= length 20)
+      (<= length 35)
+      (= "-" (string/slice value 4 5))
+      (= "-" (string/slice value 7 8))
+      (= "T" (string/slice value 10 11))
+      (= ":" (string/slice value 13 14))
+      (= ":" (string/slice value 16 17))
+      (= "Z" (string/slice value (dec length) length))
+      (every? (fn [index]
+                (has? decimal-digits
+                      (string/slice value index (inc index))))
+              timestamp-digit-indexes)
+      (or
+       (= length 20)
+       (and (= "." (string/slice value 19 20))
+            (> length 21)
+            (loop [index 20]
+              (if (= index (dec length))
+                true
+                (if (has? decimal-digits
+                          (string/slice value index (inc index)))
+                  (recur (inc index))
+                  false)))))))))
+
+(defn signature?
+  [value]
+  (and
+   (exact-record?
+    value
+    #{:profile :algorithm :key-id :value}
+    #{})
+   (= records/signature-profile (get value :profile))
+   (has? signature-algorithms (get value :algorithm))
+   (model/identifier? (get value :key-id))
+   (model/non-empty-string? (get value :value))
+   (>= (count (get value :value)) 16)
+   (<= (count (get value :value)) 8192)))
+
+(defn verification-request
+  [record-protocol digest maximum-bytes]
+  {:protocol verification-request-protocol
+   :record-protocol record-protocol
+   :canonical-digest digest
+   :max-bytes maximum-bytes})
+
+(defn verification-request?
+  [value]
+  (and
+   (exact-record?
+    value
+    #{:protocol :record-protocol :canonical-digest :max-bytes}
+    #{})
+   (= verification-request-protocol (get value :protocol))
+   (has? verifiable-record-protocols (get value :record-protocol))
+   (model/canonical-digest? (get value :canonical-digest))
+   (model/positive-integer? (get value :max-bytes))))
+
+(defn verification?
+  [value record-protocol]
+  (and
+   (exact-record?
+    value
+    #{:protocol :record-protocol :verified
+      :canonical-digest :key-id :record}
+    #{})
+   (= verification-protocol (get value :protocol))
+   (= record-protocol (get value :record-protocol))
+   (= true (get value :verified))
+   (model/canonical-digest? (get value :canonical-digest))
+   (model/identifier? (get value :key-id))
+   (map? (get value :record))
+   (= record-protocol (get-in value [:record :protocol]))
+   (= (get value :key-id)
+      (get-in value [:record :signature :key-id]))))
+
+(defn verified-record
+  [verification record-protocol]
+  (if (verification? verification record-protocol)
+    (get verification :record)
+    nil))
+
+(def commit-fields
+  #{:protocol :root :application :namespace :collection
+    :schema :schema-version :device :parents :objects
+    :tombstones :sequence :timestamp :signature})
+
+(defn commit?
+  [value]
+  (and
+   (exact-record? value commit-fields #{})
+   (= model/commit-protocol (get value :protocol))
+   (model/canonical-digest? (get value :root))
+   (model/identifier? (get value :application))
+   (model/identifier? (get value :namespace))
+   (model/identifier? (get value :collection))
+   (model/identifier? (get value :schema))
+   (model/positive-integer? (get value :schema-version))
+   (model/identifier? (get value :device))
+   (digest-vector? (get value :parents))
+   (digest-vector? (get value :objects))
+   (digest-vector? (get value :tombstones))
+   (model/positive-integer? (get value :sequence))
+   (timestamp? (get value :timestamp))
+   (signature? (get value :signature))))
+
+(def head-required-fields
+  #{:protocol :application :namespace :collection
+    :kind :name :commits :updated-at :signature})
+
+(defn head?
+  [value]
+  (and
+   (exact-record? value head-required-fields #{:expected})
+   (= model/head-protocol (get value :protocol))
+   (model/identifier? (get value :application))
+   (model/identifier? (get value :namespace))
+   (model/identifier? (get value :collection))
+   (has? head-kinds (get value :kind))
+   (model/identifier? (get value :name))
+   (digest-vector? (get value :commits))
+   (> (count (get value :commits)) 0)
+   (or (not (has? value :expected))
+       (digest-vector? (get value :expected)))
+   (timestamp? (get value :updated-at))
+   (signature? (get value :signature))))
+
+(def backup-fields
+  #{:protocol :id :application :roots :created-by
+    :created-at :retention-label :signature})
+
+(defn backup?
+  [value]
+  (and
+   (exact-record? value backup-fields #{})
+   (= model/backup-protocol (get value :protocol))
+   (model/canonical-digest? (get value :id))
+   (model/identifier? (get value :application))
+   (digest-vector? (get value :roots))
+   (> (count (get value :roots)) 0)
+   (model/identifier? (get value :created-by))
+   (timestamp? (get value :created-at))
+   (model/identifier? (get value :retention-label))
+   (signature? (get value :signature))))
+
+(def receipt-fields
+  #{:protocol :id :node :action :subject :timestamp :signature})
+
+(defn receipt?
+  [value]
+  (and
+   (exact-record? value receipt-fields #{})
+   (= model/receipt-protocol (get value :protocol))
+   (model/canonical-digest? (get value :id))
+   (model/identifier? (get value :node))
+   (has? receipt-actions (get value :action))
+   (model/non-empty-string? (get value :subject))
+   (<= (count (get value :subject)) 512)
+   (timestamp? (get value :timestamp))
+   (signature? (get value :signature))))

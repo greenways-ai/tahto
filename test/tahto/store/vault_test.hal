@@ -1,6 +1,8 @@
 (ns tahto.store.vault-test
-  (:use code.test)
-  (:require [tahto.store.host :as host]
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.store.graph :as graph]
+            [tahto.store.host :as host]
             [tahto.store.model :as model]
             [tahto.store.vault :as vault]))
 
@@ -10,244 +12,362 @@
   "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 (def digest-c
   "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
-(def digest-d
-  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
-(def digest-empty
-  "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
 
-(defn test-state
-  ([]
-   (test-state 1024))
-  ([quota]
-   (model/empty-state
-    {:max-object-bytes 1024
-     :max-upload-chunk-bytes 256
-     :max-range-bytes 256
-     :max-manifest-chunks 8
-     :max-closure-objects 64
-     :default-namespace-quota-bytes quota})))
+(defn result-state
+  [result]
+  (get result :state))
 
-(defn open-upload
-  [state upload-id digest size]
-  (vault/begin-upload state
-                      upload-id
-                      "app.example"
-                      "profile.primary"
-                      digest
-                      size
-                      "application/octet-stream"))
-
-(defn install-proof
-  [upload]
-  {:protocol host/result-protocol
-   :operation "upload/verify-install"
-   :upload-id (get upload :id)
-   :digest (get upload :digest)
-   :size (get upload :size)
-   :verified true
-   :installed true})
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
 
 (defn upload-object
-  [state upload-id digest size]
-  (let [opened (open-upload state upload-id digest size)
-        appended (vault/append-upload (get opened :state)
-                                      upload-id
-                                      0
-                                      size
-                                      (str "body:" upload-id))
-        verifying (vault/request-install (get appended :state) upload-id)
-        upload (get verifying :value)]
-    (vault/accept-install (get verifying :state)
-                          upload-id
-                          (install-proof upload))))
+  [state upload-id application namespace digest size]
+  (let [begun (vault/begin-upload
+               state
+               {:upload-id upload-id
+                :application application
+                :namespace namespace
+                :digest digest
+                :size size
+                :media-type "application/octet-stream"})
+        appended (if (= size 0)
+                   begun
+                   (vault/append-upload
+                    (result-state begun)
+                    {:upload-id upload-id
+                     :offset 0
+                     :length size
+                     :body-handle 42}))
+        requested (vault/request-install
+                   (result-state appended)
+                   {:upload-id upload-id})]
+    (vault/accept-install
+     (result-state requested)
+     {:protocol host/result-protocol
+      :operation "upload/verify-install"
+      :upload-id upload-id
+      :digest digest
+      :size size
+      :verified true
+      :installed true})))
 
-(def results
-  [(fact "canonical digests require lower-case SHA-256 identifiers"
-     [(model/canonical-digest? digest-a)
-      (model/canonical-digest?
-       "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-      (model/canonical-digest? "../../objects")]
-     => [true false false])
+(test/print-results
+ [(test/check
+   "canonical digests are lower-case sha256 identifiers"
+   [(model/canonical-digest? digest-a)
+    (model/canonical-digest?
+     "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+    (model/canonical-digest? "../objects/a")]
+   [true false false])
 
-   (fact "host effects reject caller-selected paths and upstreams"
-     [(host/effect?
-       (host/effect "upload/open"
-                    {:upload-id "upload-1"
-                     :digest digest-a
-                     :size 10}))
-      (host/effect?
-       (host/effect "upload/open"
-                    {:upload-id "upload-1"
-                     :path "/tmp/chosen-by-request"}))
-      (host/effect?
-       (host/effect "object/read-range"
-                    {:digest digest-a
-                     :upstream "https://example.invalid"}))]
-     => [true false false])
+  (test/check
+   "application-facing identifiers follow the TAHTO-2 core vocabulary"
+   [(model/identifier? "app.example")
+    (model/identifier? "profile/primary")
+    (model/identifier? "App.Example")
+    (model/identifier? ".hidden")
+    (model/identifier?
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+   [true true false false false])
 
-   (fact "opening an upload reserves its declared namespace quota"
-     (let [opened (open-upload (test-state 10) "upload-1" digest-a 10)
-           denied (open-upload (get opened :state) "upload-2" digest-b 1)]
-       [(get opened :ok)
-        (model/namespace-reservations (get opened :state)
-                                      "app.example"
-                                      "profile.primary")
-        (get-in denied [:error :code])])
-     => [true 10 "tahto.store/quota-exceeded"])
+  (test/check
+   "the host boundary rejects paths, raw bytes and non-numeric handles"
+   [(host/effect?
+     (host/effect
+      "upload/open"
+      {:upload-id "upload-1"
+       :digest digest-a
+       :size 8
+       :media-type "application/octet-stream"}))
+    (host/effect?
+     (host/effect
+      "upload/open"
+      {:upload-id "upload-1"
+       :digest digest-a
+       :size 8
+       :media-type "application/octet-stream"
+       :path "/tmp/a"}))
+    (host/effect?
+     (host/effect
+      "upload/append"
+      {:upload-id "upload-1"
+       :offset 0
+       :length 8
+       :body-handle "body-42"}))]
+   [true false false])
 
-   (fact "zero-byte objects can verify without an append"
-     (let [state (model/empty-state {:max-object-bytes 8
-                                     :default-namespace-quota-bytes 8})
-           opened (vault/begin-upload state
-                                      "upload-empty"
-                                      "app.example"
-                                      "profile.primary"
-                                      digest-empty
-                                      0
-                                      "application/octet-stream")
-           verifying (vault/request-install (get opened :state) "upload-empty")]
-       [(get-in opened [:value :offset])
-        (get-in verifying [:value :status])])
-     => [0 "verifying"])
+  (test/check
+   "an upload reserves its full logical namespace quota"
+   (let [state (model/empty-state {:default-namespace-quota-bytes 10})
+         first-result
+         (vault/begin-upload
+          state
+          {:upload-id "upload-1"
+           :application "app"
+           :namespace "ns"
+           :digest digest-a
+           :size 7
+           :media-type "application/octet-stream"})
+         second-result
+         (vault/begin-upload
+          (result-state first-result)
+          {:upload-id "upload-2"
+           :application "app"
+           :namespace "ns"
+           :digest digest-b
+           :size 4
+           :media-type "application/octet-stream"})]
+     [(get first-result :ok)
+      (get second-result :ok)
+      (error-code second-result)])
+   [true false "tahto.store/quota-exceeded"])
 
-   (fact "append rejects stale offsets before issuing a host write"
-     (let [opened (open-upload (test-state) "upload-1" digest-a 10)
-           first-write (vault/append-upload (get opened :state)
-                                            "upload-1" 0 4 "body:1")
-           stale-write (vault/append-upload (get first-write :state)
-                                            "upload-1" 0 2 "body:2")]
-       [(get-in first-write [:value :offset])
-        (count (get first-write :effects))
-        (get-in stale-write [:error :code])
-        (count (get stale-write :effects))])
-     => [4 1 "tahto.store/upload-offset-stale" 0])
+  (test/check
+   "empty immutable objects can complete without an append"
+   (let [installed (upload-object (model/empty-state)
+                                  "upload-empty" "app" "ns" digest-a 0)]
+     [(get installed :ok)
+      (get (model/stored-object (result-state installed) digest-a) :size)])
+   [true 0])
 
-   (fact "Hara passes opaque body handles rather than object bytes"
-     (let [opened (open-upload (test-state) "upload-1" digest-a 10)
-           appended (vault/append-upload (get opened :state)
-                                         "upload-1" 0 4 "hoplite-body:42")]
-       (get-in appended [:effects 0 :request])
-       => {:upload-id "upload-1"
-           :offset 0
+  (test/check
+   "append rejects stale offsets before issuing a host write"
+   (let [begun
+         (vault/begin-upload
+          (model/empty-state)
+          {:upload-id "upload-1"
+           :application "app"
+           :namespace "ns"
+           :digest digest-a
+           :size 8
+           :media-type "application/octet-stream"})
+         stale
+         (vault/append-upload
+          (result-state begun)
+          {:upload-id "upload-1"
+           :offset 1
            :length 4
-           :body-handle "hoplite-body:42"}))
+           :body-handle 42})]
+     [(get stale :ok)
+      (error-code stale)
+      (get stale :effects)])
+   [false "tahto.store/stale-upload-offset" []])
 
-   (fact "installation requires the exact native verification proof"
-     (let [opened (open-upload (test-state) "upload-1" digest-a 4)
-           appended (vault/append-upload (get opened :state)
-                                         "upload-1" 0 4 "body:1")
-           verifying (vault/request-install (get appended :state) "upload-1")
-           upload (get verifying :value)
-           bad-proof (assoc (install-proof upload) :digest digest-b)
-           rejected (vault/accept-install (get verifying :state)
-                                          "upload-1"
-                                          bad-proof)]
-       [(get-in verifying [:value :status])
-        (get-in rejected [:error :code])
-        (nil? (model/object (get rejected :state) digest-a))])
-     => ["verifying" "tahto.store/install-proof-invalid" true])
+  (test/check
+   "large object bytes stay behind an opaque Hoplite resource handle"
+   (let [begun
+         (vault/begin-upload
+          (model/empty-state)
+          {:upload-id "upload-1"
+           :application "app"
+           :namespace "ns"
+           :digest digest-a
+           :size 8
+           :media-type "application/octet-stream"})
+         appended
+         (vault/append-upload
+          (result-state begun)
+          {:upload-id "upload-1"
+           :offset 0
+           :length 8
+           :body-handle 42})
+         effect (first (get appended :effects))]
+     [(get-in effect [:request :body-handle])
+      (has? (get effect :request) :bytes)
+      (has? (get effect :request) :path)
+      (host/effect? effect)])
+   [42 false false true])
 
-   (fact "verified installation creates immutable metadata and a logical reference"
-     (let [installed (upload-object (test-state) "upload-1" digest-a 4)
-           state (get installed :state)]
-       [(get-in installed [:value :protocol])
-        (get-in installed [:value :verified])
-        (model/namespace-usage state "app.example" "profile.primary")
-        (contains? (model/namespace-references state
-                                               "app.example"
-                                               "profile.primary")
-                   digest-a)
-        (nil? (model/upload state "upload-1"))])
-     => ["tahto.object/1" true 4 true true])
+  (test/check
+   "installation is authoritative only after a matching host proof"
+   (let [begun
+         (vault/begin-upload
+          (model/empty-state)
+          {:upload-id "upload-1"
+           :application "app"
+           :namespace "ns"
+           :digest digest-a
+           :size 8
+           :media-type "application/octet-stream"})
+         appended
+         (vault/append-upload
+          (result-state begun)
+          {:upload-id "upload-1"
+           :offset 0
+           :length 8
+           :body-handle 42})
+         requested
+         (vault/request-install (result-state appended) {:upload-id "upload-1"})
+         rejected
+         (vault/accept-install
+          (result-state requested)
+          {:protocol host/result-protocol
+           :operation "upload/verify-install"
+           :upload-id "upload-1"
+           :digest digest-b
+           :size 8
+           :verified true
+           :installed true})]
+     [(get rejected :ok)
+      (error-code rejected)
+      (nil? (model/stored-object (result-state rejected) digest-a))])
+   [false "tahto.store/install-verification-failed" true])
 
-   (fact "missing-object negotiation preserves order and removes duplicates"
-     (let [installed (upload-object (test-state) "upload-1" digest-a 4)
-           result (vault/missing (get installed :state)
-                                 [digest-b digest-a digest-b digest-c])]
-       (get result :value)
-       => [digest-b digest-c]))
+  (test/check
+   "verified installation creates an object and namespace reference"
+   (let [installed (upload-object (model/empty-state)
+                                  "upload-1" "app" "ns" digest-a 8)
+         state (result-state installed)]
+     [(get installed :ok)
+      (get (model/stored-object state digest-a) :protocol)
+      (get (model/stored-object state digest-a) :size)
+      (get (model/stored-object state digest-a) :encoding)
+      (has? (model/stored-object state digest-a) :media-type)
+      (model/namespace-reference? state "app" "ns" digest-a)
+      (nil? (model/upload state "upload-1"))])
+   [true model/object-protocol 8 "identity" false true true])
 
-   (fact "range planning is half-open and bounded"
-     (let [installed (upload-object (test-state) "upload-1" digest-a 100)
-           allowed (vault/plan-range (get installed :state) digest-a 10 20)
-           denied (vault/plan-range (get installed :state) digest-a 10 300)]
-       [(get allowed :value)
-        (get-in denied [:error :code])])
-     => [{:digest digest-a
-          :start 10
-          :end-exclusive 20
-          :length 10}
-         "tahto.store/range-outside-object"])
+  (test/check
+   "aborting an upload releases its reservation and emits bounded cleanup"
+   (let [begun
+         (vault/begin-upload
+          (model/empty-state {:default-namespace-quota-bytes 8})
+          {:upload-id "upload-1"
+           :application "app"
+           :namespace "ns"
+           :digest digest-a
+           :size 8
+           :media-type "application/octet-stream"})
+         aborted
+         (vault/abort-upload (result-state begun) {:upload-id "upload-1"})]
+     [(model/namespace-reservations
+       (result-state aborted) "app" "ns")
+      (get-in aborted [:effects 0 :operation])
+      (host/effect? (first (get aborted :effects)))])
+   [0 "upload/abort" true])
 
-   (fact "chunk manifests preserve repeated digests and ordinal order"
-     (let [a (upload-object (test-state) "upload-a" digest-a 4)
-           b (upload-object (get a :state) "upload-b" digest-b 3)
-           manifest-object (upload-object (get b :state) "upload-m" digest-c 7)
-           chunks [{:digest digest-a :size 4}
-                   {:digest digest-b :size 3}
-                   {:digest digest-a :size 4}]
-           manifest (vault/register-manifest (get manifest-object :state)
-                                             digest-c
-                                             11
-                                             "application/octet-stream"
-                                             chunks)]
-       (get-in manifest [:value :chunks])
-       => chunks))
+  (test/check
+   "existence negotiation preserves order for one authorized namespace"
+   (let [installed-a (upload-object (model/empty-state)
+                                    "upload-a" "app" "ns" digest-a 8)
+         installed-b (upload-object (result-state installed-a)
+                                    "upload-b" "app" "ns" digest-b 4)
+         result
+         (vault/negotiate
+          (result-state installed-b)
+          {:application "app"
+           :namespace "ns"
+           :digests [digest-b digest-a digest-b digest-c]})]
+     (get result :value))
+   {:present [digest-b digest-a]
+    :missing [digest-c]})
 
-   (fact "closure verification follows manifests and reports missing objects"
-     (let [a (upload-object (test-state) "upload-a" digest-a 4)
-           b (upload-object (get a :state) "upload-b" digest-b 3)
-           manifest-object (upload-object (get b :state) "upload-m" digest-c 7)
-           manifest (vault/register-manifest (get manifest-object :state)
-                                             digest-c
-                                             7
-                                             "application/octet-stream"
-                                             [{:digest digest-a :size 4}
-                                              {:digest digest-b :size 3}])
-           complete (vault/closure-report (get manifest :state) [digest-c])
-           incomplete (vault/closure-report (get manifest :state) [digest-d])]
-       [(get-in complete [:value :complete])
-        (set (get-in complete [:value :objects]))
-        (get-in incomplete [:value :complete])
-        (get-in incomplete [:value :missing])])
-     => [true #{digest-a digest-b digest-c} false [digest-d]])
+  (test/check
+   "existence negotiation is bounded before digest traversal"
+   (let [result
+         (vault/negotiate
+          (model/empty-state {:max-negotiate-digests 2})
+          {:application "app"
+           :namespace "ns"
+           :digests [digest-a digest-b digest-c]})]
+     [(get result :ok) (error-code result) (get result :effects)])
+   [false "tahto.store/digest-list-too-large" []])
 
-   (fact "pinned roots and namespace references protect complete closures from GC"
-     (let [a (upload-object (test-state) "upload-a" digest-a 4)
-           b (upload-object (get a :state) "upload-b" digest-b 3)
-           orphan (upload-object (get b :state) "upload-d" digest-d 2)
-           detached (vault/detach-object (get orphan :state)
-                                         "app.example"
-                                         "profile.primary"
-                                         digest-d)
-           pinned (vault/pin-root (get detached :state)
-                                  "backup"
-                                  "backup-1"
-                                  [digest-a digest-b])
-           plan (vault/gc-plan (get pinned :state))]
-       [(get-in plan [:value :dry-run])
-        (get-in plan [:value :candidates])
-        (mapv (fn [effect]
-                (get-in effect [:request :digest]))
-              (get plan :effects))])
-     => [true [digest-d] [digest-d]])
+  (test/check
+   "object presence is not disclosed across namespaces or applications"
+   (let [installed (upload-object (model/empty-state)
+                                  "upload-a" "app-a" "ns-a" digest-a 8)
+         state (result-state installed)
+         other-namespace
+         (vault/negotiate
+          state
+          {:application "app-a"
+           :namespace "ns-b"
+           :digests [digest-a]})
+         other-application
+         (vault/negotiate
+          state
+          {:application "app-b"
+           :namespace "ns-b"
+           :digests [digest-a]})]
+     [(get other-namespace :value)
+      (get other-application :value)])
+   [{:present [] :missing [digest-a]}
+    {:present [] :missing [digest-a]}])
 
-   (fact "global digest deduplication cannot bypass namespace quotas"
-     (let [installed (upload-object (test-state 10) "upload-a" digest-a 10)
-           attached (vault/attach-object (get installed :state)
-                                         "app.example"
-                                         "profile.secondary"
-                                         digest-a)
-           reduced-quota (vault/set-quota (get attached :state)
-                                          "app.example"
-                                          "profile.secondary"
-                                          9)]
-       [(get attached :ok)
-        (model/namespace-usage (get attached :state)
-                               "app.example"
-                               "profile.secondary")
-        (get-in reduced-quota [:error :code])])
-     => [true 10 "tahto.store/quota-below-usage"])
-   ])
+  (test/check
+   "another application gains authority only after a full verified upload"
+   (let [installed (upload-object (model/empty-state)
+                                  "upload-a" "app-a" "ns-a" digest-a 8)
+         verified-again
+         (upload-object (result-state installed)
+                        "upload-b" "app-b" "ns-b" digest-a 8)
+         state (result-state verified-again)]
+     [(get verified-again :ok)
+      (model/namespace-reference? state "app-a" "ns-a" digest-a)
+      (model/namespace-reference? state "app-b" "ns-b" digest-a)
+      (count (get state :objects))])
+   [true true true 1])
 
-(pr-str (run '[tahto.store.vault-test]))
+  (test/check
+   "global deduplication cannot bypass logical namespace quota"
+   (let [installed (upload-object (model/empty-state)
+                                  "upload-a" "app-a" "ns-a" digest-a 8)
+         limited
+         (vault/set-quota
+          (result-state installed)
+          {:application "app-b" :namespace "ns-b" :quota-bytes 7})
+         begun
+         (vault/begin-upload
+          (result-state limited)
+          {:upload-id "upload-b"
+           :application "app-b"
+           :namespace "ns-b"
+           :digest digest-a
+           :size 8
+           :media-type "application/octet-stream"})]
+     [(get begun :ok)
+      (error-code begun)
+      (get begun :effects)
+      (get-in (graph/namespace-accounting
+               (result-state begun) "app-b" "ns-b")
+              [:value :bytes])])
+   [false "tahto.store/quota-exceeded" [] 0])
+
+  (test/check
+   "range plans enforce namespace authority and bounded half-open offsets"
+   (let [installed (upload-object
+                    (model/empty-state {:max-range-bytes 4})
+                    "upload-1" "app-a" "ns-a" digest-a 8)
+         state (result-state installed)
+         valid
+         (vault/plan-range
+          state
+          {:application "app-a" :namespace "ns-a"
+           :digest digest-a :start 2 :end 6})
+         forbidden
+         (vault/plan-range
+          state
+          {:application "app-b" :namespace "ns-b"
+           :digest digest-a :start 2 :end 6})
+         absent
+         (vault/plan-range
+          state
+          {:application "app-b" :namespace "ns-b"
+           :digest digest-c :start 2 :end 6})
+         too-large
+         (vault/plan-range
+          state
+          {:application "app-a" :namespace "ns-a"
+           :digest digest-a :start 2 :end 7})]
+     [(get valid :ok)
+      (get-in valid [:effects 0 :request])
+      (error-code forbidden)
+      (error-code absent)
+      (error-code too-large)])
+   [true
+    {:digest digest-a :start 2 :end 6}
+    "tahto.store/object-not-authorized"
+    "tahto.store/object-not-authorized"
+    "tahto.store/range-too-large"])])

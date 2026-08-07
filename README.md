@@ -1,14 +1,16 @@
 # Tahto
 
-**Tahto** is the Greenways application-state fabric. It stores, synchronizes, backs up, restores, and routes application state while Greenways OS retains consent, installation, private-key, credential, and grant authority.
+**Tahto** is the Greenways application-state fabric. It stores, synchronizes,
+backs up, restores and routes application state while Greenways OS retains
+consent, installation, private-key, credential and grant authority.
 
 ```text
 Greenways OS applications
-          │ exact OS grants
+          │ exact OS grants and signed record verification
           ▼
        Tahto node
   objects · commits · heads
-  sync · backup · services
+  backup · restore · services
           │
           ├─ local home node
           ├─ trusted compute node
@@ -16,7 +18,10 @@ Greenways OS applications
           └─ optional hosted relay
 ```
 
-Applications retain semantic ownership. Historia defines an archive, Hestia defines a room or mandate, Worlds defines a scene, and Ignatius validates canonical execution. Tahto preserves their signed records and divergent heads without inventing generic merge semantics.
+Applications retain semantic ownership. Historia defines an archive, Hestia
+defines a room or mandate, Worlds defines a scene, and Ignatius validates
+canonical execution. Tahto preserves signed records and divergent heads without
+inventing generic merge semantics.
 
 ## Node surface
 
@@ -36,21 +41,23 @@ GET /beacon/v1/health
 GET /beacon/v1/status
 ```
 
-The compatibility routes describe Tahto; they do not preserve Beacon's former assumption that Greenways Space is the service authority. The optional hosted Space relationship lives under `adapters/greenways-space/` and is not part of core node startup.
+Compatibility routes describe Tahto; they do not restore Beacon's former
+assumption that Greenways Space is the service authority. Hosted Space remains
+an optional adapter under `adapters/greenways-space/`.
 
 ## Repository layout
 
 ```text
 src/tahto/node/       Hoplite control-plane application
-src/tahto/protocol/   application-neutral descriptors and wire contracts
-src/tahto/store/      Hara object-vault state machine and host boundary
+src/tahto/protocol/   application-neutral records and verification contracts
+src/tahto/store/      Hara object graph, commits, heads and backup transitions
 src/tahto/sync/       device and replication boundary (TAHTO-5/8)
-src/tahto/backup/     immutable backup and restore boundary (TAHTO-4/9/10)
+src/tahto/backup/     transfer and restore executors (TAHTO-9/10)
 src/tahto/service/    inert service descriptors and durable jobs (TAHTO-6)
-test/                  Hara executable conformance
-protocol/              normative protocol documents and schemas
-conformance/           repository, route and JSON-Schema guards
-adapters/              optional integrations outside Tahto core
+protocol/             normative protocol documents and schemas
+test/                 executable Hara conformance suites
+conformance/          dependency-free protocol and architecture guards
+adapters/             optional integrations outside Tahto core
 ```
 
 ## Operate the node
@@ -71,35 +78,63 @@ curl http://127.0.0.1:58100/tahto/v1/status
 
 `bin/greenways-beacon` is a warning compatibility wrapper that invokes `tahto`.
 
-## Hara object-vault kernel
+## Hara object and history kernels
 
-TAHTO-3 is implemented in Hara under `tahto.store.*`.
+TAHTO-3 and TAHTO-4 are deterministic Hara state machines under
+`src/tahto/store/`.
 
-Hara owns:
+The object kernel owns:
 
 ```text
-canonical object identity
-resumable-upload transitions
+canonical digest identity
+resumable upload transitions
 logical namespace quotas
-verified-install acceptance
-namespace references
+verified installation acceptance
 bounded range plans
-ordered chunk manifests
-closure verification
-root pins
-garbage-collection plans
+verified ordered chunk manifests
+object closure and GC roots
 ```
 
-Large object bytes are not materialized as ordinary Hara values. Hara emits a closed set of `tahto.store.host-effect/1` operations using opaque request-body handles. A trusted native/Hoplite adapter will provide bounded streaming, SHA-256 verification, seekable reads, fsync and atomic installation under HOPLITE-1.
+The history kernel owns:
 
-See [`protocol/object-vault.md`](protocol/object-vault.md) and `test/tahto/store/vault_test.hal`.
+```text
+verified immutable commits
+strict device sequence slots
+signed compare-and-swap heads
+divergent-head preservation
+immutable backup closure pins
+deterministic restore manifests
+verified receipt evidence
+```
+
+Large object bodies never become ordinary Hara values. The kernel emits a closed
+set of native effects using opaque body handles. Hoplite's merged bounded
+streaming ABI defines the transport contract, while runtime/Nginx wiring and
+durable metadata persistence remain explicit follow-up work.
+
+Commit, head, backup and receipt transitions consume
+`tahto.record-verification/1` proofs. The installed key provider must bind the
+exact canonical bytes, digest, key identity and signature. TAHTO-4 validates and
+uses that proof; key enrolment, cryptographic verification and revocation remain
+TAHTO-5.
+
+See:
+
+- [`protocol/object-vault.md`](protocol/object-vault.md)
+- [`protocol/history.md`](protocol/history.md)
+- [`test/tahto/store/vault_test.hal`](test/tahto/store/vault_test.hal)
+- [`test/tahto/store/history_test.hal`](test/tahto/store/history_test.hal)
 
 ## Current implementation status
 
-TAHTO-2 defines the stable application-neutral record envelopes in [`protocol/records.md`](protocol/records.md).
+TAHTO-2 defines the stable application-neutral record envelopes. TAHTO-3
+provides the Hara object-vault kernel, and TAHTO-4 provides immutable commits,
+atomic signed heads, backups and restore planning.
 
-The object-vault state machine is ready in Hara. The HTTP/native byte data plane is deliberately reported as not wired rather than emulated in Python or by moving whole blobs through Hara collections. Atomic heads, immutable backups, device enrolment, incremental sync, workers and durable jobs remain separate implementation PRs.
+The native byte data plane, durable metadata transaction provider, signed-device
+verifier, enrolment and incremental replication are not represented as complete.
+The status document reports these boundaries directly instead of emulating them
+with whole-file Python or in-memory production stores.
 
-The Python programs under `conformance/` are static architecture and schema guards only; they are not node runtime components.
-
-See [`LINEAGE.md`](LINEAGE.md) for the extracted Beacon history and [`protocol/tahto.md`](protocol/tahto.md) for the authority boundary.
+See [`LINEAGE.md`](LINEAGE.md) for the extracted Beacon history and
+[`protocol/tahto.md`](protocol/tahto.md) for the authority boundary.

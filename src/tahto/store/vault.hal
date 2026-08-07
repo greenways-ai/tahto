@@ -1,5 +1,6 @@
 (ns tahto.store.vault
   (:require [std.foundation :refer :all]
+            [tahto.store.graph :as graph]
             [tahto.store.host :as host]
             [tahto.store.model :as model]))
 
@@ -8,103 +9,140 @@
   (get state :limits))
 
 (defn set-quota
-  [state application namespace quota-bytes]
-  (cond
-    (not (model/non-empty-string? application))
-    (model/fail state "tahto.store/application-invalid")
+  [state request]
+  (let [application (get request :application)
+        namespace (get request :namespace)
+        quota-bytes (get request :quota-bytes)]
+    (cond
+      (not (model/identifier? application))
+      (model/fail state "tahto.store/application-invalid")
 
-    (not (model/non-empty-string? namespace))
-    (model/fail state "tahto.store/namespace-invalid")
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.store/namespace-invalid")
 
-    (not (model/non-negative-integer? quota-bytes))
-    (model/fail state "tahto.store/quota-invalid" {:quota-bytes quota-bytes})
+      (not (model/non-negative-integer? quota-bytes))
+      (model/fail state "tahto.store/quota-invalid")
 
-    (< quota-bytes
-       (+ (model/namespace-usage state application namespace)
-          (model/namespace-reservations state application namespace)))
-    (model/fail state "tahto.store/quota-below-usage"
-                {:quota-bytes quota-bytes})
-
-    :else
-    (model/ok
-     (assoc-in state
-               [:quotas (model/namespace-key application namespace)]
-               quota-bytes)
-     quota-bytes)))
+      :else
+      (let [accounting (graph/namespace-accounting state application namespace)]
+        (if (not (get accounting :ok))
+          accounting
+          (let [used (get-in accounting [:value :bytes])
+                reserved (model/namespace-reservations
+                          state application namespace)]
+            (if (> (+ used reserved) quota-bytes)
+              (model/fail state "tahto.store/quota-below-usage"
+                          {:quota quota-bytes
+                           :used used
+                           :reserved reserved})
+              (let [key (model/namespace-key application namespace)
+                    next-state
+                    (assoc state :quotas
+                           (assoc (get state :quotas) key quota-bytes))]
+                (model/ok next-state
+                          {:application application
+                           :namespace namespace
+                           :quota-bytes quota-bytes})))))))))
 
 (defn begin-upload
-  [state upload-id application namespace digest size media-type]
-  (cond
-    (not (model/non-empty-string? upload-id))
-    (model/fail state "tahto.store/upload-id-invalid")
+  [state request]
+  (let [upload-id (get request :upload-id)
+        application (get request :application)
+        namespace (get request :namespace)
+        digest (get request :digest)
+        size (get request :size)
+        media-type (get request :media-type)]
+    (cond
+      (not (model/identifier? upload-id))
+      (model/fail state "tahto.store/upload-id-invalid")
 
-    (not (model/non-empty-string? application))
-    (model/fail state "tahto.store/application-invalid")
+      (not (model/identifier? application))
+      (model/fail state "tahto.store/application-invalid")
 
-    (not (model/non-empty-string? namespace))
-    (model/fail state "tahto.store/namespace-invalid")
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.store/namespace-invalid")
 
-    (not (model/canonical-digest? digest))
-    (model/fail state "tahto.store/digest-invalid" {:digest digest})
+      (not (model/canonical-digest? digest))
+      (model/fail state "tahto.store/digest-invalid" {:digest digest})
 
-    (not (model/non-negative-integer? size))
-    (model/fail state "tahto.store/size-invalid" {:size size})
+      (not (model/non-negative-integer? size))
+      (model/fail state "tahto.store/size-invalid" {:size size})
 
-    (> size (get (limits state) :max-object-bytes))
-    (model/fail state "tahto.store/object-too-large" {:size size})
+      (> size (get (limits state) :max-object-bytes))
+      (model/fail state "tahto.store/object-too-large" {:size size})
 
-    (not (nil? (model/upload state upload-id)))
-    (model/fail state "tahto.store/upload-exists" {:upload-id upload-id})
+      (not (model/media-type? media-type))
+      (model/fail state "tahto.store/media-type-invalid")
 
-    (not (nil? (model/object state digest)))
-    (model/fail state "tahto.store/object-exists" {:digest digest})
+      (not (nil? (model/upload state upload-id)))
+      (model/fail state "tahto.store/upload-exists" {:upload-id upload-id})
 
-    (not (model/namespace-capacity? state application namespace size))
-    (model/fail state "tahto.store/quota-exceeded"
-                {:application application
-                 :namespace namespace
-                 :size size})
+      (and (not (nil? (model/stored-object state digest)))
+           (graph/namespace-reachable? state application namespace digest))
+      (model/fail state "tahto.store/object-present" {:digest digest})
 
-    :else
-    (let [upload {:id upload-id
-                  :application application
-                  :namespace namespace
-                  :digest digest
-                  :size size
-                  :media-type media-type
-                  :offset 0
-                  :status "open"}
-          next-state (assoc-in state [:uploads upload-id] upload)
-          effect (host/effect
-                  "upload/open"
-                  {:upload-id upload-id
-                   :digest digest
-                   :size size})]
-      (model/ok next-state upload [effect]))))
+      :else
+      (let [accounting (graph/namespace-accounting state application namespace)]
+        (if (not (get accounting :ok))
+          accounting
+          (let [used (get-in accounting [:value :bytes])
+                reserved (model/namespace-reservations
+                          state application namespace)
+                quota (model/namespace-quota state application namespace)]
+            (if (> (+ used reserved size) quota)
+              (model/fail state "tahto.store/quota-exceeded"
+                          {:application application
+                           :namespace namespace
+                           :size size
+                           :used used
+                           :reserved reserved
+                           :quota quota})
+              (let [upload {:id upload-id
+                            :application application
+                            :namespace namespace
+                            :digest digest
+                            :size size
+                            :media-type media-type
+                            :offset 0
+                            :status "open"}
+                    next-state
+                    (assoc state :uploads
+                           (assoc (get state :uploads) upload-id upload))
+                    effect (host/effect
+                            "upload/open"
+                            {:upload-id upload-id
+                             :digest digest
+                             :size size
+                             :media-type media-type})]
+                (model/ok next-state upload [effect])))))))))
 
 (defn append-upload
-  [state upload-id offset length body-handle]
-  (let [upload (model/upload state upload-id)]
+  [state request]
+  (let [upload-id (get request :upload-id)
+        offset (get request :offset)
+        length (get request :length)
+        body-handle (get request :body-handle)
+        upload (model/upload state upload-id)]
     (cond
       (nil? upload)
       (model/fail state "tahto.store/upload-missing" {:upload-id upload-id})
 
-      (not= "open" (get upload :status))
+      (not (= "open" (get upload :status)))
       (model/fail state "tahto.store/upload-not-open" {:upload-id upload-id})
 
-      (not= offset (get upload :offset))
-      (model/fail state "tahto.store/upload-offset-stale"
+      (not (model/non-negative-integer? offset))
+      (model/fail state "tahto.store/offset-invalid" {:offset offset})
+
+      (not (= offset (get upload :offset)))
+      (model/fail state "tahto.store/stale-upload-offset"
                   {:expected (get upload :offset)
-                   :actual offset})
+                   :received offset})
 
       (not (model/positive-integer? length))
-      (model/fail state "tahto.store/chunk-length-invalid" {:length length})
+      (model/fail state "tahto.store/chunk-size-invalid" {:length length})
 
       (> length (get (limits state) :max-upload-chunk-bytes))
-      (model/fail state "tahto.store/chunk-too-large" {:length length})
-
-      (not (model/non-empty-string? body-handle))
-      (model/fail state "tahto.store/body-handle-invalid")
+      (model/fail state "tahto.store/upload-chunk-too-large" {:length length})
 
       (> (+ offset length) (get upload :size))
       (model/fail state "tahto.store/upload-overflow"
@@ -112,325 +150,215 @@
                    :length length
                    :size (get upload :size)})
 
+      (not (model/positive-integer? body-handle))
+      (model/fail state "tahto.store/body-handle-invalid")
+
       :else
-      (let [next-offset (+ offset length)
-            next-upload (assoc upload :offset next-offset)
-            next-state (assoc-in state [:uploads upload-id] next-upload)
+      (let [updated (assoc upload :offset (+ offset length))
+            next-state (assoc state :uploads
+                              (assoc (get state :uploads) upload-id updated))
             effect (host/effect
                     "upload/append"
                     {:upload-id upload-id
                      :offset offset
                      :length length
                      :body-handle body-handle})]
-        (model/ok next-state next-upload [effect])))))
+        (model/ok next-state updated [effect])))))
+
+(defn abort-upload
+  [state request]
+  (let [upload-id (get request :upload-id)
+        upload (model/upload state upload-id)]
+    (if (nil? upload)
+      (model/fail state "tahto.store/upload-missing" {:upload-id upload-id})
+      (model/ok
+       (assoc state :uploads (dissoc (get state :uploads) upload-id))
+       upload-id
+       [(host/effect "upload/abort" {:upload-id upload-id})]))))
 
 (defn request-install
-  [state upload-id]
-  (let [upload (model/upload state upload-id)]
+  [state request]
+  (let [upload-id (get request :upload-id)
+        upload (model/upload state upload-id)]
     (cond
       (nil? upload)
       (model/fail state "tahto.store/upload-missing" {:upload-id upload-id})
 
-      (not= "open" (get upload :status))
+      (not (= "open" (get upload :status)))
       (model/fail state "tahto.store/upload-not-open" {:upload-id upload-id})
 
-      (not= (get upload :offset) (get upload :size))
+      (not (= (get upload :offset) (get upload :size)))
       (model/fail state "tahto.store/upload-incomplete"
                   {:offset (get upload :offset)
                    :size (get upload :size)})
 
       :else
-      (let [next-upload (assoc upload :status "verifying")
-            next-state (assoc-in state [:uploads upload-id] next-upload)
+      (let [updated (assoc upload :status "verifying")
+            next-state (assoc state :uploads
+                              (assoc (get state :uploads) upload-id updated))
             effect (host/effect
                     "upload/verify-install"
                     {:upload-id upload-id
                      :digest (get upload :digest)
                      :size (get upload :size)})]
-        (model/ok next-state next-upload [effect])))))
+        (model/ok next-state updated [effect])))))
 
 (defn accept-install
-  [state upload-id host-result]
-  (let [upload (model/upload state upload-id)]
+  [state host-result]
+  (let [upload-id (get host-result :upload-id)
+        upload (model/upload state upload-id)]
     (cond
       (nil? upload)
       (model/fail state "tahto.store/upload-missing" {:upload-id upload-id})
 
-      (not= "verifying" (get upload :status))
+      (not (= "verifying" (get upload :status)))
       (model/fail state "tahto.store/upload-not-verifying" {:upload-id upload-id})
 
       (not (host/verified-install? host-result upload))
-      (model/fail state "tahto.store/install-proof-invalid")
+      (model/fail state "tahto.store/install-verification-failed"
+                  {:upload-id upload-id})
 
       :else
       (let [digest (get upload :digest)
-            application (get upload :application)
-            namespace (get upload :namespace)
-            namespace-key (model/namespace-key application namespace)
-            references (model/namespace-references state application namespace)
-            record {:protocol model/object-protocol
-                    :digest digest
-                    :size (get upload :size)
-                    :media-type (get upload :media-type)
-                    :verified true}
-            next-state (-> state
-                           (assoc-in [:objects digest] record)
-                           (assoc-in [:references namespace-key]
-                                     (conj references digest))
-                           (update :uploads dissoc upload-id))]
-        (model/ok next-state record)))))
-
-(defn attach-object
-  [state application namespace digest]
-  (let [record (model/object state digest)
-        references (model/namespace-references state application namespace)]
-    (cond
-      (nil? record)
-      (model/fail state "tahto.store/object-missing" {:digest digest})
-
-      (contains? references digest)
-      (model/ok state record)
-
-      (not (model/namespace-capacity? state application namespace (get record :size)))
-      (model/fail state "tahto.store/quota-exceeded"
-                  {:application application
-                   :namespace namespace
-                   :size (get record :size)})
-
-      :else
-      (model/ok
-       (assoc-in state
-                 [:references (model/namespace-key application namespace)]
-                 (conj references digest))
-       record))))
+            candidate (model/object-record
+                       digest
+                       (get upload :size))
+            existing (model/stored-object state digest)
+            key (model/namespace-key
+                 (get upload :application)
+                 (get upload :namespace))
+            references (model/value-or (get state :references) key #{})]
+        (if (and (not (nil? existing))
+                 (or (not (= (get existing :size) (get candidate :size)))
+                     (not (= (get existing :encoding)
+                             (get candidate :encoding)))))
+          (model/fail state "tahto.store/object-metadata-conflict"
+                      {:digest digest})
+          (let [object (if (nil? existing) candidate existing)
+                objects (assoc (get state :objects) digest object)
+                next-state (assoc
+                            (assoc
+                             (assoc state :objects objects)
+                             :uploads (dissoc (get state :uploads) upload-id))
+                            :references
+                            (assoc (get state :references)
+                                   key
+                                   (conj references digest)))]
+            (model/ok next-state object)))))))
 
 (defn detach-object
-  [state application namespace digest]
-  (let [references (model/namespace-references state application namespace)]
-    (model/ok
-     (assoc-in state
-               [:references (model/namespace-key application namespace)]
-               (disj references digest))
-     digest)))
+  [state request]
+  (let [application (get request :application)
+        namespace (get request :namespace)
+        digest (get request :digest)
+        key (model/namespace-key application namespace)
+        references (model/value-or (get state :references) key #{})]
+    (cond
+      (not (model/identifier? application))
+      (model/fail state "tahto.store/application-invalid")
 
-(defn missing
-  [state digests]
-  (loop [remaining digests
-         seen #{}
-         output []]
-    (if (empty? remaining)
-      (model/ok state output)
-      (let [digest (first remaining)]
-        (cond
-          (not (model/canonical-digest? digest))
-          (model/fail state "tahto.store/digest-invalid" {:digest digest})
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.store/namespace-invalid")
 
-          (contains? seen digest)
-          (recur (rest remaining) seen output)
+      (not (model/canonical-digest? digest))
+      (model/fail state "tahto.store/digest-invalid" {:digest digest})
 
-          (nil? (model/object state digest))
-          (recur (rest remaining) (conj seen digest) (conj output digest))
+      :else
+      (let [updated (model/set-remove references digest)
+            reference-map (if (empty? updated)
+                            (dissoc (get state :references) key)
+                            (assoc (get state :references) key updated))]
+        (model/ok (assoc state :references reference-map) digest)))))
 
-          :else
-          (recur (rest remaining) (conj seen digest) output))))))
+(defn negotiate
+  [state request]
+  (let [application (get request :application)
+        namespace (get request :namespace)
+        digests (get request :digests)]
+    (cond
+      (not (model/identifier? application))
+      (model/fail state "tahto.store/application-invalid")
+
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.store/namespace-invalid")
+
+      (not (vector? digests))
+      (model/fail state "tahto.store/digest-list-invalid")
+
+      (> (count digests) (get (limits state) :max-negotiate-digests))
+      (model/fail state "tahto.store/digest-list-too-large"
+                  {:count (count digests)})
+
+      (not (every? model/canonical-digest? digests))
+      (model/fail state "tahto.store/digest-invalid")
+
+      :else
+      (let [report (graph/namespace-closure-report-value
+                    state application namespace)]
+        (if (get report :overflow)
+          (model/fail state "tahto.store/namespace-closure-overflow"
+                      {:application application :namespace namespace})
+          (let [reachable (into #{} (get report :visited))
+                ordered (distinct digests)
+                result
+                (reduce
+                 (fn [output digest]
+                   (if (and (has? reachable digest)
+                            (not (nil? (model/stored-object state digest))))
+                     (assoc output :present
+                            (conj (get output :present) digest))
+                     (assoc output :missing
+                            (conj (get output :missing) digest))))
+                 {:present [] :missing []}
+                 ordered)]
+            (model/ok state result)))))))
 
 (defn plan-range
-  [state digest start end-exclusive]
-  (let [record (model/object state digest)]
+  [state request]
+  (let [application (get request :application)
+        namespace (get request :namespace)
+        digest (get request :digest)
+        start (get request :start)
+        end (get request :end)
+        object (model/stored-object state digest)]
     (cond
-      (nil? record)
+      (not (model/identifier? application))
+      (model/fail state "tahto.store/application-invalid")
+
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.store/namespace-invalid")
+
+      (not (model/canonical-digest? digest))
+      (model/fail state "tahto.store/digest-invalid" {:digest digest})
+
+      (not (graph/namespace-reachable? state application namespace digest))
+      (model/fail state "tahto.store/object-not-authorized" {:digest digest})
+
+      (nil? object)
       (model/fail state "tahto.store/object-missing" {:digest digest})
 
       (not (model/non-negative-integer? start))
       (model/fail state "tahto.store/range-start-invalid" {:start start})
 
-      (not (model/non-negative-integer? end-exclusive))
-      (model/fail state "tahto.store/range-end-invalid" {:end end-exclusive})
+      (not (model/positive-integer? end))
+      (model/fail state "tahto.store/range-end-invalid" {:end end})
 
-      (> start end-exclusive)
-      (model/fail state "tahto.store/range-invalid"
-                  {:start start :end end-exclusive})
+      (>= start end)
+      (model/fail state "tahto.store/range-order-invalid"
+                  {:start start :end end})
 
-      (> end-exclusive (get record :size))
-      (model/fail state "tahto.store/range-outside-object"
-                  {:end end-exclusive :size (get record :size)})
+      (> end (get object :size))
+      (model/fail state "tahto.store/range-out-of-bounds"
+                  {:end end :size (get object :size)})
 
-      (> (- end-exclusive start) (get (limits state) :max-range-bytes))
+      (> (- end start) (get (limits state) :max-range-bytes))
       (model/fail state "tahto.store/range-too-large"
-                  {:length (- end-exclusive start)})
+                  {:length (- end start)})
 
       :else
-      (let [plan {:digest digest
-                  :start start
-                  :end-exclusive end-exclusive
-                  :length (- end-exclusive start)}
-            effect (host/effect "object/read-range" plan)]
-        (model/ok state plan [effect])))))
-
-(defn- chunk-valid?
-  [chunk]
-  (and (map? chunk)
-       (model/canonical-digest? (get chunk :digest))
-       (model/positive-integer? (get chunk :size))))
-
-(defn register-manifest
-  [state manifest-digest total-size media-type chunks]
-  (let [max-chunks (get (limits state) :max-manifest-chunks)]
-    (cond
-      (not (model/canonical-digest? manifest-digest))
-      (model/fail state "tahto.store/digest-invalid" {:digest manifest-digest})
-
-      (nil? (model/object state manifest-digest))
-      (model/fail state "tahto.store/manifest-object-missing"
-                  {:digest manifest-digest})
-
-      (not (vector? chunks))
-      (model/fail state "tahto.store/manifest-chunks-invalid")
-
-      (> (count chunks) max-chunks)
-      (model/fail state "tahto.store/manifest-too-wide"
-                  {:count (count chunks)
-                   :maximum max-chunks})
-
-      (not (every? chunk-valid? chunks))
-      (model/fail state "tahto.store/manifest-chunk-invalid")
-
-      (not= total-size
-            (reduce (fn [total chunk]
-                      (+ total (get chunk :size)))
-                    0
-                    chunks))
-      (model/fail state "tahto.store/manifest-size-mismatch"
-                  {:total-size total-size})
-
-      (not
-       (every?
-        (fn [chunk]
-          (let [child (model/object state (get chunk :digest))]
-            (and (not (nil? child))
-                 (= (get child :size) (get chunk :size)))))
-        chunks))
-      (model/fail state "tahto.store/manifest-child-missing-or-mismatched")
-
-      :else
-      (let [manifest {:protocol model/chunk-manifest-protocol
-                      :digest manifest-digest
-                      :total-size total-size
-                      :media-type media-type
-                      :chunks chunks}
-            object-record (merge (model/object state manifest-digest)
-                                 {:logical-size total-size
-                                  :manifest-protocol model/chunk-manifest-protocol})
-            next-state (-> state
-                           (assoc-in [:manifests manifest-digest] manifest)
-                           (assoc-in [:objects manifest-digest] object-record))]
-        (model/ok next-state manifest)))))
-
-(defn child-digests
-  [state digest]
-  (let [manifest (get-in state [:manifests digest])]
-    (if (nil? manifest)
-      []
-      (map (fn [chunk] (get chunk :digest))
-           (get manifest :chunks)))))
-
-(defn closure-report
-  [state roots]
-  (loop [pending (vec roots)
-         visited #{}
-         missing-set #{}]
-    (cond
-      (> (+ (count pending) (count visited))
-         (get (limits state) :max-closure-objects))
-      (model/fail state "tahto.store/closure-too-large")
-
-      (empty? pending)
-      (model/ok state
-                {:complete (empty? missing-set)
-                 :objects (vec (sort visited))
-                 :missing (vec (sort missing-set))})
-
-      :else
-      (let [digest (peek pending)
-            rest-pending (pop pending)]
-        (cond
-          (contains? visited digest)
-          (recur rest-pending visited missing-set)
-
-          (not (model/canonical-digest? digest))
-          (model/fail state "tahto.store/digest-invalid" {:digest digest})
-
-          (nil? (model/object state digest))
-          (recur rest-pending visited (conj missing-set digest))
-
-          :else
-          (recur (into rest-pending (child-digests state digest))
-                 (conj visited digest)
-                 missing-set))))))
-
-(defn pin-root
-  [state kind root-id digests]
-  (cond
-    (not (contains? model/root-kinds kind))
-    (model/fail state "tahto.store/root-kind-invalid" {:kind kind})
-
-    (not (model/non-empty-string? root-id))
-    (model/fail state "tahto.store/root-id-invalid")
-
-    :else
-    (let [closure (closure-report state digests)]
-      (if (not (get closure :ok))
-        closure
-        (if (not (get-in closure [:value :complete]))
-          (model/fail state "tahto.store/root-closure-incomplete"
-                      {:missing (get-in closure [:value :missing])})
-          (let [root {:kind kind
-                      :id root-id
-                      :digests (vec (distinct digests))}
-                next-state (assoc-in state [:roots [kind root-id]] root)]
-            (model/ok next-state root)))))))
-
-(defn unpin-root
-  [state kind root-id]
-  (model/ok (update state :roots dissoc [kind root-id])
-            [kind root-id]))
-
-(defn gc-root-digests
-  [state]
-  (let [reference-digests
-        (reduce
-         (fn [output entry]
-           (into output (val entry)))
-         []
-         (get state :references))
-        pinned-digests
-        (reduce
-         (fn [output entry]
-           (into output (get (val entry) :digests)))
-         []
-         (get state :roots))]
-    (vec (distinct (concat reference-digests pinned-digests)))))
-
-(defn gc-plan
-  [state]
-  (let [closure (closure-report state (gc-root-digests state))]
-    (if (not (get closure :ok))
-      closure
-      (if (not (get-in closure [:value :complete]))
-        (model/fail state "tahto.store/gc-root-closure-incomplete"
-                    {:missing (get-in closure [:value :missing])})
-        (let [reachable (set (get-in closure [:value :objects]))
-              candidates (->> (keys (get state :objects))
-                              (filter (fn [digest]
-                                        (not (contains? reachable digest))))
-                              sort
-                              vec)
-              effects (mapv
-                       (fn [digest]
-                         (host/effect "object/delete" {:digest digest}))
-                       candidates)]
-          (model/ok state
-                    {:dry-run true
-                     :reachable (vec (sort reachable))
-                     :candidates candidates}
-                    effects))))))
+      (model/ok
+       state
+       {:digest digest :start start :end end}
+       [(host/effect
+         "object/read-range"
+         {:digest digest :start start :end end})]))))

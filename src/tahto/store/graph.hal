@@ -1,0 +1,416 @@
+(ns tahto.store.graph
+  (:require [std.foundation :refer :all]
+            [tahto.store.host :as host]
+            [tahto.store.model :as model]))
+
+(defn limits
+  [state]
+  (get state :limits))
+
+(defn manifest-child-digests
+  [state digest]
+  (map (fn [chunk]
+         (get chunk :digest))
+       (model/value-or (get state :manifests) digest [])))
+
+(defn child-digests
+  [state digest]
+  (model/value-or
+   (get state :edges)
+   digest
+   (vec (manifest-child-digests state digest))))
+
+(defn closure-report-value
+  [state roots]
+  (let [maximum (get (limits state) :max-closure-objects)]
+    (loop [queue (vec roots)
+           index 0
+           seen #{}
+           visited []
+           missing []]
+      (if (= index (count queue))
+        {:complete (empty? missing)
+         :overflow false
+         :visited visited
+         :missing missing}
+        (let [digest (nth queue index)]
+          (cond
+            (has? seen digest)
+            (recur queue (inc index) seen visited missing)
+
+            (>= (count visited) maximum)
+            {:complete false
+             :overflow true
+             :visited visited
+             :missing missing}
+
+            (nil? (model/stored-object state digest))
+            (recur queue
+                   (inc index)
+                   (conj seen digest)
+                   (conj visited digest)
+                   (conj missing digest))
+
+            :else
+            (recur (into queue (child-digests state digest))
+                   (inc index)
+                   (conj seen digest)
+                   (conj visited digest)
+                   missing)))))))
+
+(defn closure-report
+  [state roots]
+  (cond
+    (not (vector? roots))
+    (model/fail state "tahto.store/closure-roots-invalid")
+
+    (not (every? model/canonical-digest? roots))
+    (model/fail state "tahto.store/digest-invalid")
+
+    :else
+    (model/ok state (closure-report-value state roots))))
+
+(defn root-digests
+  [root]
+  (cond
+    (vector? (get root :digests))
+    (get root :digests)
+
+    (model/canonical-digest? (get root :digest))
+    [(get root :digest)]
+
+    :else []))
+
+(defn explicit-root-digests
+  [state application namespace]
+  (reduce
+   (fn [output entry]
+     (let [root (val entry)]
+       (if (and (= application (get root :application))
+                (= namespace (get root :namespace)))
+         (into output (root-digests root))
+         output)))
+   []
+   (get state :roots)))
+
+(defn namespace-root-digests
+  [state application namespace]
+  (vec
+   (distinct
+    (concat
+     (sort (model/namespace-references state application namespace))
+     (sort (explicit-root-digests state application namespace))))))
+
+(defn namespace-closure-report-value
+  [state application namespace]
+  (closure-report-value
+   state
+   (namespace-root-digests state application namespace)))
+
+(defn namespace-accounting
+  [state application namespace]
+  (let [report (namespace-closure-report-value state application namespace)]
+    (cond
+      (get report :overflow)
+      (model/fail state "tahto.store/namespace-closure-overflow"
+                  {:application application :namespace namespace})
+
+      (not (get report :complete))
+      (model/fail state "tahto.store/namespace-closure-incomplete"
+                  {:application application
+                   :namespace namespace
+                   :missing (get report :missing)})
+
+      :else
+      (model/ok
+       state
+       {:digests (get report :visited)
+        :bytes (reduce (fn [total digest]
+                         (+ total (model/object-size state digest)))
+                       0
+                       (get report :visited))}))))
+
+(defn namespace-reachable?
+  [state application namespace digest]
+  (let [report (namespace-closure-report-value state application namespace)]
+    (and (get report :complete)
+         (not (get report :overflow))
+         (has? (into #{} (get report :visited)) digest))))
+
+(defn request-manifest
+  [state request]
+  (let [application (get request :application)
+        namespace (get request :namespace)
+        digest (get request :digest)
+        object (model/stored-object state digest)]
+    (cond
+      (not (model/identifier? application))
+      (model/fail state "tahto.store/application-invalid")
+
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.store/namespace-invalid")
+
+      (not (model/canonical-digest? digest))
+      (model/fail state "tahto.store/digest-invalid" {:digest digest})
+
+      (not (namespace-reachable? state application namespace digest))
+      (model/fail state "tahto.store/object-not-authorized" {:digest digest})
+
+      (nil? object)
+      (model/fail state "tahto.store/manifest-object-missing" {:digest digest})
+
+      :else
+      (model/ok
+       state
+       {:digest digest}
+       [(host/effect
+         "manifest/verify"
+         {:digest digest
+          :max-chunks (get (limits state) :max-manifest-chunks)})]))))
+
+(defn chunk-valid?
+  [state application namespace chunk]
+  (and
+   (host/manifest-chunk? chunk)
+   (let [digest (get chunk :digest)
+         size (get chunk :size)
+         object (model/stored-object state digest)]
+     (and (model/canonical-digest? digest)
+          (model/positive-integer? size)
+          (not (nil? object))
+          (= size (get object :size))
+          (namespace-reachable? state application namespace digest)))))
+
+(defn manifest-cycle?
+  [state digest chunks]
+  (reduce
+   (fn [found chunk]
+     (if found
+       true
+       (let [child (get chunk :digest)
+             report (closure-report-value state [child])]
+         (or (get report :overflow)
+             (not (get report :complete))
+             (has? (into #{} (get report :visited)) digest)))))
+   false
+   chunks))
+
+(defn accept-manifest
+  [state context host-result]
+  (let [application (get context :application)
+        namespace (get context :namespace)
+        digest (get context :digest)
+        total-size (get host-result :total-size)
+        chunks (get host-result :chunks)
+        manifest-object (model/stored-object state digest)
+        maximum (get (limits state) :max-manifest-chunks)
+        existing (model/value-or (get state :manifests) digest nil)]
+    (cond
+      (not (model/identifier? application))
+      (model/fail state "tahto.store/application-invalid")
+
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.store/namespace-invalid")
+
+      (not (host/verified-manifest? host-result digest maximum))
+      (model/fail state "tahto.store/manifest-verification-failed"
+                  {:digest digest})
+
+      (nil? manifest-object)
+      (model/fail state "tahto.store/manifest-object-missing"
+                  {:digest digest})
+
+      (not (namespace-reachable? state application namespace digest))
+      (model/fail state "tahto.store/object-not-authorized" {:digest digest})
+
+      (> (count chunks) maximum)
+      (model/fail state "tahto.store/manifest-too-wide"
+                  {:chunks (count chunks)})
+
+      (not (every? (fn [chunk]
+                     (chunk-valid? state application namespace chunk))
+                   chunks))
+      (model/fail state "tahto.store/manifest-child-invalid")
+
+      (not (= total-size
+              (reduce (fn [total chunk]
+                        (+ total (get chunk :size)))
+                      0
+                      chunks)))
+      (model/fail state "tahto.store/manifest-size-mismatch"
+                  {:size total-size})
+
+      (reduce (fn [found chunk]
+                (or found (= digest (get chunk :digest))))
+              false
+              chunks)
+      (model/fail state "tahto.store/manifest-self-reference"
+                  {:digest digest})
+
+      (manifest-cycle? state digest chunks)
+      (model/fail state "tahto.store/manifest-cycle"
+                  {:digest digest})
+
+      (not (nil? existing))
+      (let [existing-object (model/stored-object state digest)]
+        (if (and (= existing chunks)
+                 (= total-size (get existing-object :logical-size))
+                 (= model/chunk-manifest-protocol
+                    (get existing-object :manifest-protocol)))
+          (model/ok state
+                    {:digest digest
+                     :protocol model/chunk-manifest-protocol
+                     :total-size total-size
+                     :chunks chunks})
+          (model/fail state "tahto.store/manifest-conflict"
+                      {:digest digest})))
+
+      :else
+      (let [objects (assoc (get state :objects)
+                           digest
+                           (assoc manifest-object
+                                  :manifest-protocol model/chunk-manifest-protocol
+                                  :logical-size total-size))
+            manifests (assoc (get state :manifests) digest chunks)
+            edges (assoc (get state :edges)
+                         digest
+                         (vec (map (fn [chunk]
+                                    (get chunk :digest))
+                                  chunks)))
+            next-state (assoc
+                        (assoc
+                         (assoc state :objects objects)
+                         :manifests manifests)
+                        :edges edges)]
+        (model/ok next-state
+                  {:digest digest
+                   :protocol model/chunk-manifest-protocol
+                   :total-size total-size
+                   :chunks chunks})))))
+
+(defn request-root-digests
+  [request]
+  (cond
+    (vector? (get request :digests))
+    (get request :digests)
+
+    (model/canonical-digest? (get request :digest))
+    [(get request :digest)]
+
+    :else nil))
+
+(defn pin-root
+  [state request]
+  (let [root-id (get request :root-id)
+        kind (get request :kind)
+        application (get request :application)
+        namespace (get request :namespace)
+        digests (request-root-digests request)]
+    (cond
+      (not (model/identifier? root-id))
+      (model/fail state "tahto.store/root-id-invalid")
+
+      (has? (get state :roots) root-id)
+      (model/fail state "tahto.store/root-exists" {:root-id root-id})
+
+      (not (has? model/root-kinds kind))
+      (model/fail state "tahto.store/root-kind-invalid" {:kind kind})
+
+      (not (model/identifier? application))
+      (model/fail state "tahto.store/application-invalid")
+
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.store/namespace-invalid")
+
+      (not (vector? digests))
+      (model/fail state "tahto.store/root-digests-invalid")
+
+      (or (empty? digests)
+          (not (every? model/canonical-digest? digests)))
+      (model/fail state "tahto.store/digest-invalid")
+
+      (not (every? (fn [digest]
+                     (namespace-reachable? state application namespace digest))
+                   digests))
+      (model/fail state "tahto.store/object-not-authorized")
+
+      :else
+      (let [roots (vec (distinct digests))
+            report (closure-report-value state roots)]
+        (if (or (get report :overflow)
+                (not (get report :complete)))
+          (model/fail state "tahto.store/root-closure-incomplete"
+                      {:roots roots
+                       :missing (get report :missing)
+                       :overflow (get report :overflow)})
+          (let [root {:id root-id
+                      :kind kind
+                      :application application
+                      :namespace namespace
+                      :digests roots}
+                next-state (assoc state :roots
+                                  (assoc (get state :roots) root-id root))]
+            (model/ok next-state root)))))))
+
+(defn unpin-root
+  [state request]
+  (let [root-id (get request :root-id)
+        application (get request :application)
+        namespace (get request :namespace)
+        root (model/value-or (get state :roots) root-id nil)]
+    (cond
+      (nil? root)
+      (model/fail state "tahto.store/root-missing" {:root-id root-id})
+
+      (not (= application (get root :application)))
+      (model/fail state "tahto.store/root-not-authorized" {:root-id root-id})
+
+      (not (= namespace (get root :namespace)))
+      (model/fail state "tahto.store/root-not-authorized" {:root-id root-id})
+
+      :else
+      (model/ok
+       (assoc state :roots (dissoc (get state :roots) root-id))
+       root-id))))
+
+(defn gc-root-digests
+  [state]
+  (let [reference-roots
+        (reduce (fn [digests entry]
+                  (into digests (val entry)))
+                []
+                (get state :references))
+        explicit-roots
+        (reduce (fn [digests entry]
+                  (into digests (root-digests (val entry))))
+                []
+                (get state :roots))]
+    (vec (sort (distinct (into reference-roots explicit-roots))))))
+
+(defn gc-plan
+  [state]
+  (let [roots (gc-root-digests state)
+        report (closure-report-value state roots)
+        reachable (into #{} (get report :visited))
+        candidates
+        (reduce (fn [output entry]
+                  (let [digest (key entry)]
+                    (if (has? reachable digest)
+                      output
+                      (conj output digest))))
+                []
+                (get state :objects))]
+    (cond
+      (get report :overflow)
+      (model/fail state "tahto.store/gc-closure-overflow")
+
+      (not (get report :complete))
+      (model/fail state "tahto.store/gc-closure-incomplete"
+                  {:missing (get report :missing)})
+
+      :else
+      (model/ok state
+                {:apply false
+                 :roots roots
+                 :reachable (vec (sort reachable))
+                 :candidates (vec (sort candidates))}))))

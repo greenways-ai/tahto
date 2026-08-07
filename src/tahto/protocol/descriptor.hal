@@ -25,16 +25,19 @@
    {"conflicts" "preserve-divergent-heads"
     "remoteExecutableCatalogue" false
     "hostedSpaceRequired" false
-    "largeObjectBodies" "native-host-handles"}
+    "largeObjectBodies" "native-host-handles"
+    "signedRecords" "verified-provider-proofs"}
    "routes"
    {"discovery" "/.well-known/tahto"
     "health" "/tahto/v1/health"
     "status" "/tahto/v1/status"}
    "components"
-   {"controlPlane" "bootstrap"
+   {"controlPlane" "ready"
     "objects" "hara-kernel-ready:TAHTO-3"
-    "objectDataPlane" "deferred:HOPLITE-1"
-    "headsAndBackups" "deferred:TAHTO-4"
+    "objectDataPlaneContract" "ready:HOPLITE-1"
+    "objectDataPlaneRuntime" "not-wired"
+    "commitsHeadsBackups" "hara-kernel-ready:TAHTO-4"
+    "signatureProvider" "deferred:TAHTO-5"
     "deviceSync" "deferred:TAHTO-5"
     "servicesAndJobs" "deferred:TAHTO-6"}
    "compatibility"
@@ -45,20 +48,23 @@
   {"protocol" health-protocol
    "status" "ready"
    "runtime" "hoplite"
-   "scope" "control-plane-and-vault-kernel"})
+   "scope" "control-plane-and-state-kernels"})
 
 (defn status
   []
   {"protocol" status-protocol
    "node"
    {"status" "ready"
-    "phase" "object-vault-kernel"
+    "phase" "signed-history-kernel"
     "mode" "local"}
    "fabric"
    {"objectVault" "hara-kernel-ready"
+    "commitStore" "hara-kernel-ready"
+    "headStore" "hara-kernel-ready"
+    "backupStore" "hara-kernel-ready"
     "objectDataPlane" "not-wired"
-    "commitStore" "not-installed"
-    "backupStore" "not-installed"
+    "metadataPersistence" "not-wired"
+    "signatureProvider" "not-wired"
     "deviceSync" "not-installed"
     "workerRegistry" "not-installed"}
    "hostedSpace"
