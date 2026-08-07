@@ -1,64 +1,96 @@
-# Tahto object vault profile, version 1
+# Tahto object vault: Hara kernel profile
 
-TAHTO-3 defines the application-neutral state machine for immutable object custody. The authoritative implementation is Hara under `tahto.store.*`.
-
-The kernel deliberately does not implement a byte store in Python, JavaScript, or application code. It emits a small closed set of effects to a trusted Tahto host adapter. Hara owns validation, quota accounting, upload transitions, object metadata, manifest semantics, closure verification, root pins, and garbage-collection planning. The host owns bounded byte movement and durable filesystem operations.
-
-## Authority boundary
+TAHTO-3 defines the application-neutral object-vault semantics in Hara. Python,
+JavaScript, SQLite, a filesystem layout and a particular HTTP server are not the
+source of truth for vault behaviour.
 
 ```text
-Greenways OS
-  issues exact application / namespace grants
-
-Hara object-vault kernel
-  validates identifiers and state transitions
-  accounts quotas and references
-  defines manifests, closures, roots and GC plans
-
-Hoplite / native Tahto host
-  owns request-body handles
-  streams, seeks, hashes, fsyncs and atomically installs bytes
-
-Applications
-  define payload meaning and merge semantics
+Hoplite request / node service
+          │ exact OS grant + opaque ResourceHandle
+          ▼
+Hara tahto.store.* reducer
+  lifecycle · quota · graph · roots · GC planning
+          │ closed effects, never caller paths
+          ▼
+Trusted native object host
+  stream · seek · hash · fsync · atomic install · range read
 ```
 
-Large object bodies never become ordinary Hara collections. A Hoplite request body is represented to Hara by an opaque bounded handle plus an exact byte count. The host adapter may consume that handle only for the effect that named it.
+Hara owns every application-neutral transition. The native host owns byte
+movement that must not become an ordinary Hara collection. The host is an
+installed node capability, never remotely supplied application code.
 
-## Hara state
+## Source and serialization boundary
 
-The in-memory conformance representation is:
+The implementation uses the source and serialized vocabulary released by the
+completed Hara namespace and metadata cuts:
+
+```text
+tahto.store.model
+tahto.store.host
+tahto.store.vault
+tahto.store.graph
+```
+
+Hara compiler metadata is canonical under `:lang/*`; Tahto owns its versioned
+`tahto.*` protocol identifiers without a forwarding language namespace. Tahto's
+wire discriminators remain strings such as `tahto.object/1`.
+
+## Immutable reducer state
+
+The kernel state is a small immutable value:
 
 ```clojure
 {:protocol "tahto.object-vault-state/1"
  :limits {...}
  :objects {digest object-record}
  :uploads {upload-id upload-record}
- :quotas {[application namespace] bytes}
- :references {[application namespace] #{digest ...}}
- :manifests {digest manifest-record}
- :roots {[kind root-id] root-record}}
+ :quotas {namespace-key bytes}
+ :references {namespace-key #{digest ...}}
+ :manifests {manifest-digest [{:digest child :size bytes} ...]}
+ :edges {object-digest [child-digest ...]}
+ :roots {root-id {:kind kind
+                  :application application
+                  :namespace namespace
+                  :digests [digest ...]}}}
 ```
 
-A durable metadata provider may store the same logical records in SQLite, D1, PostgreSQL or another transactional store. Storage engines do not change the state-transition laws.
+The global object records align with the TAHTO-2 `tahto.object/1` envelope:
 
-## Native host effects
-
-Hara may emit only:
-
-```text
-upload/open
-upload/append
-upload/verify-install
-object/read-range
-object/delete
+```clojure
+{:protocol "tahto.object/1"
+ :digest "sha256:..."
+ :size 1234
+ :encoding "identity"}
 ```
 
-Every effect uses `tahto.store.host-effect/1`. The host returns versioned result records. The request vocabulary intentionally has no path, destination, upstream or URL field.
+TAHTO-3 supports identity objects only. Sealed object encoding remains the
+separate opaque-replica profile. Media type is an upload/application hint rather
+than global custody identity, so two applications cannot overwrite one another's
+semantic metadata when the same bytes deduplicate.
 
-A future HOPLITE-1 adapter must enforce the same closed operation set and derive every temporary or final path from node configuration, server-generated upload identity, and a validated digest.
+Application, namespace, upload and root identifiers use the TAHTO-2 core
+identifier grammar and are bounded to 128 ASCII characters. The private
+`namespace-key` is a length-prefixed string used only because portable Hara maps
+require scalar keys; it is not a wire identifier or a filesystem path.
 
-## Digest identity
+Object bodies, temporary upload files, file descriptors, sockets and database
+handles are never stored in this value.
+
+Every successful command returns:
+
+```clojure
+{:ok true
+ :state tentative-next-state
+ :value result
+ :effects [closed-host-effect ...]}
+```
+
+The executor commits `:state` only after all effects succeed. This preserves the
+atomic boundary between Hara metadata and native byte operations without
+pretending the portable whole-file API is a streaming vault.
+
+## Canonical object identity
 
 An object identifier is exactly:
 
@@ -66,172 +98,190 @@ An object identifier is exactly:
 sha256:<64 lower-case hexadecimal characters>
 ```
 
-Upper-case digests, partial digests, paths and URLs are invalid. A host may derive a local layout such as:
+Hara rejects upper-case, shortened, path-like and otherwise non-canonical values
+before emitting a host effect. A native provider derives internal locations from
+the validated digest. Devices and applications cannot select a destination path,
+upstream URL or proxy target.
+
+Zero-byte immutable objects are valid. Upload chunks are non-empty and bounded.
+
+## Upload lifecycle
 
 ```text
-objects/sha256/ab/cdef...
+begin-upload
+  reserve the full declared size against one application namespace
+  emit upload/open
+
+append-upload
+  require the exact committed offset
+  enforce the chunk and object bounds
+  emit upload/append with a non-zero ResourceHandle
+
+request-install
+  require offset == declared size
+  keep the quota reservation while verification runs
+  emit upload/verify-install
+
+accept-install
+  accept only a matching trusted digest/size/install proof
+  install global object metadata and the namespace reference
+  release the upload reservation
+
+abort-upload
+  release the reservation
+  emit idempotent native temporary-upload cleanup
 ```
 
-but that layout is never request vocabulary.
+A stale append receives no host effect. Large bytes are never embedded in an
+effect or result.
 
-## Resumable uploads
+## Closed host effect boundary
 
-An upload record contains:
+Version 1 recognizes only:
 
 ```text
-server-generated upload ID
-application
-namespace
-digest
-declared size
-media type
-committed offset
-status: open | verifying
+upload/open
+upload/append
+upload/abort
+upload/verify-install
+manifest/verify
+object/read-range
 ```
 
-Opening an upload reserves the complete declared size against the application namespace. Verification remains an active reservation; changing the state from `open` to `verifying` must not temporarily release quota.
+Effects use `tahto.store.host-effect/1`; trusted results use
+`tahto.store.host-result/1`. Records containing `path`, `destination`,
+`upstream`, `url`, raw `bytes`, a raw `body`, `command` or `executable` are
+invalid.
 
-Append requires:
+The install provider must hash the complete stream, verify exact size, install
+immutably and durably, then return the matching proof. Hara accepts no weaker
+result as authoritative installation.
 
-- an exact current offset;
-- a positive bounded chunk length;
-- an opaque body handle;
-- no overflow beyond the declared size.
+## Logical quotas and global deduplication
 
-Hara advances the logical offset and emits `upload/append`. The native adapter must serialize or compare-and-swap the corresponding physical append. If the effect fails, its transaction boundary must not commit the Hara transition.
+Bytes may be globally deduplicated by digest. Authority and accounting remain
+logical per `(application, namespace)` reference set.
 
-A zero-byte object moves directly from `open` to `verifying`.
+- One namespace reference consumes the full object size once.
+- The same digest in another namespace consumes that namespace's quota.
+- An active or verifying upload reserves its complete declared size.
+- Objects retained only through an application/head/backup/retention root remain
+  part of that namespace's unique closure usage.
+- A quota cannot be reduced below retained closure use plus reservations.
+- Physical presence owned by another namespace or application is neither
+  disclosed nor granted without a new verified upload or a later explicit
+  sharing protocol.
 
-## Verified installation
+Existence negotiation is scoped to one exact `(application, namespace)` closure,
+bounds the requested digest count before traversal, and returns two stable,
+order-preserving sets:
 
-Once the committed offset equals the declared size, Hara emits:
+```text
+present      stored and reachable from this namespace's references or roots
+missing      absent, incomplete or not disclosed to this namespace
+```
+
+A digest held elsewhere is reported as `missing`; there is no generic attach
+shortcut. Another namespace or application gains authority only by completing
+its own verified upload or through a later explicit OS-authorized sharing
+protocol. The native host may deduplicate verified bytes without exposing that
+physical fact to the caller.
+
+## Range reads and authority
+
+A range is a non-empty half-open interval `[start, end)`. Hara checks canonical
+identity, namespace reachability, object size and configured range bounds before
+emitting `object/read-range`. An unreferenced digest receives the same
+not-authorized result whether or not another application physically stores it.
+
+Namespace reachability is the closure of direct object references plus explicit
+application/head/backup/retention roots belonging to that same namespace. A
+caller that merely guesses another application's digest receives no read plan.
+
+## Verified chunk manifests
+
+The first manifest profile is `tahto.chunk-manifest/1`. A manifest is itself an
+immutable object. Its ordered chunk vector may repeat a digest at multiple
+ordinals; occurrences are not collapsed.
+
+The native host reads the bounded manifest object and returns a trusted proof of
+the exact decoded fields. Hara then checks:
+
+- protocol and manifest digest;
+- maximum fan-out;
+- canonical child identities;
+- child presence and exact size;
+- namespace reachability of every child; and
+- equality between logical size and the sum of chunk sizes.
+
+Only then does Hara register closure edges. This prevents an application from
+attaching an arbitrary graph to unrelated immutable bytes.
+
+## Closures, roots and garbage collection
+
+Closure traversal is iterative, bounded and cycle-safe. It preserves first-seen
+order, collapses repeated identities for traversal, and reports every encountered
+missing object.
+
+A root can be pinned only when its complete closure is present and reachable by
+the named application namespace. Safe GC roots are the union of all namespace
+references and explicit roots.
+
+`gc-plan` is deterministic and dry-run only:
 
 ```clojure
-{:protocol "tahto.store.host-effect/1"
- :operation "upload/verify-install"
- :request {:upload-id ...
-           :digest ...
-           :size ...}}
+{:apply false
+ :roots [...]
+ :reachable [...]
+ :candidates [...]}
 ```
 
-The host must:
+It refuses to plan deletion when a rooted closure is incomplete or exceeds the
+configured traversal bound. Applying a plan belongs to a later authorized node
+operation with generation revalidation.
 
-1. hash the complete temporary byte stream;
-2. compare the exact digest and length;
-3. reject any incompatible existing object at the derived digest path;
-4. atomically install verified bytes;
-5. synchronize the required durability boundary; and
-6. return a matching `tahto.store.host-result/1` proof.
+## Persistence boundary
 
-Hara accepts installation only when upload ID, digest, size, verification and installation all match. It then creates immutable object metadata, creates the logical namespace reference, and removes the upload reservation.
-
-## Existence negotiation
-
-`missing` validates every requested digest, removes duplicate requests while preserving first-seen order, and returns only objects absent from the vault metadata.
-
-The host must not report a digest as installed merely because an unverified file exists at a derived path.
-
-## Quotas and deduplication
-
-Object bytes may be globally deduplicated. Quotas are logical per `(application, namespace)` reference set.
-
-- The same digest counts once within one namespace.
-- The same digest consumes quota again when attached to another namespace.
-- Active uploads reserve their declared sizes.
-- A quota cannot be reduced below committed use plus active reservations.
-- Existing global bytes do not grant application access; an explicit namespace attachment is required.
-
-## Range reads
-
-Hara validates a half-open range:
-
-```text
-[start, end-exclusive)
-```
-
-The range must be inside verified object length and no larger than the configured range limit. Hara emits an `object/read-range` plan. The native/Hoplite adapter owns seekable streaming and HTTP `Range` response details.
-
-## Chunk manifests
-
-The first large-object graph profile is:
-
-```text
-tahto.chunk-manifest/1
-```
-
-Its Hara representation contains:
-
-```clojure
-{:protocol "tahto.chunk-manifest/1"
- :digest manifest-object-digest
- :total-size total-logical-bytes
- :media-type "application/octet-stream"
- :chunks [{:digest chunk-digest :size chunk-size} ...]}
-```
-
-The manifest is itself an immutable object. Every child object must exist and have the declared size before registration. Chunk order is normative, and the same digest may appear at multiple ordinals. Repeated chunks must not be collapsed from the sequence.
-
-Manifest fan-out is bounded.
-
-## Closure verification
-
-Closure traversal is iterative and bounded. It follows registered chunk manifests, reports the complete visited object set and missing digest set, and does not interpret application payloads.
-
-A head, backup or retention boundary may be pinned only when its complete closure is present.
-
-## Roots and garbage collection
-
-The safe root set is the union of:
-
-- application/namespace object references; and
-- explicit `application`, `head`, `backup`, or `retention` roots.
-
-Hara computes the complete reachable closure and emits one `object/delete` effect for each unreachable digest. A GC plan is dry-run data; a native adapter must not apply it without an explicit operator or policy decision and a metadata transaction that rechecks the roots.
-
-## Transaction rule
-
-The functions in `tahto.store.vault` are deterministic transition planners. A production node applies one command as:
-
-```text
-read metadata snapshot
-  -> evaluate Hara transition
-  -> execute bounded host effects
-  -> validate host results
-  -> commit new metadata state atomically
-```
-
-A host-effect failure aborts the corresponding metadata transition. This keeps Hara authoritative without materializing large bytes in the language runtime.
+The current portable Hara file API is whole-value oriented, and the portable
+SQLite provider is transient. Neither is used to disguise a production data
+plane. Hoplite's merged bounded-streaming ABI defines opaque request and response
+handles, byte limits and range planning. The remaining runtime/Nginx binding and
+durable metadata provider must implement those contracts without changing these
+Hara reducer laws.
 
 ## Security laws
 
-- no request-selected filesystem destination or upstream;
-- no unbounded object body in a Hara value;
-- exact offsets precede append effects;
-- complete SHA-256 and size verification precede installation metadata;
-- verification retains quota reservation;
-- global deduplication cannot grant access or bypass logical quota;
-- manifest fan-out and closure traversal are bounded;
-- incomplete roots cannot be pinned;
-- GC begins as an explicit dry-run plan; and
-- application-specific fields and merge rules never enter Tahto core.
+- Greenways OS grants exact application and namespace authority.
+- Upload IDs and resource handles are server generated and never interpreted as
+  paths.
+- Complete native digest verification precedes authoritative installation.
+- Exact offsets reject stale and concurrent append attempts.
+- Object, chunk, range, manifest and closure sizes are bounded.
+- Verifying uploads continue to reserve quota, and pinned closures remain
+  accounted after direct references detach.
+- Global deduplication cannot bypass namespace accounting, application
+  confidentiality or read authority.
+- Manifest edges are proved against the stored immutable manifest bytes.
+- Manifests preserve order and repeated chunk occurrences.
+- Roots require a complete, authorized closure.
+- Garbage collection is dry-run first and fails closed.
+- Tahto core contains no application-specific fields or merge rules.
 
 ## Conformance
 
-`test/tahto/store/vault_test.hal` proves:
+The Hara suites prove:
 
 - canonical digest rejection;
-- forbidden host request fields;
-- active upload quota reservation;
-- zero-byte verification;
-- stale offset rejection before host I/O;
-- opaque request-body handles;
-- exact verified-install proof matching;
-- immutable object/reference creation;
-- order-preserving missing-object negotiation;
-- bounded half-open range planning;
-- ordered repeated chunks;
-- complete and incomplete closure reporting;
-- pinned-root GC safety; and
-- namespace quota accounting under global deduplication.
+- absence of paths, raw bodies and executable instructions in effects;
+- numeric opaque Hoplite handles;
+- zero-byte objects and bounded resumable offsets;
+- quota reservation and cross-namespace deduplication accounting;
+- matching host proof before installation;
+- bounded, order-preserving existence negotiation;
+- namespace-isolated range and manifest plans without global-presence leakage;
+- byte-anchored manifests with repeated chunks;
+- bounded unique closure traversal; and
+- root-safe dry-run garbage collection.
 
-The existing Python programs under `conformance/` remain dependency-free repository, route and JSON-Schema guards. They are not the Tahto object-vault runtime.
+Python remains only in the pre-existing schema and architecture guards. It is
+not a Tahto runtime, storage library or test implementation for this slice.
