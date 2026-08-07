@@ -1,0 +1,105 @@
+(ns tahto.store.vault-hardening-test
+  (:use code.test)
+  (:require [tahto.store.model :as model]
+            [tahto.store.vault :as vault]))
+
+(def digest-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def digest-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def digest-c
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+
+(defn object-record
+  [digest size]
+  {:protocol model/object-protocol
+   :digest digest
+   :size size
+   :media-type "application/octet-stream"
+   :verified true})
+
+(defn manifest-state
+  []
+  (-> (model/empty-state
+       {:max-object-bytes 1024
+        :max-upload-chunk-bytes 256
+        :max-range-bytes 256
+        :max-manifest-chunks 8
+        :max-closure-objects 64
+        :default-namespace-quota-bytes 1024})
+      (assoc-in [:objects digest-a] (object-record digest-a 4))
+      (assoc-in [:objects digest-b] (object-record digest-b 3))
+      (assoc-in [:objects digest-c] (object-record digest-c 7))))
+
+(def results
+  [(fact "upload metadata rejects empty media types"
+     (let [result (vault/begin-upload (model/empty-state)
+                                      "upload-1"
+                                      "app.example"
+                                      "profile.primary"
+                                      digest-a
+                                      4
+                                      "")]
+       (get-in result [:error :code]))
+     => "tahto.store/media-type-invalid")
+
+   (fact "append validates offsets before stale-offset comparison"
+     (let [opened (vault/begin-upload (model/empty-state)
+                                      "upload-1"
+                                      "app.example"
+                                      "profile.primary"
+                                      digest-a
+                                      4
+                                      "application/octet-stream")
+           result (vault/append-upload (get opened :state)
+                                       "upload-1"
+                                       -1
+                                       1
+                                       "body:1")]
+       [(get-in result [:error :code])
+        (count (get result :effects))])
+     => ["tahto.store/upload-offset-invalid" 0])
+
+   (fact "manifest registration is idempotent but cannot change one digest's meaning"
+     (let [state (manifest-state)
+           first-result (vault/register-manifest state
+                                                 digest-c
+                                                 7
+                                                 "application/octet-stream"
+                                                 [{:digest digest-a :size 4}
+                                                  {:digest digest-b :size 3}])
+           same-result (vault/register-manifest (get first-result :state)
+                                                digest-c
+                                                7
+                                                "application/octet-stream"
+                                                [{:digest digest-a :size 4}
+                                                 {:digest digest-b :size 3}])
+           conflict-result (vault/register-manifest (get first-result :state)
+                                                    digest-c
+                                                    8
+                                                    "application/octet-stream"
+                                                    [{:digest digest-a :size 4}
+                                                     {:digest digest-a :size 4}])]
+       [(get same-result :ok)
+        (= (get first-result :state) (get same-result :state))
+        (get-in conflict-result [:error :code])])
+     => [true true "tahto.store/manifest-conflict"])
+
+   (fact "a manifest cannot directly include its own object digest"
+     (let [result (vault/register-manifest (manifest-state)
+                                           digest-c
+                                           7
+                                           "application/octet-stream"
+                                           [{:digest digest-c :size 7}])]
+       (get-in result [:error :code]))
+     => "tahto.store/manifest-self-reference")
+
+   (fact "root removal validates the closed root-kind vocabulary"
+     (let [result (vault/unpin-root (model/empty-state)
+                                    "remote-code"
+                                    "root-1")]
+       (get-in result [:error :code]))
+     => "tahto.store/root-kind-invalid")
+   ])
+
+(pr-str (run '[tahto.store.vault-hardening-test]))
