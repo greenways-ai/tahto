@@ -1,0 +1,253 @@
+(ns tahto.store.vault-test
+  (:use code.test)
+  (:require [tahto.store.host :as host]
+            [tahto.store.model :as model]
+            [tahto.store.vault :as vault]))
+
+(def digest-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def digest-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def digest-c
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def digest-d
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def digest-empty
+  "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+
+(defn test-state
+  ([]
+   (test-state 1024))
+  ([quota]
+   (model/empty-state
+    {:max-object-bytes 1024
+     :max-upload-chunk-bytes 256
+     :max-range-bytes 256
+     :max-manifest-chunks 8
+     :max-closure-objects 64
+     :default-namespace-quota-bytes quota})))
+
+(defn open-upload
+  [state upload-id digest size]
+  (vault/begin-upload state
+                      upload-id
+                      "app.example"
+                      "profile.primary"
+                      digest
+                      size
+                      "application/octet-stream"))
+
+(defn install-proof
+  [upload]
+  {:protocol host/result-protocol
+   :operation "upload/verify-install"
+   :upload-id (get upload :id)
+   :digest (get upload :digest)
+   :size (get upload :size)
+   :verified true
+   :installed true})
+
+(defn upload-object
+  [state upload-id digest size]
+  (let [opened (open-upload state upload-id digest size)
+        appended (vault/append-upload (get opened :state)
+                                      upload-id
+                                      0
+                                      size
+                                      (str "body:" upload-id))
+        verifying (vault/request-install (get appended :state) upload-id)
+        upload (get verifying :value)]
+    (vault/accept-install (get verifying :state)
+                          upload-id
+                          (install-proof upload))))
+
+(def results
+  [(fact "canonical digests require lower-case SHA-256 identifiers"
+     [(model/canonical-digest? digest-a)
+      (model/canonical-digest?
+       "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+      (model/canonical-digest? "../../objects")]
+     => [true false false])
+
+   (fact "host effects reject caller-selected paths and upstreams"
+     [(host/effect?
+       (host/effect "upload/open"
+                    {:upload-id "upload-1"
+                     :digest digest-a
+                     :size 10}))
+      (host/effect?
+       (host/effect "upload/open"
+                    {:upload-id "upload-1"
+                     :path "/tmp/chosen-by-request"}))
+      (host/effect?
+       (host/effect "object/read-range"
+                    {:digest digest-a
+                     :upstream "https://example.invalid"}))]
+     => [true false false])
+
+   (fact "opening an upload reserves its declared namespace quota"
+     (let [opened (open-upload (test-state 10) "upload-1" digest-a 10)
+           denied (open-upload (get opened :state) "upload-2" digest-b 1)]
+       [(get opened :ok)
+        (model/namespace-reservations (get opened :state)
+                                      "app.example"
+                                      "profile.primary")
+        (get-in denied [:error :code])])
+     => [true 10 "tahto.store/quota-exceeded"])
+
+   (fact "zero-byte objects can verify without an append"
+     (let [state (model/empty-state {:max-object-bytes 8
+                                     :default-namespace-quota-bytes 8})
+           opened (vault/begin-upload state
+                                      "upload-empty"
+                                      "app.example"
+                                      "profile.primary"
+                                      digest-empty
+                                      0
+                                      "application/octet-stream")
+           verifying (vault/request-install (get opened :state) "upload-empty")]
+       [(get-in opened [:value :offset])
+        (get-in verifying [:value :status])])
+     => [0 "verifying"])
+
+   (fact "append rejects stale offsets before issuing a host write"
+     (let [opened (open-upload (test-state) "upload-1" digest-a 10)
+           first-write (vault/append-upload (get opened :state)
+                                            "upload-1" 0 4 "body:1")
+           stale-write (vault/append-upload (get first-write :state)
+                                            "upload-1" 0 2 "body:2")]
+       [(get-in first-write [:value :offset])
+        (count (get first-write :effects))
+        (get-in stale-write [:error :code])
+        (count (get stale-write :effects))])
+     => [4 1 "tahto.store/upload-offset-stale" 0])
+
+   (fact "Hara passes opaque body handles rather than object bytes"
+     (let [opened (open-upload (test-state) "upload-1" digest-a 10)
+           appended (vault/append-upload (get opened :state)
+                                         "upload-1" 0 4 "hoplite-body:42")]
+       (get-in appended [:effects 0 :request])
+       => {:upload-id "upload-1"
+           :offset 0
+           :length 4
+           :body-handle "hoplite-body:42"}))
+
+   (fact "installation requires the exact native verification proof"
+     (let [opened (open-upload (test-state) "upload-1" digest-a 4)
+           appended (vault/append-upload (get opened :state)
+                                         "upload-1" 0 4 "body:1")
+           verifying (vault/request-install (get appended :state) "upload-1")
+           upload (get verifying :value)
+           bad-proof (assoc (install-proof upload) :digest digest-b)
+           rejected (vault/accept-install (get verifying :state)
+                                          "upload-1"
+                                          bad-proof)]
+       [(get-in verifying [:value :status])
+        (get-in rejected [:error :code])
+        (nil? (model/object (get rejected :state) digest-a))])
+     => ["verifying" "tahto.store/install-proof-invalid" true])
+
+   (fact "verified installation creates immutable metadata and a logical reference"
+     (let [installed (upload-object (test-state) "upload-1" digest-a 4)
+           state (get installed :state)]
+       [(get-in installed [:value :protocol])
+        (get-in installed [:value :verified])
+        (model/namespace-usage state "app.example" "profile.primary")
+        (contains? (model/namespace-references state
+                                               "app.example"
+                                               "profile.primary")
+                   digest-a)
+        (nil? (model/upload state "upload-1"))])
+     => ["tahto.object/1" true 4 true true])
+
+   (fact "missing-object negotiation preserves order and removes duplicates"
+     (let [installed (upload-object (test-state) "upload-1" digest-a 4)
+           result (vault/missing (get installed :state)
+                                 [digest-b digest-a digest-b digest-c])]
+       (get result :value)
+       => [digest-b digest-c]))
+
+   (fact "range planning is half-open and bounded"
+     (let [installed (upload-object (test-state) "upload-1" digest-a 100)
+           allowed (vault/plan-range (get installed :state) digest-a 10 20)
+           denied (vault/plan-range (get installed :state) digest-a 10 300)]
+       [(get allowed :value)
+        (get-in denied [:error :code])])
+     => [{:digest digest-a
+          :start 10
+          :end-exclusive 20
+          :length 10}
+         "tahto.store/range-outside-object"])
+
+   (fact "chunk manifests preserve repeated digests and ordinal order"
+     (let [a (upload-object (test-state) "upload-a" digest-a 4)
+           b (upload-object (get a :state) "upload-b" digest-b 3)
+           manifest-object (upload-object (get b :state) "upload-m" digest-c 7)
+           chunks [{:digest digest-a :size 4}
+                   {:digest digest-b :size 3}
+                   {:digest digest-a :size 4}]
+           manifest (vault/register-manifest (get manifest-object :state)
+                                             digest-c
+                                             11
+                                             "application/octet-stream"
+                                             chunks)]
+       (get-in manifest [:value :chunks])
+       => chunks))
+
+   (fact "closure verification follows manifests and reports missing objects"
+     (let [a (upload-object (test-state) "upload-a" digest-a 4)
+           b (upload-object (get a :state) "upload-b" digest-b 3)
+           manifest-object (upload-object (get b :state) "upload-m" digest-c 7)
+           manifest (vault/register-manifest (get manifest-object :state)
+                                             digest-c
+                                             7
+                                             "application/octet-stream"
+                                             [{:digest digest-a :size 4}
+                                              {:digest digest-b :size 3}])
+           complete (vault/closure-report (get manifest :state) [digest-c])
+           incomplete (vault/closure-report (get manifest :state) [digest-d])]
+       [(get-in complete [:value :complete])
+        (set (get-in complete [:value :objects]))
+        (get-in incomplete [:value :complete])
+        (get-in incomplete [:value :missing])])
+     => [true #{digest-a digest-b digest-c} false [digest-d]])
+
+   (fact "pinned roots and namespace references protect complete closures from GC"
+     (let [a (upload-object (test-state) "upload-a" digest-a 4)
+           b (upload-object (get a :state) "upload-b" digest-b 3)
+           orphan (upload-object (get b :state) "upload-d" digest-d 2)
+           detached (vault/detach-object (get orphan :state)
+                                         "app.example"
+                                         "profile.primary"
+                                         digest-d)
+           pinned (vault/pin-root (get detached :state)
+                                  "backup"
+                                  "backup-1"
+                                  [digest-a digest-b])
+           plan (vault/gc-plan (get pinned :state))]
+       [(get-in plan [:value :dry-run])
+        (get-in plan [:value :candidates])
+        (mapv (fn [effect]
+                (get-in effect [:request :digest]))
+              (get plan :effects))])
+     => [true [digest-d] [digest-d]])
+
+   (fact "global digest deduplication cannot bypass namespace quotas"
+     (let [installed (upload-object (test-state 10) "upload-a" digest-a 10)
+           attached (vault/attach-object (get installed :state)
+                                         "app.example"
+                                         "profile.secondary"
+                                         digest-a)
+           reduced-quota (vault/set-quota (get attached :state)
+                                          "app.example"
+                                          "profile.secondary"
+                                          9)]
+       [(get attached :ok)
+        (model/namespace-usage (get attached :state)
+                               "app.example"
+                               "profile.secondary")
+        (get-in reduced-quota [:error :code])])
+     => [true 10 "tahto.store/quota-below-usage"])
+   ])
+
+(pr-str (run '[tahto.store.vault-test]))

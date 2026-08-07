@@ -3,7 +3,7 @@
  :project/id greenways.tahto/node
  :project/version "0.1.0-dev"
  :project/source-paths ["src"]
- :project/test-paths []
+ :project/test-paths ["test"]
  :project/extension-paths []
  :project/capabilities #{:host/nginx}
  :project/main tahto.node.app

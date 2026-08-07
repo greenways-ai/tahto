@@ -1,0 +1,57 @@
+(ns tahto.store.host
+  (:require [std.foundation :refer :all]))
+
+(def effect-protocol "tahto.store.host-effect/1")
+(def result-protocol "tahto.store.host-result/1")
+
+(def operations
+  #{"upload/open"
+    "upload/append"
+    "upload/verify-install"
+    "object/read-range"
+    "object/delete"})
+
+(def forbidden-request-fields
+  #{:path :destination :upstream :url})
+
+(defn operation?
+  [value]
+  (contains? operations value))
+
+(defn request-safe?
+  [request]
+  (and (map? request)
+       (not
+        (reduce
+         (fn [found field]
+           (or found (contains? request field)))
+         false
+         forbidden-request-fields))))
+
+(defn effect
+  [operation request]
+  {:protocol effect-protocol
+   :operation operation
+   :request request})
+
+(defn effect?
+  [value]
+  (and (map? value)
+       (= effect-protocol (get value :protocol))
+       (operation? (get value :operation))
+       (request-safe? (get value :request))))
+
+(defn result?
+  [value operation]
+  (and (map? value)
+       (= result-protocol (get value :protocol))
+       (= operation (get value :operation))))
+
+(defn verified-install?
+  [result upload]
+  (and (result? result "upload/verify-install")
+       (= true (get result :verified))
+       (= true (get result :installed))
+       (= (get upload :id) (get result :upload-id))
+       (= (get upload :digest) (get result :digest))
+       (= (get upload :size) (get result :size))))
