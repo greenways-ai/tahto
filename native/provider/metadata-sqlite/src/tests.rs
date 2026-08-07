@@ -132,14 +132,7 @@ fn stale_revision_conflicts_do_not_mutate_state() {
     store.compare_and_swap(first).unwrap();
     let installed = store.load().unwrap().unwrap();
 
-    let stale = plan(
-        0,
-        'd',
-        'e',
-        'f',
-        frame("stale"),
-        "2026-08-07T14:02:00Z",
-    );
+    let stale = plan(0, 'd', 'e', 'f', frame("stale"), "2026-08-07T14:02:00Z");
     let error = store.compare_and_swap(stale.clone()).unwrap_err();
     assert_eq!(error.code, "metadata-revision-conflict");
     assert_eq!(store.load().unwrap(), Some(installed));
@@ -167,14 +160,7 @@ fn exact_plan_retry_is_replayed_even_after_later_commits() {
     let mut store = SqliteMetadataStore::open(&database.path).unwrap();
     store.initialize(snapshot(0, frame("initial"))).unwrap();
     let first = plan(0, 'a', 'b', 'c', frame("first"), "2026-08-07T14:04:00Z");
-    let second = plan(
-        1,
-        'd',
-        'e',
-        'f',
-        frame("second"),
-        "2026-08-07T14:05:00Z",
-    );
+    let second = plan(1, 'd', 'e', 'f', frame("second"), "2026-08-07T14:05:00Z");
     store.compare_and_swap(first.clone()).unwrap();
     store.compare_and_swap(second).unwrap();
 
@@ -331,5 +317,8 @@ fn unsupported_schema_versions_are_rejected_without_rewriting_them() {
 fn receipt_lookup_rejects_noncanonical_identity() {
     let database = TemporaryDatabase::new("receipt-input");
     let store = SqliteMetadataStore::open(&database.path).unwrap();
-    assert_eq!(store.receipt("not-a-digest").unwrap_err().code, "digest-invalid");
+    assert_eq!(
+        store.receipt("not-a-digest").unwrap_err().code,
+        "digest-invalid"
+    );
 }
