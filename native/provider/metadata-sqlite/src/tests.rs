@@ -128,14 +128,7 @@ fn stale_revision_conflicts_do_not_mutate_state() {
     let database = TemporaryDatabase::new("stale");
     let mut store = SqliteMetadataStore::open(&database.path).unwrap();
     store.initialize(snapshot(0, frame("initial"))).unwrap();
-    let first = plan(
-        0,
-        'a',
-        'b',
-        'c',
-        frame("first"),
-        "2026-08-07T14:01:00Z",
-    );
+    let first = plan(0, 'a', 'b', 'c', frame("first"), "2026-08-07T14:01:00Z");
     store.compare_and_swap(first).unwrap();
     let installed = store.load().unwrap().unwrap();
 
@@ -159,14 +152,7 @@ fn state_digest_mismatch_rolls_back_before_the_transaction() {
     let mut store = SqliteMetadataStore::open(&database.path).unwrap();
     let initial = snapshot(0, frame("initial"));
     store.initialize(initial.clone()).unwrap();
-    let mut plan = plan(
-        0,
-        'a',
-        'b',
-        'c',
-        frame("correct"),
-        "2026-08-07T14:03:00Z",
-    );
+    let mut plan = plan(0, 'a', 'b', 'c', frame("correct"), "2026-08-07T14:03:00Z");
     plan.state = frame("tampered");
 
     let error = store.compare_and_swap(plan.clone()).unwrap_err();
@@ -180,14 +166,7 @@ fn exact_plan_retry_is_replayed_even_after_later_commits() {
     let database = TemporaryDatabase::new("replay");
     let mut store = SqliteMetadataStore::open(&database.path).unwrap();
     store.initialize(snapshot(0, frame("initial"))).unwrap();
-    let first = plan(
-        0,
-        'a',
-        'b',
-        'c',
-        frame("first"),
-        "2026-08-07T14:04:00Z",
-    );
+    let first = plan(0, 'a', 'b', 'c', frame("first"), "2026-08-07T14:04:00Z");
     let second = plan(
         1,
         'd',
@@ -210,14 +189,7 @@ fn one_plan_digest_cannot_be_rebound() {
     let database = TemporaryDatabase::new("plan-conflict");
     let mut store = SqliteMetadataStore::open(&database.path).unwrap();
     store.initialize(snapshot(0, frame("initial"))).unwrap();
-    let first = plan(
-        0,
-        'a',
-        'b',
-        'c',
-        frame("first"),
-        "2026-08-07T14:06:00Z",
-    );
+    let first = plan(0, 'a', 'b', 'c', frame("first"), "2026-08-07T14:06:00Z");
     store.compare_and_swap(first.clone()).unwrap();
 
     let conflicting_state = frame("conflicting");
@@ -242,14 +214,7 @@ fn public_plan_fields_are_revalidated_at_the_provider_boundary() {
     let database = TemporaryDatabase::new("revalidate");
     let mut store = SqliteMetadataStore::open(&database.path).unwrap();
     store.initialize(snapshot(0, frame("initial"))).unwrap();
-    let mut invalid = plan(
-        0,
-        'a',
-        'b',
-        'c',
-        frame("invalid"),
-        "2026-08-07T14:08:00Z",
-    );
+    let mut invalid = plan(0, 'a', 'b', 'c', frame("invalid"), "2026-08-07T14:08:00Z");
     invalid.revision = 2;
 
     let error = store.compare_and_swap(invalid).unwrap_err();
@@ -353,7 +318,7 @@ fn unsupported_schema_versions_are_rejected_without_rewriting_them() {
         connection.pragma_update(None, "user_version", 7).unwrap();
     }
 
-    let error = SqliteMetadataStore::open(&database.path).unwrap_err();
+    let error = SqliteMetadataStore::open(&database.path).err().unwrap();
     assert_eq!(error.code, "sqlite-schema-version");
     let connection = Connection::open(&database.path).unwrap();
     let version: i64 = connection
@@ -366,8 +331,5 @@ fn unsupported_schema_versions_are_rejected_without_rewriting_them() {
 fn receipt_lookup_rejects_noncanonical_identity() {
     let database = TemporaryDatabase::new("receipt-input");
     let store = SqliteMetadataStore::open(&database.path).unwrap();
-    assert_eq!(
-        store.receipt("not-a-digest").unwrap_err().code,
-        "digest-invalid"
-    );
+    assert_eq!(store.receipt("not-a-digest").unwrap_err().code, "digest-invalid");
 }
