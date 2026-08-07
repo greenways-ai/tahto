@@ -29,6 +29,7 @@
     "signedRecords" "verified-provider-proofs"
     "devicePairing" "identity-only-no-admin-grant"
     "requestReplay" "durable-nonce-and-idempotency-evidence"
+    "metadataTransactions" "deterministic-plan-provider-cas"
     "serviceDescriptors" "inert-digest-pinned-metadata"
     "workerExecution" "application-owned-installed-provider"}
    "routes"
@@ -44,8 +45,10 @@
     "deviceIdentityReplay" "hara-kernel-ready:TAHTO-5"
     "deviceSyncPlanning" "hara-kernel-ready:TAHTO-5"
     "servicesAndJobs" "hara-kernel-ready:TAHTO-6"
+    "atomicMetadataPlan" "hara-kernel-ready:TAHTO-7"
     "serviceExecutor" "not-wired"
     "signatureProvider" "not-wired"
+    "resultVerificationProvider" "not-wired"
     "durableMetadataProvider" "not-wired"}
    "compatibility"
    {"greenwaysBeacon" "one-release-route-alias"}})
@@ -62,7 +65,7 @@
   {"protocol" status-protocol
    "node"
    {"status" "ready"
-    "phase" "services-jobs-kernel"
+    "phase" "atomic-metadata-plan"
     "mode" "local"}
    "fabric"
    {"objectVault" "hara-kernel-ready"
@@ -74,9 +77,11 @@
     "syncPlanning" "hara-kernel-ready"
     "serviceRegistry" "hara-kernel-ready"
     "jobLedger" "hara-kernel-ready"
+    "atomicMetadataPlan" "hara-kernel-ready"
     "objectDataPlane" "not-wired"
     "metadataPersistence" "not-wired"
     "signatureProvider" "not-wired"
+    "resultVerificationProvider" "not-wired"
     "workerExecution" "not-wired"}
    "hostedSpace"
    {"required" false
