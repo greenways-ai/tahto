@@ -147,18 +147,21 @@
 
 (defn service?
   [value]
-  (and
-   (validate/exact-record? value service-fields #{})
-   (= service-protocol (get value :protocol))
-   (model/identifier? (get value :id))
-   (model/identifier? (get value :application))
-   (model/identifier? (get value :service-protocol))
-   (bounded-text? (get value :worker-version) 255)
-   (model/canonical-digest? (get value :artifact-digest))
-   (identifier-vector? (get value :collections))
-   (operation-vector? (get value :operations))
-   (resource-policy? (get value :resources))
-   (has? service-statuses (get value :status))))
+  (if
+   (and
+    (validate/exact-record? value service-fields #{})
+    (= service-protocol (get value :protocol))
+    (model/identifier? (get value :id))
+    (model/identifier? (get value :application))
+    (model/identifier? (get value :service-protocol))
+    (bounded-text? (get value :worker-version) 255)
+    (model/canonical-digest? (get value :artifact-digest))
+    (identifier-vector? (get value :collections))
+    (operation-vector? (get value :operations))
+    (resource-policy? (get value :resources))
+    (has? service-statuses (get value :status)))
+   true
+   false))
 
 (def job-error-fields
   #{:code :message})
