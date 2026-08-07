@@ -45,6 +45,10 @@ jobs:
           test -f test/tahto/service/state_test.hal
           test -f protocol/services.md
           test -f protocol/transactions.md
+          test -f native/Cargo.toml
+          test -f native/README.md
+          test -f native/abi/metadata-store/Cargo.toml
+          test -f native/abi/metadata-store/src/lib.rs
 
   hara-state:
     runs-on: ubuntu-latest
@@ -70,3 +74,17 @@ jobs:
         run: cargo build --locked --release --manifest-path .hara/core/rust/Cargo.toml --bin hara
       - name: Run the Hara state conformance suites
         run: .hara/core/rust/target/release/hara --project "$GITHUB_WORKSPACE" test
+
+  native-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the reviewed Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Check native contract formatting
+        run: cargo fmt --manifest-path native/Cargo.toml --all -- --check
+      - name: Test the dependency-free metadata-store ABI
+        run: cargo test --manifest-path native/Cargo.toml --workspace
