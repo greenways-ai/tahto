@@ -1,4 +1,5 @@
-(ns tahto.protocol.records)
+(ns tahto.protocol.records
+  (:require [std.foundation :refer :all]))
 
 (def signature-profile "tahto-signature/1")
 (def canonical-json-profile "tahto-canonical-json/1")
@@ -47,20 +48,20 @@
 
 (defn core-protocol?
   [value]
-  (contains? core-protocols value))
+  (has? core-protocols value))
 
 (defn collection-mode?
   [value]
-  (contains? collection-modes value))
+  (has? collection-modes value))
 
 (defn collection-authority?
   [value]
-  (contains? collection-authorities value))
+  (has? collection-authorities value))
 
 (defn service-operation?
   [value]
-  (contains? service-operations value))
+  (has? service-operations value))
 
 (defn job-state?
   [value]
-  (contains? job-states value))
+  (has? job-states value))
