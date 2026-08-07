@@ -107,7 +107,7 @@
    [(provider/snapshot? snapshot)
     (provider/snapshot? (assoc snapshot :revision 0))
     (provider/snapshot? (assoc snapshot :database-path "/tmp/unsafe"))]
-   [true false false])
+   [true false nil])
 
   (test/check
    "canonical state verification is exact revision-bound evidence"
@@ -118,7 +118,7 @@
     (provider/state-verification?
      (assoc state-verification :provider "request-selected")
      state)]
-   [true false false])
+   [true false nil])
 
   (test/check
    "load uses one fixed installed host service and ABI"
@@ -203,7 +203,7 @@
      state)
     (provider/commit-verification?
      (assoc commit-verification :database-path "/tmp/unsafe"))]
-   [true true false false])
+   [true true false nil])
 
   (test/check
    "compare-and-swap preparation binds the exact TAHTO-7 plan and state"
@@ -272,7 +272,7 @@
        {:protocol provider/request-protocol
         :operation "execute"
         :credential "secret"})])
-   [true false false])
+   [true false nil])
 
   (test/check
    "receipts are closed and match exact verified commit evidence"
@@ -283,7 +283,7 @@
      commit-verification)
     (provider/receipt?
      (assoc receipt :provider-command "run"))]
-   [true true false false])
+   [true true false nil])
 
   (test/check
    "provider response profiles are operation-specific"

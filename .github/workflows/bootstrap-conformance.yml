@@ -99,16 +99,7 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt
-      - name: Materialize the complete native dependency graph
-        run: cargo generate-lockfile --manifest-path native/Cargo.toml
       - name: Check native contract and provider formatting
         run: cargo fmt --manifest-path native/Cargo.toml --all -- --check
       - name: Test the metadata-store ABI and SQLite provider
-        run: cargo test --quiet --manifest-path native/Cargo.toml --workspace
-      - name: Capture the generated native dependency lock
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tahto-native-cargo-lock
-          path: native/Cargo.lock
-          if-no-files-found: error
+        run: cargo test --locked --quiet --manifest-path native/Cargo.toml --workspace
