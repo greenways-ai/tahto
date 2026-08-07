@@ -54,6 +54,10 @@ jobs:
           test -f native/abi/metadata-store/README.md
           test -f native/abi/metadata-store/src/lib.rs
           test -f native/abi/metadata-store/tests/contract.rs
+          test -f native/provider/metadata-sqlite/Cargo.toml
+          test -f native/provider/metadata-sqlite/README.md
+          test -f native/provider/metadata-sqlite/src/lib.rs
+          test -f native/provider/metadata-sqlite/src/tests.rs
 
   hara-state:
     runs-on: ubuntu-latest
@@ -89,7 +93,9 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt
-      - name: Check native contract formatting
+      - name: Check native contract and provider formatting
         run: cargo fmt --manifest-path native/Cargo.toml --all -- --check
-      - name: Test the dependency-free metadata-store ABI
-        run: cargo test --locked --manifest-path native/Cargo.toml --workspace
+      - name: Test the metadata-store ABI and SQLite provider
+        run: cargo test --manifest-path native/Cargo.toml --workspace
+      - name: Print the generated native dependency lock
+        run: cat native/Cargo.lock
