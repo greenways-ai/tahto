@@ -53,6 +53,7 @@ jobs:
           test -f native/abi/metadata-store/Cargo.toml
           test -f native/abi/metadata-store/README.md
           test -f native/abi/metadata-store/src/lib.rs
+          test -f native/abi/metadata-store/tests/contract.rs
 
   hara-state:
     runs-on: ubuntu-latest
