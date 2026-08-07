@@ -1,0 +1,355 @@
+(ns tahto.store.transaction-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.store.transaction :as transaction]
+            [tahto.sync.device :as device]))
+
+(def application "app.example")
+(def namespace "profile.primary")
+(def collection "archive")
+(def device-id "device.a")
+(def public-key "ed25519:device-a-public-key")
+
+(def approval-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def request-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def result-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def error-digest
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn fixture-state
+  []
+  (result-state
+   (device/enrol-device
+    (model/empty-state)
+    {:protocol validate/device-enrolment-protocol
+     :authorized true
+     :node "node.home"
+     :approval-digest approval-digest
+     :device
+     {:protocol model/device-protocol
+      :id device-id
+      :node "node.home"
+      :public-key public-key
+      :status "enrolled"
+      :enrolled-at "2026-08-07T00:00:00Z"}})))
+
+(defn proof
+  [nonce idempotency-key]
+  {:protocol validate/request-verification-protocol
+   :verified true
+   :device device-id
+   :public-key public-key
+   :operation "service.register"
+   :application application
+   :namespace namespace
+   :collection collection
+   :request-digest request-digest
+   :nonce nonce
+   :idempotency-key idempotency-key
+   :timestamp "2026-08-07T00:01:00Z"})
+
+(defn result-proof
+  [outcome digest]
+  {:protocol transaction/result-verification-protocol
+   :verified true
+   :operation "service.register"
+   :request-digest request-digest
+   :outcome outcome
+   :result-digest digest
+   :completed-at "2026-08-07T00:02:00Z"})
+
+(defn mark-transition
+  [state context input]
+  (model/ok
+   (assoc state :transaction-marker input)
+   {:marker input
+    :application (get context :application)}))
+
+(defn rejected-transition
+  [state context input]
+  (model/fail
+   (assoc state :partial-mutation input)
+   "test/rejected"
+   {:application (get context :application)}))
+
+(defn effectful-transition
+  [state context input]
+  (model/ok
+   (assoc state :transaction-marker input)
+   {:marker input}
+   [{:op "native/write"
+     :application (get context :application)}]))
+
+(defn invalid-transition
+  [state context input]
+  {:ok true
+   :state (assoc state :transaction-marker input)
+   :value {:marker input}})
+
+(defn should-not-run
+  [state context input]
+  (model/fail
+   (assoc state :unexpected-replay input)
+   "test/should-not-run"
+   {:application (get context :application)}))
+
+(test/print-results
+ [(test/check
+   "a successful transition commits nonce mutation completion and revision together"
+   (let [request (proof "nonce-success-0001" "idempotency-success-0001")
+         result
+         (transaction/execute
+          (fixture-state)
+          0
+          request
+          mark-transition
+          "stored"
+          (result-proof "ok" result-digest))
+         state (result-state result)]
+     [(get result :ok)
+      (get state :transaction-marker)
+      (transaction/current-revision state)
+      (not (nil? (model/request-nonce
+                  state device-id "nonce-success-0001")))
+      (get (model/idempotency-record
+            state device-id "idempotency-success-0001")
+           :status)
+      (get-in result [:value :result-digest])
+      (get-in result [:value :context :result-digest])])
+   [true "stored" 1 true "completed" result-digest result-digest])
+
+  (test/check
+   "a completed idempotent replay records the new nonce without rerunning the transition"
+   (let [first-request
+         (proof "nonce-replay-0001" "idempotency-replay-0001")
+         first
+         (transaction/execute
+          (fixture-state)
+          0
+          first-request
+          mark-transition
+          "first"
+          (result-proof "ok" result-digest))
+         second-request
+         (proof "nonce-replay-0002" "idempotency-replay-0001")
+         replay
+         (transaction/execute
+          (result-state first)
+          1
+          second-request
+          should-not-run
+          "second"
+          nil)
+         state (result-state replay)]
+     [(get replay :ok)
+      (get-in replay [:value :replayed])
+      (get-in replay [:value :result-digest])
+      (get state :transaction-marker)
+      (get state :unexpected-replay)
+      (transaction/current-revision state)
+      (not (nil? (model/request-nonce
+                  state device-id "nonce-replay-0002")))])
+   [true true result-digest "first" nil 2 true])
+
+  (test/check
+   "a stale expected revision fails before consuming a nonce"
+   (let [state (fixture-state)
+         result
+         (transaction/execute
+          state
+          1
+          (proof "nonce-stale-0001" "idempotency-stale-0001")
+          mark-transition
+          "stale"
+          (result-proof "ok" result-digest))]
+     [(get result :ok)
+      (error-code result)
+      (= state (result-state result))
+      (model/request-nonce
+       (result-state result) device-id "nonce-stale-0001")])
+   [false "tahto.transaction/revision-conflict" true nil])
+
+  (test/check
+   "an invalid result proof rolls back authorization and domain mutation"
+   (let [state (fixture-state)
+         result
+         (transaction/execute
+          state
+          0
+          (proof "nonce-invalid-proof-0001"
+                 "idempotency-invalid-proof-0001")
+          mark-transition
+          "must-rollback"
+          nil)]
+     [(get result :ok)
+      (error-code result)
+      (= state (result-state result))
+      (get (result-state result) :transaction-marker)
+      (model/request-nonce
+       (result-state result) device-id "nonce-invalid-proof-0001")])
+   [false "tahto.transaction/result-verification-invalid" true nil nil])
+
+  (test/check
+   "a mismatched result proof cannot complete another operation"
+   (let [state (fixture-state)
+         verification
+         (assoc (result-proof "ok" result-digest)
+                :operation "job.enqueue")
+         result
+         (transaction/execute
+          state
+          0
+          (proof "nonce-mismatch-0001" "idempotency-mismatch-0001")
+          mark-transition
+          "must-rollback"
+          verification)]
+     [(get result :ok)
+      (error-code result)
+      (= state (result-state result))])
+   [false "tahto.transaction/result-verification-mismatch" true])
+
+  (test/check
+   "effectful transitions cannot masquerade as one atomic metadata commit"
+   (let [state (fixture-state)
+         result
+         (transaction/execute
+          state
+          0
+          (proof "nonce-effects-0001" "idempotency-effects-0001")
+          effectful-transition
+          "must-rollback"
+          (result-proof "ok" result-digest))]
+     [(get result :ok)
+      (error-code result)
+      (= state (result-state result))
+      (get (result-state result) :transaction-marker)])
+   [false "tahto.transaction/effects-not-atomic" true nil])
+
+  (test/check
+   "a rejected domain transition is completed idempotently without partial mutation"
+   (let [request
+         (proof "nonce-error-0001" "idempotency-error-0001")
+         result
+         (transaction/execute
+          (fixture-state)
+          0
+          request
+          rejected-transition
+          "partial"
+          (result-proof "error" error-digest))
+         state (result-state result)]
+     [(get result :ok)
+      (error-code result)
+      (get state :partial-mutation)
+      (transaction/current-revision state)
+      (get (model/idempotency-record
+            state device-id "idempotency-error-0001")
+           :status)
+      (get-in result [:transaction :result :code])
+      (get-in result [:transaction :result-digest])])
+   [false "test/rejected" nil 1 "completed" "test/rejected" error-digest])
+
+  (test/check
+   "the same signed nonce is still rejected after an atomic completion"
+   (let [request
+         (proof "nonce-repeat-0001" "idempotency-repeat-0001")
+         first
+         (transaction/execute
+          (fixture-state)
+          0
+          request
+          mark-transition
+          "first"
+          (result-proof "ok" result-digest))
+         repeated
+         (transaction/execute
+          (result-state first)
+          1
+          request
+          should-not-run
+          "second"
+          nil)]
+     [(get repeated :ok)
+      (error-code repeated)
+      (= (result-state first) (result-state repeated))
+      (transaction/current-revision (result-state repeated))])
+   [false "tahto.device/nonce-replayed" true 1])
+
+  (test/check
+   "a legacy pending idempotency record can finish through the atomic coordinator"
+   (let [state (fixture-state)
+         first-request
+         (proof "nonce-pending-0001" "idempotency-pending-0001")
+         authorized (device/authorize-request state first-request)
+         pending-state (result-state authorized)
+         retry-request
+         (proof "nonce-pending-0002" "idempotency-pending-0001")
+         result
+         (transaction/execute
+          pending-state
+          0
+          retry-request
+          mark-transition
+          "recovered"
+          (result-proof "ok" result-digest))
+         next-state (result-state result)]
+     [(get result :ok)
+      (get next-state :transaction-marker)
+      (get (model/idempotency-record
+            next-state device-id "idempotency-pending-0001")
+           :status)
+      (transaction/current-revision next-state)
+      (not (nil? (model/request-nonce
+                  next-state device-id "nonce-pending-0001")))
+      (not (nil? (model/request-nonce
+                  next-state device-id "nonce-pending-0002")))])
+   [true "recovered" "completed" 1 true true])
+
+  (test/check
+   "unknown result-proof fields fail closed and roll back"
+   (let [state (fixture-state)
+         verification
+         (assoc (result-proof "ok" result-digest)
+                :unreviewed-authority true)
+         result
+         (transaction/execute
+          state
+          0
+          (proof "nonce-closed-proof-0001"
+                 "idempotency-closed-proof-0001")
+          mark-transition
+          "must-rollback"
+          verification)]
+     [(get result :ok)
+      (error-code result)
+      (= state (result-state result))])
+   [false "tahto.transaction/result-verification-invalid" true])
+
+  (test/check
+   "invalid transition result shapes never reach the provider commit plan"
+   (let [state (fixture-state)
+         result
+         (transaction/execute
+          state
+          0
+          (proof "nonce-shape-0001" "idempotency-shape-0001")
+          invalid-transition
+          "must-rollback"
+          (result-proof "ok" result-digest))]
+     [(get result :ok)
+      (error-code result)
+      (= state (result-state result))])
+   [false "tahto.transaction/transition-result-invalid" true])])
