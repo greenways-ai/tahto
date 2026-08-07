@@ -3,6 +3,7 @@
             [std.foundation.string :as string]))
 
 (def state-protocol "tahto.object-vault-state/1")
+(def device-protocol "tahto.device/1")
 (def object-protocol "tahto.object/1")
 (def chunk-manifest-protocol "tahto.chunk-manifest/1")
 (def commit-protocol "tahto.commit/1")
@@ -24,6 +25,12 @@
    :max-history-commits 100000
    :max-head-commits 256
    :max-backup-roots 4096
+   :max-devices 4096
+   :max-device-nonces 65536
+   :max-device-idempotency-keys 65536
+   :max-sync-heads 256
+   :max-sync-known-digests 4096
+   :max-sync-missing-digests 4096
    :default-namespace-quota-bytes 1073741824})
 
 (def hex-digits
@@ -125,6 +132,25 @@
   (str (collection-key application namespace collection)
        ":" kind ":" name))
 
+(defn public-key-key
+  [public-key]
+  (str (count public-key) ":" public-key))
+
+(defn nonce-key
+  [device nonce]
+  (str (count device) ":" device
+       ":" (count nonce) ":" nonce))
+
+(defn idempotency-key
+  [device key]
+  (str (count device) ":" device
+       ":" (count key) ":" key))
+
+(defn sync-key
+  [device application namespace collection]
+  (str (sequence-key application namespace collection device)
+       ":sync"))
+
 (defn set-remove
   [values target]
   (reduce (fn [output value]
@@ -149,6 +175,12 @@
     :limits (merge-with (fn [_ replacement] replacement)
                         default-limits
                         limits)
+    :devices {}
+    :device-public-keys {}
+    :request-nonces {}
+    :idempotency {}
+    :sync-cursors {}
+    :sync-offers {}
     :objects {}
     :uploads {}
     :quotas {}
@@ -163,6 +195,49 @@
     :head-digests {}
     :backups {}
     :receipts {}}))
+
+(defn device-record
+  [state device]
+  (value-or (get state :devices) device nil))
+
+(defn public-key-device
+  [state public-key]
+  (value-or
+   (get state :device-public-keys)
+   (public-key-key public-key)
+   nil))
+
+(defn device-enrolled?
+  [state device]
+  (= "enrolled" (get (device-record state device) :status)))
+
+(defn request-nonce
+  [state device nonce]
+  (value-or
+   (get state :request-nonces)
+   (nonce-key device nonce)
+   nil))
+
+(defn idempotency-record
+  [state device key]
+  (value-or
+   (get state :idempotency)
+   (idempotency-key device key)
+   nil))
+
+(defn sync-cursor
+  [state device application namespace collection]
+  (value-or
+   (get state :sync-cursors)
+   (sync-key device application namespace collection)
+   0))
+
+(defn sync-offer
+  [state device application namespace collection]
+  (value-or
+   (get state :sync-offers)
+   (sync-key device application namespace collection)
+   nil))
 
 (defn commit-record
   [state root]
