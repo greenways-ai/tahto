@@ -1,0 +1,387 @@
+(ns tahto.store.history-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.graph :as graph]
+            [tahto.store.history :as history]
+            [tahto.store.model :as model]))
+
+(def app "app.example")
+(def namespace "profile.primary")
+(def collection "memory")
+
+(def object-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def object-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def commit-a
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def commit-b
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def commit-c
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def backup-a
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def receipt-a
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def head-a
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def head-b
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+(def missing
+  "sha256:9999999999999999999999999999999999999999999999999999999999999999")
+
+(def signature
+  {:profile "tahto-signature/1"
+   :algorithm "ed25519"
+   :key-id "key.device-a"
+   :value "0123456789abcdef"})
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn add-object
+  [state application ns digest size]
+  (let [object (model/object-record digest size)
+        key (model/namespace-key application ns)
+        references (model/namespace-references state application ns)]
+    (assoc
+     (assoc state
+            :objects
+            (assoc (get state :objects) digest object))
+     :references
+     (assoc (get state :references)
+            key
+            (conj references digest)))))
+
+(defn fixture-state
+  ([]
+   (fixture-state {}))
+  ([limits]
+   (let [initial (model/empty-state limits)
+         with-object-a (add-object initial app namespace object-a 4)
+         with-object-b (add-object with-object-a app namespace object-b 7)
+         with-commit-a (add-object with-object-b app namespace commit-a 512)
+         with-commit-b (add-object with-commit-a app namespace commit-b 512)
+         with-commit-c (add-object with-commit-b app namespace commit-c 512)
+         with-backup (add-object with-commit-c app namespace backup-a 512)]
+     (add-object with-backup app namespace receipt-a 256))))
+
+(defn proof
+  [record-protocol digest record]
+  {:protocol validate/verification-protocol
+   :record-protocol record-protocol
+   :verified true
+   :canonical-digest digest
+   :key-id (get-in record [:signature :key-id])
+   :record record})
+
+(defn commit-record
+  [root device sequence parents objects]
+  {:protocol model/commit-protocol
+   :root root
+   :application app
+   :namespace namespace
+   :collection collection
+   :schema "app.memory"
+   :schema-version 1
+   :device device
+   :parents parents
+   :objects objects
+   :tombstones []
+   :sequence sequence
+   :timestamp "2026-08-07T00:00:00Z"
+   :signature (assoc signature :key-id (str "key." device))})
+
+(defn accept-commit
+  [state record]
+  (history/accept-commit
+   state
+   {:application app :namespace namespace}
+   (proof model/commit-protocol (get record :root) record)))
+
+(defn state-with-three-commits
+  []
+  (let [first-record (commit-record commit-a "device-a" 1 [] [object-a])
+        first (accept-commit (fixture-state) first-record)
+        second-record (commit-record commit-b "device-b" 1 [commit-a] [object-b])
+        second (accept-commit (result-state first) second-record)
+        third-record (commit-record commit-c "device-c" 1 [commit-a] [object-a])
+        third (accept-commit (result-state second) third-record)]
+    (result-state third)))
+
+(defn head-record
+  [commits expected timestamp]
+  {:protocol model/head-protocol
+   :application app
+   :namespace namespace
+   :collection collection
+   :kind "main"
+   :name "primary"
+   :commits commits
+   :expected expected
+   :updated-at timestamp
+   :signature signature})
+
+(defn backup-record
+  [roots retention]
+  {:protocol model/backup-protocol
+   :id backup-a
+   :application app
+   :roots roots
+   :created-by "device-a"
+   :created-at "2026-08-07T00:03:00Z"
+   :retention-label retention
+   :signature signature})
+
+(test/print-results
+ [(test/check
+   "stored commit verification is content-addressed and bounded"
+   (let [requested
+         (history/request-commit
+          (fixture-state)
+          {:application app :namespace namespace :digest commit-a})]
+     [(get requested :ok)
+      (get-in requested [:value :protocol])
+      (get-in requested [:value :record-protocol])
+      (get-in requested [:value :canonical-digest])
+      (get-in requested [:value :max-bytes])
+      (validate/verification-request? (get requested :value))])
+   [true
+    validate/verification-request-protocol
+    model/commit-protocol
+    commit-a
+    1048576
+    true])
+
+  (test/check
+   "record verification does not disclose objects outside one namespace"
+   (let [state (add-object (model/empty-state) app "other" commit-a 32)
+         result
+         (history/request-commit
+          state
+          {:application app :namespace namespace :digest commit-a})]
+     [(get result :ok) (error-code result)])
+   [false "tahto.history/record-not-authorized"])
+
+  (test/check
+   "accepted commits bind signature proof, device sequence and object edges"
+   (let [record (commit-record commit-a "device-a" 1 [] [object-a])
+         result (accept-commit (fixture-state) record)
+         state (result-state result)]
+     [(get result :ok)
+      (get (model/commit-record state commit-a) :root)
+      (model/device-sequence state app namespace collection "device-a")
+      (model/sequence-root state app namespace collection "device-a" 1)
+      (graph/child-digests state commit-a)
+      (get-in result [:value :receipt-action])])
+   [true commit-a 1 commit-a [object-a] "commit.accept"])
+
+  (test/check
+   "commit acceptance is idempotent for one immutable root"
+   (let [record (commit-record commit-a "device-a" 1 [] [object-a])
+         first (accept-commit (fixture-state) record)
+         second (accept-commit (result-state first) record)]
+     [(get second :ok)
+      (= (result-state first) (result-state second))])
+   [true true])
+
+  (test/check
+   "device sequence gaps and reuse are rejected before state mutation"
+   (let [first-record (commit-record commit-a "device-a" 1 [] [object-a])
+         first (accept-commit (fixture-state) first-record)
+         gap-record (commit-record commit-b "device-a" 3 [commit-a] [object-b])
+         gap (accept-commit (result-state first) gap-record)]
+     [(get gap :ok)
+      (error-code gap)
+      (nil? (model/commit-record (result-state gap) commit-b))])
+   [false "tahto.history/sequence-not-next" true])
+
+  (test/check
+   "commit parents must already exist in the same collection coordinate"
+   (let [record (commit-record commit-b "device-b" 1 [missing] [object-b])
+         result (accept-commit (fixture-state) record)]
+     [(get result :ok) (error-code result)])
+   [false "tahto.history/commit-parent-invalid"])
+
+  (test/check
+   "commit payload roots require namespace authority and complete closure"
+   (let [initial (model/empty-state)
+         with-commit (add-object initial app namespace commit-a 512)
+         state (add-object with-commit app "other" object-a 4)
+         record (commit-record commit-a "device-a" 1 [] [object-a])
+         result (accept-commit state record)]
+     [(get result :ok) (error-code result)])
+   [false "tahto.history/object-not-authorized"])
+
+  (test/check
+   "a verification key must match the signed record key"
+   (let [record (commit-record commit-a "device-a" 1 [] [object-a])
+         invalid
+         {:protocol validate/verification-protocol
+          :record-protocol model/commit-protocol
+          :verified true
+          :canonical-digest commit-a
+          :key-id "key.someone-else"
+          :record record}
+         result
+         (history/accept-commit
+          (fixture-state)
+          {:application app :namespace namespace}
+          invalid)]
+     [(get result :ok) (error-code result)])
+   [false "tahto.history/verification-invalid"])
+
+  (test/check
+   "head updates use signed compare-and-swap"
+   (let [state (state-with-three-commits)
+         first-record (head-record [commit-b] [] "2026-08-07T00:01:00Z")
+         first
+         (history/update-head
+          state
+          (proof model/head-protocol head-a first-record))
+         second-record
+         (head-record [commit-b commit-c]
+                      [commit-b]
+                      "2026-08-07T00:02:00Z")
+         second
+         (history/update-head
+          (result-state first)
+          (proof model/head-protocol head-b second-record))
+         stale-record
+         (head-record [commit-a] [] "2026-08-07T00:03:00Z")
+         stale
+         (history/update-head
+          (result-state second)
+          (proof model/head-protocol
+                 "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+                 stale-record))]
+     [(get first :ok)
+      (get second :ok)
+      (get-in second [:value :previous])
+      (error-code stale)])
+   [true true [commit-b] "tahto.history/head-compare-failed"])
+
+  (test/check
+   "a head preserves divergent valid commits without selecting a winner"
+   (let [state (state-with-three-commits)
+         record
+         (head-record [commit-b commit-c] [] "2026-08-07T00:02:00Z")
+         result
+         (history/update-head
+          state
+          (proof model/head-protocol head-b record))
+         next-state (result-state result)
+         stored (model/head-record next-state
+                                   app namespace collection "main" "primary")
+         root-id (history/internal-head-root-id record)]
+     [(get stored :commits)
+      (get-in next-state [:roots root-id :digests])])
+   [[commit-b commit-c] [commit-b commit-c]])
+
+  (test/check
+   "replaying the same signed head update is idempotent"
+   (let [state (state-with-three-commits)
+         record (head-record [commit-b] [] "2026-08-07T00:02:00Z")
+         verification (proof model/head-protocol head-a record)
+         first (history/update-head state verification)
+         replay (history/update-head (result-state first) verification)]
+     [(get replay :ok)
+      (= (result-state first) (result-state replay))])
+   [true true])
+
+  (test/check
+   "heads cannot pin an incomplete object closure"
+   (let [state (state-with-three-commits)
+         broken (assoc state :objects
+                       (dissoc (get state :objects) object-b))
+         record (head-record [commit-b] [] "2026-08-07T00:02:00Z")
+         result
+         (history/update-head
+          broken
+          (proof model/head-protocol head-a record))]
+     [(get result :ok) (error-code result)])
+   [false "tahto.history/head-closure-incomplete"])
+
+  (test/check
+   "immutable backups pin the complete commit and object closure"
+   (let [state (state-with-three-commits)
+         record (backup-record [commit-b commit-c] "daily")
+         result
+         (history/accept-backup
+          state
+          {:application app :namespace namespace}
+          (proof model/backup-protocol backup-a record))
+         next-state (result-state result)
+         root-id (history/internal-backup-root-id backup-a)
+         plan
+         (history/restore-plan
+          next-state
+          {:application app :backup-id backup-a})]
+     [(get result :ok)
+      (get-in next-state [:roots root-id :digests])
+      (get-in plan [:value :complete])
+      (has? (into #{} (get-in plan [:value :commits])) commit-a)
+      (has? (into #{} (get-in plan [:value :objects])) object-b)
+      (has? (into #{} (get-in plan [:value :objects])) backup-a)])
+   [true [backup-a] true true true true])
+
+  (test/check
+   "one backup digest cannot acquire different retention meaning"
+   (let [state (state-with-three-commits)
+         first-record (backup-record [commit-b] "daily")
+         first
+         (history/accept-backup
+          state
+          {:application app :namespace namespace}
+          (proof model/backup-protocol backup-a first-record))
+         changed-record (backup-record [commit-b] "forever")
+         changed
+         (history/accept-backup
+          (result-state first)
+          {:application app :namespace namespace}
+          (proof model/backup-protocol backup-a changed-record))]
+     [(get changed :ok) (error-code changed)])
+   [false "tahto.history/backup-conflict"])
+
+  (test/check
+   "releasing retention removes the root but preserves immutable backup evidence"
+   (let [state (state-with-three-commits)
+         record (backup-record [commit-b] "daily")
+         accepted
+         (history/accept-backup
+          state
+          {:application app :namespace namespace}
+          (proof model/backup-protocol backup-a record))
+         released
+         (history/release-backup
+          (result-state accepted)
+          {:application app :backup-id backup-a})
+         next-state (result-state released)]
+     [(get released :ok)
+      (nil? (get-in next-state [:roots (history/internal-backup-root-id backup-a)]))
+      (= record (model/backup-record next-state backup-a))])
+   [true true true])
+
+  (test/check
+   "signed receipts are immutable evidence records"
+   (let [record
+         {:protocol model/receipt-protocol
+          :id receipt-a
+          :node "node.local"
+          :action "backup.pin"
+          :subject backup-a
+          :timestamp "2026-08-07T00:04:00Z"
+          :signature signature}
+         accepted
+         (history/accept-receipt
+          (fixture-state)
+          (proof model/receipt-protocol receipt-a record))]
+     [(get accepted :ok)
+      (= record (model/receipt-record (result-state accepted) receipt-a))])
+   [true true])])
