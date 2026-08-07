@@ -4,6 +4,8 @@
 //! It does not parse application payloads, execute Hara transitions, verify
 //! signatures, or grant installation and key authority.
 
+use std::fmt;
+
 pub const ABI_ID: &str = "tahto/metadata-store";
 pub const ABI_VERSION: &str = "1.0.0";
 pub const TRANSPORT: &str = "hta.v1";
@@ -26,15 +28,19 @@ impl Snapshot {
         state: Vec<u8>,
         state_digest: impl Into<String>,
     ) -> Result<Self, Error> {
-        validate_stored_revision(revision)?;
-        validate_hta(&state)?;
-        let state_digest = state_digest.into();
-        validate_digest(&state_digest, "state digest")?;
-        Ok(Self {
+        let snapshot = Self {
             revision,
             state,
-            state_digest,
-        })
+            state_digest: state_digest.into(),
+        };
+        snapshot.validate()?;
+        Ok(snapshot)
+    }
+
+    pub fn validate(&self) -> Result<(), Error> {
+        validate_stored_revision(self.revision)?;
+        validate_hta(&self.state)?;
+        validate_digest(&self.state_digest, "state digest")
     }
 }
 
@@ -62,31 +68,28 @@ impl CommitPlan {
         state_digest: impl Into<String>,
         completed_at: impl Into<String>,
     ) -> Result<Self, Error> {
-        validate_revision_step(expected_revision, revision)?;
-        validate_hta(&state)?;
-
-        let plan_digest = plan_digest.into();
-        let request_digest = request_digest.into();
-        let result_digest = result_digest.into();
-        let state_digest = state_digest.into();
-        let completed_at = completed_at.into();
-
-        validate_digest(&plan_digest, "plan digest")?;
-        validate_digest(&request_digest, "request digest")?;
-        validate_digest(&result_digest, "result digest")?;
-        validate_digest(&state_digest, "state digest")?;
-        validate_timestamp(&completed_at)?;
-
-        Ok(Self {
+        let plan = Self {
             expected_revision,
             revision,
-            plan_digest,
-            request_digest,
-            result_digest,
+            plan_digest: plan_digest.into(),
+            request_digest: request_digest.into(),
+            result_digest: result_digest.into(),
             state,
-            state_digest,
-            completed_at,
-        })
+            state_digest: state_digest.into(),
+            completed_at: completed_at.into(),
+        };
+        plan.validate()?;
+        Ok(plan)
+    }
+
+    pub fn validate(&self) -> Result<(), Error> {
+        validate_revision_step(self.expected_revision, self.revision)?;
+        validate_hta(&self.state)?;
+        validate_digest(&self.plan_digest, "plan digest")?;
+        validate_digest(&self.request_digest, "request digest")?;
+        validate_digest(&self.result_digest, "result digest")?;
+        validate_digest(&self.state_digest, "state digest")?;
+        validate_timestamp(&self.completed_at)
     }
 }
 
@@ -142,6 +145,15 @@ impl CommitReceipt {
         validate_digest(&self.state_digest, "state digest")?;
         validate_timestamp(&self.completed_at)
     }
+
+    pub fn matches_plan(&self, plan: &CommitPlan) -> bool {
+        self.revision == plan.revision
+            && self.plan_digest == plan.plan_digest
+            && self.request_digest == plan.request_digest
+            && self.result_digest == plan.result_digest
+            && self.state_digest == plan.state_digest
+            && self.completed_at == plan.completed_at
+    }
 }
 
 pub trait Adapter {
@@ -168,6 +180,14 @@ impl Error {
         }
     }
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.detail)
+    }
+}
+
+impl std::error::Error for Error {}
 
 pub fn validate_identifier(value: &str, label: &'static str) -> Result<(), Error> {
     if value.is_empty()
@@ -353,10 +373,22 @@ mod tests {
     }
 
     #[test]
+    fn public_values_must_be_revalidated_after_mutation() {
+        let mut snapshot = Snapshot::new(0, b"HTA1state".to_vec(), digest('a')).unwrap();
+        snapshot.state = b"json".to_vec();
+        assert_eq!(snapshot.validate().unwrap_err().code, "state-not-canonical-hta");
+
+        let mut plan = plan();
+        plan.revision = 2;
+        assert_eq!(plan.validate().unwrap_err().code, "revision-step-invalid");
+    }
+
+    #[test]
     fn receipt_preserves_the_exact_plan_evidence() {
         let plan = plan();
         let receipt = CommitReceipt::from_plan(&plan, CommitStatus::Applied);
         receipt.validate().unwrap();
+        assert!(receipt.matches_plan(&plan));
         assert_eq!(receipt.status.name(), "applied");
         assert_eq!(receipt.plan_digest, plan.plan_digest);
         assert_eq!(receipt.request_digest, plan.request_digest);
