@@ -1,4 +1,4 @@
-name: Apply TAHTO-8 CI corrections
+name: Export TAHTO-8 CI corrections
 
 on:
   push:
@@ -6,17 +6,15 @@ on:
       - agent/tahto-8-metadata-host-contract-v2
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  export:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/tahto-8-metadata-host-contract-v2
-          fetch-depth: 0
       - name: Install the reviewed Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -91,17 +89,19 @@ jobs:
           cargo generate-lockfile --manifest-path native/Cargo.toml
           cargo fmt --manifest-path native/Cargo.toml --all -- --check
           cargo test --locked --quiet --manifest-path native/Cargo.toml --workspace
-      - name: Commit the complete lock and corrected conformance
+      - name: Stage the exact reviewed files
         run: |
-          rm .github/workflows/apply-tahto8-ci-corrections.yml
-          git config user.name "greenways-release-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add \
+          mkdir -p reviewed
+          cp --parents \
             native/Cargo.lock \
             native/provider/metadata-sqlite/src/tests.rs \
             test/tahto/store/provider_test.hal \
             .github/workflows/bootstrap-conformance.yml \
-            .github/workflows/apply-tahto8-ci-corrections.yml
-          git diff --cached --check
-          git commit -m "Lock and correct the TAHTO-8 provider conformance"
-          git push origin HEAD:agent/tahto-8-metadata-host-contract-v2
+            reviewed/
+      - name: Export the exact reviewed files
+        uses: actions/upload-artifact@v4
+        with:
+          name: tahto8-reviewed-files
+          path: reviewed/
+          include-hidden-files: true
+          if-no-files-found: error
