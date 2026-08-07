@@ -1,5 +1,6 @@
 (ns tahto.store.host
-  (:require [std.foundation :refer :all]))
+  (:require [std.foundation :refer :all]
+            [tahto.store.model :as model]))
 
 (def effect-protocol "tahto.store.host-effect/1")
 (def result-protocol "tahto.store.host-result/1")
@@ -7,26 +8,76 @@
 (def operations
   #{"upload/open"
     "upload/append"
+    "upload/abort"
     "upload/verify-install"
-    "object/read-range"
-    "object/delete"})
+    "manifest/verify"
+    "object/read-range"})
 
-(def forbidden-request-fields
-  #{:path :destination :upstream :url})
+(def forbidden-record-fields
+  #{:path :destination :upstream :url :bytes :body :command :executable})
 
 (defn operation?
   [value]
-  (contains? operations value))
+  (has? operations value))
 
-(defn request-safe?
-  [request]
-  (and (map? request)
-       (not
-        (reduce
-         (fn [found field]
-           (or found (contains? request field)))
-         false
-         forbidden-request-fields))))
+(defn exact-keys?
+  [record expected]
+  (and (map? record)
+       (= expected (into #{} (keys record)))))
+
+(defn record-safe?
+  [record]
+  (and
+   (map? record)
+   (not
+    (reduce
+     (fn [found field]
+       (or found (has? record field)))
+     false
+     forbidden-record-fields))))
+
+(defn effect-request-valid?
+  [operation request]
+  (and
+   (record-safe? request)
+   (cond
+     (= operation "upload/open")
+     (and (exact-keys? request #{:upload-id :digest :size :media-type})
+          (model/identifier? (get request :upload-id))
+          (model/canonical-digest? (get request :digest))
+          (model/non-negative-integer? (get request :size))
+          (model/media-type? (get request :media-type)))
+
+     (= operation "upload/append")
+     (and (exact-keys? request #{:upload-id :offset :length :body-handle})
+          (model/identifier? (get request :upload-id))
+          (model/non-negative-integer? (get request :offset))
+          (model/positive-integer? (get request :length))
+          (model/positive-integer? (get request :body-handle)))
+
+     (= operation "upload/abort")
+     (and (exact-keys? request #{:upload-id})
+          (model/identifier? (get request :upload-id)))
+
+     (= operation "upload/verify-install")
+     (and (exact-keys? request #{:upload-id :digest :size})
+          (model/identifier? (get request :upload-id))
+          (model/canonical-digest? (get request :digest))
+          (model/non-negative-integer? (get request :size)))
+
+     (= operation "manifest/verify")
+     (and (exact-keys? request #{:digest :max-chunks})
+          (model/canonical-digest? (get request :digest))
+          (model/positive-integer? (get request :max-chunks)))
+
+     (= operation "object/read-range")
+     (and (exact-keys? request #{:digest :start :end})
+          (model/canonical-digest? (get request :digest))
+          (model/non-negative-integer? (get request :start))
+          (model/positive-integer? (get request :end))
+          (< (get request :start) (get request :end)))
+
+     :else false)))
 
 (defn effect
   [operation request]
@@ -36,22 +87,49 @@
 
 (defn effect?
   [value]
-  (and (map? value)
+  (and (exact-keys? value #{:protocol :operation :request})
        (= effect-protocol (get value :protocol))
        (operation? (get value :operation))
-       (request-safe? (get value :request))))
+       (effect-request-valid? (get value :operation)
+                              (get value :request))))
 
 (defn result?
-  [value operation]
-  (and (map? value)
+  [value operation expected-keys]
+  (and (exact-keys? value expected-keys)
+       (record-safe? value)
        (= result-protocol (get value :protocol))
        (= operation (get value :operation))))
 
 (defn verified-install?
   [result upload]
-  (and (result? result "upload/verify-install")
-       (= true (get result :verified))
-       (= true (get result :installed))
-       (= (get upload :id) (get result :upload-id))
-       (= (get upload :digest) (get result :digest))
-       (= (get upload :size) (get result :size))))
+  (and
+   (result? result
+            "upload/verify-install"
+            #{:protocol :operation :verified :installed
+              :upload-id :digest :size})
+   (= true (get result :verified))
+   (= true (get result :installed))
+   (= (get upload :id) (get result :upload-id))
+   (= (get upload :digest) (get result :digest))
+   (= (get upload :size) (get result :size))))
+
+(defn manifest-chunk?
+  [chunk]
+  (and (exact-keys? chunk #{:digest :size})
+       (model/canonical-digest? (get chunk :digest))
+       (model/positive-integer? (get chunk :size))))
+
+(defn verified-manifest?
+  [result digest maximum-chunks]
+  (and
+   (result? result
+            "manifest/verify"
+            #{:protocol :operation :verified :digest
+              :manifest-protocol :total-size :chunks})
+   (= true (get result :verified))
+   (= digest (get result :digest))
+   (= model/chunk-manifest-protocol (get result :manifest-protocol))
+   (model/non-negative-integer? (get result :total-size))
+   (vector? (get result :chunks))
+   (<= (count (get result :chunks)) maximum-chunks)
+   (every? manifest-chunk? (get result :chunks))))
