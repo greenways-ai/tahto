@@ -30,6 +30,7 @@ jobs:
           test -f src/tahto/store/vault.hal
           test -f src/tahto/store/graph.hal
           test -f src/tahto/store/history.hal
+          test -f src/tahto/store/transaction.hal
           test -f src/tahto/sync/device.hal
           test -f src/tahto/sync/session.hal
           test -f src/tahto/service/state.hal
@@ -38,10 +39,12 @@ jobs:
           test -f test/tahto/store/graph_test.hal
           test -f test/tahto/store/history_test.hal
           test -f test/tahto/store/vault_hardening_test.hal
+          test -f test/tahto/store/transaction_test.hal
           test -f test/tahto/sync/device_test.hal
           test -f test/tahto/sync/session_test.hal
           test -f test/tahto/service/state_test.hal
           test -f protocol/services.md
+          test -f protocol/transactions.md
 
   hara-state:
     runs-on: ubuntu-latest

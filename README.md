@@ -50,9 +50,9 @@ an optional adapter under `adapters/greenways-space/`.
 ```text
 src/tahto/node/       Hoplite control-plane application
 src/tahto/protocol/   application-neutral records and verification contracts
-src/tahto/store/      Hara object graph, commits, heads and backup transitions
+src/tahto/store/      objects, history and atomic metadata transaction plans
 src/tahto/sync/       device and replication boundary (TAHTO-5/8)
-src/tahto/backup/     transfer and restore executors (TAHTO-9/10)
+src/tahto/backup/     transfer and restore executors (future provider work)
 src/tahto/service/    inert service descriptors and durable jobs (TAHTO-6)
 protocol/             normative protocol documents and schemas
 test/                 executable Hara conformance suites
@@ -109,9 +109,9 @@ verified receipt evidence
 
 Large object bodies never become ordinary Hara values. The kernel emits a closed
 set of native effects using opaque body handles. Hoplite's merged bounded
-streaming ABI and Nginx body binding define the transport contract, while object
-transfer execution and durable metadata persistence remain explicit follow-up
-work.
+streaming ABI and Nginx request-body binding define the transport contract,
+while object-transfer execution and native response-source streaming remain
+explicit follow-up work.
 
 Commit, head, backup and receipt transitions consume
 `tahto.record-verification/1` proofs. The installed key provider must bind the
@@ -149,20 +149,43 @@ See:
 - [`test/tahto/sync/session_test.hal`](test/tahto/sync/session_test.hal)
 - [`test/tahto/service/state_test.hal`](test/tahto/service/state_test.hal)
 
+## Atomic metadata transaction plans
+
+TAHTO-7 composes one verified request into one deterministic metadata commit
+plan. It checks the expected state revision, records nonce and idempotency
+evidence, executes one reviewed effect-free domain transition, validates an
+installed-provider result digest, completes the request and advances the
+metadata revision.
+
+A completed idempotent replay records its fresh nonce and returns the prior
+result digest without re-running domain code. Rejected domain operations are
+also completed idempotently, but any partial state returned by the rejected
+transition is discarded.
+
+This is the semantic boundary required by a durable provider; it is not itself
+a database. The installed provider must compare-and-swap the expected revision
+and returned state in one durable transaction. Signature, freshness and
+canonical-result verification remain provider responsibilities.
+
+See:
+
+- [`protocol/transactions.md`](protocol/transactions.md)
+- [`test/tahto/store/transaction_test.hal`](test/tahto/store/transaction_test.hal)
+
 ## Current implementation status
 
 TAHTO-2 defines the stable application-neutral record envelopes. TAHTO-3
 provides the Hara object-vault kernel, TAHTO-4 provides immutable commits,
 atomic signed heads, backups and restore planning, TAHTO-5 provides device,
-replay and incremental-sync planning, and TAHTO-6 provides inert service and
-durable-job state.
+replay and incremental-sync planning, TAHTO-6 provides inert service and
+durable-job state, and TAHTO-7 provides atomic metadata transaction plans.
 
-The native object-transfer executor, durable metadata transaction provider,
-signature and request-freshness provider, nonce/idempotency retention
-compaction, worker executor, pairing UX and complete two-device conformance
-scenario are not represented as complete. The status document reports these
-boundaries directly instead of emulating them with whole-file Python or
-in-memory production stores.
+The concrete durable metadata provider, canonical result/signature/freshness
+providers, nonce/idempotency retention compaction, native object-transfer and
+response-streaming executors, worker executor, pairing UX and complete
+two-device conformance scenario are not represented as complete. The status
+document reports these boundaries directly instead of emulating them with
+whole-file Python or in-memory production stores.
 
 See [`LINEAGE.md`](LINEAGE.md) for the extracted Beacon history and
 [`protocol/tahto.md`](protocol/tahto.md) for the authority boundary.
