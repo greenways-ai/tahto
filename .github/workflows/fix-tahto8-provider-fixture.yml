@@ -1,0 +1,41 @@
+name: Fix TAHTO-8 provider fixture
+
+on:
+  push:
+    branches:
+      - agent/tahto-8-metadata-host-contract-v2
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/tahto-8-metadata-host-contract-v2
+      - name: Repair the exact corrupted call form
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('test/tahto/store/provider_test.hal')
+          source = path.read_text()
+          corrupted = "[('get accepted :ok)"
+          corrected = "[(get accepted :ok)"
+          if source.count(corrupted) != 1:
+              raise SystemExit(
+                  f'expected one corrupted call form, found {source.count(corrupted)}'
+              )
+          path.write_text(source.replace(corrupted, corrected))
+          PY
+          git diff --check
+      - name: Commit the repaired fixture
+        run: |
+          git config user.name "greenways-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add test/tahto/store/provider_test.hal
+          git commit -m "Repair the TAHTO-8 provider fixture"
+          git push origin HEAD:agent/tahto-8-metadata-host-contract-v2
