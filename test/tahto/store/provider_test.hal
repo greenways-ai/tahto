@@ -139,7 +139,7 @@
    "receipt lookup accepts only a canonical plan identity"
    (let [accepted (provider/prepare-receipt state plan-digest)
          rejected (provider/prepare-receipt state "not-a-digest")]
-     [('get accepted :ok)
+     [(get accepted :ok)
       (get-in accepted [:value :host-method])
       (get-in accepted [:value :request :plan-digest])
       (get rejected :ok)
