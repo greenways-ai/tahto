@@ -48,21 +48,29 @@
   [state key]
   (model/value-or state key {}))
 
+(defn key-component
+  [value]
+  (if (string? value) value ""))
+
 (defn service-key
   [application service]
-  (str (count application) ":" application
-       ":" (count service) ":" service))
+  (let [application-value (key-component application)
+        service-value (key-component service)]
+    (str (count application-value) ":" application-value
+         ":" (count service-value) ":" service-value)))
 
 (defn job-key
   [application service job]
-  (str (service-key application service)
-       ":" (count job) ":" job))
+  (let [job-value (key-component job)]
+    (str (service-key application service)
+         ":" (count job-value) ":" job-value)))
 
 (defn job-idempotency-key
   [application service idempotency-key]
-  (str (service-key application service)
-       ":idempotency:"
-       (count idempotency-key) ":" idempotency-key))
+  (let [idempotency-value (key-component idempotency-key)]
+    (str (service-key application service)
+         ":idempotency:"
+         (count idempotency-value) ":" idempotency-value)))
 
 (defn services
   [state]
@@ -107,8 +115,7 @@
 (defn bounded-text?
   [value maximum]
   (and (model/non-empty-string? value)
-       (<= (count value) maximum)
-       (not (string? nil))))
+       (<= (count value) maximum)))
 
 (def resource-policy-fields
   #{:max-memory-bytes :max-cpu-millis :max-output-bytes})
@@ -191,7 +198,7 @@
                        maximum-error-message-bytes))
       (not (has? value :error)))
     (or (= "completed" (get value :state))
-        (empty? (get value :output-roots)))))))
+        (empty? (get value :output-roots))))))
 
 (defn authorized-context?
   [context operation]
