@@ -134,7 +134,7 @@ fn stale_revision_conflicts_do_not_mutate_state() {
 
     let stale = plan(0, 'd', 'e', 'f', frame("stale"), "2026-08-07T14:02:00Z");
     let error = store.compare_and_swap(stale.clone()).unwrap_err();
-    assert_eq!(error.code, "metadata-revision-conflict");
+    assert_eq!(error.code, "metadata-revision-receipt-conflict");
     assert_eq!(store.load().unwrap(), Some(installed));
     assert!(store.receipt(&stale.plan_digest).unwrap().is_none());
 }
@@ -238,7 +238,7 @@ fn two_connections_reject_the_stale_writer() {
             "2026-08-07T14:10:00Z",
         ))
         .unwrap_err();
-    assert_eq!(error.code, "metadata-revision-conflict");
+    assert_eq!(error.code, "metadata-revision-receipt-conflict");
     assert_eq!(second_store.load().unwrap().unwrap().revision, 1);
 }
 

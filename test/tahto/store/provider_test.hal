@@ -1,0 +1,326 @@
+(ns tahto.store.provider-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.provider :as provider]
+            [tahto.store.transaction :as transaction]))
+
+(def request-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def result-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def state-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def plan-digest
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+
+(def state
+  {:metadata-revision 1
+   :objects {}})
+
+(def context
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation "service.register"
+   :application "app.example"
+   :namespace "profile.primary"
+   :collection "archive"
+   :request-digest request-digest
+   :idempotency-key "request-idempotency-0001"
+   :status "completed"
+   :replayed false
+   :result-digest result-digest})
+
+(def plan
+  {:protocol transaction/transaction-protocol
+   :expected-revision 0
+   :revision 1
+   :request-digest request-digest
+   :result-digest result-digest
+   :context context
+   :result {:stored true}
+   :replayed false})
+
+(def success-result
+  {:ok true
+   :state state
+   :value plan
+   :effects []})
+
+(def rejected-result
+  {:ok false
+   :state state
+   :effects []
+   :error {:code "test/rejected"
+           :details {}}
+   :transaction plan})
+
+(def state-verification
+  {:protocol provider/state-verification-protocol
+   :verified true
+   :revision 1
+   :state-digest state-digest
+   :encoded-at "2026-08-08T00:00:00Z"})
+
+(def commit-verification
+  {:protocol provider/commit-verification-protocol
+   :verified true
+   :expected-revision 0
+   :revision 1
+   :plan-digest plan-digest
+   :request-digest request-digest
+   :result-digest result-digest
+   :state-digest state-digest
+   :completed-at "2026-08-08T00:01:00Z"})
+
+(def snapshot
+  {:protocol provider/snapshot-protocol
+   :revision 1
+   :state state
+   :state-digest state-digest})
+
+(def receipt
+  {:protocol provider/receipt-protocol
+   :status "applied"
+   :revision 1
+   :plan-digest plan-digest
+   :request-digest request-digest
+   :result-digest result-digest
+   :state-digest state-digest
+   :completed-at "2026-08-08T00:01:00Z"})
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "provider revisions fit a signed 64-bit storage column"
+   [(provider/provider-revision? 0)
+    (provider/provider-revision? provider/max-provider-revision)
+    (provider/provider-revision?
+     (inc provider/max-provider-revision))]
+   [true true false])
+
+  (test/check
+   "loaded snapshots bind state bytes evidence to the state revision"
+   [(provider/snapshot? snapshot)
+    (provider/snapshot? (assoc snapshot :revision 0))
+    (provider/snapshot? (assoc snapshot :database-path "/tmp/unsafe"))]
+   [true false nil])
+
+  (test/check
+   "canonical state verification is exact revision-bound evidence"
+   [(provider/state-verification? state-verification state)
+    (provider/state-verification?
+     (assoc state-verification :revision 0)
+     state)
+    (provider/state-verification?
+     (assoc state-verification :provider "request-selected")
+     state)]
+   [true false nil])
+
+  (test/check
+   "load uses one fixed installed host service and ABI"
+   (let [result (provider/prepare-load state)
+         call (get result :value)]
+     [(get result :ok)
+      (get call :host-service)
+      (get call :host-method)
+      (get call :native-abi)
+      (provider/host-call? call)])
+   [true
+    "tahto.metadata"
+    "load"
+    "tahto-metadata-store/1"
+    true])
+
+  (test/check
+   "receipt lookup accepts only a canonical plan identity"
+   (let [accepted (provider/prepare-receipt state plan-digest)
+         rejected (provider/prepare-receipt state "not-a-digest")]
+     [(get accepted :ok)
+      (get-in accepted [:value :host-method])
+      (get-in accepted [:value :request :plan-digest])
+      (get rejected :ok)
+      (error-code rejected)])
+   [true
+    "receipt"
+    plan-digest
+    false
+    "tahto.provider/plan-digest-invalid"])
+
+  (test/check
+   "initialization emits a closed provider request after canonical encoding"
+   (let [result
+         (provider/prepare-initialize state state-verification)
+         call (get result :value)
+         request (get call :request)]
+     [(get result :ok)
+      (provider/host-call? call)
+      (provider/provider-request? request)
+      (get request :state)
+      (get request :state-digest)])
+   [true true true state state-digest])
+
+  (test/check
+   "initialization cannot use proof for different state evidence"
+   (let [result
+         (provider/prepare-initialize
+          state
+          (assoc state-verification :state-digest "invalid"))]
+     [(get result :ok) (error-code result)])
+   [false "tahto.provider/state-verification-invalid"])
+
+  (test/check
+   "successful and rejected TAHTO-7 results expose the same commit plan"
+   [(provider/transaction-plan success-result)
+    (provider/transaction-plan rejected-result)]
+   [plan plan])
+
+  (test/check
+   "the transaction plan is bound to completed request evidence and state"
+   [(provider/transaction-plan? plan state)
+    (provider/transaction-plan?
+     (assoc plan :request-digest plan-digest)
+     state)
+    (provider/transaction-plan?
+     (assoc plan :revision 2)
+     state)
+    (provider/transaction-plan?
+     plan
+     (assoc state :metadata-revision 2))]
+   [true false false false])
+
+  (test/check
+   "commit verification binds the plan and state without widening authority"
+   [(provider/commit-verification? commit-verification)
+    (provider/commit-verification-matches?
+     commit-verification plan state)
+    (provider/commit-verification-matches?
+     (assoc commit-verification :request-digest plan-digest)
+     plan
+     state)
+    (provider/commit-verification?
+     (assoc commit-verification :database-path "/tmp/unsafe"))]
+   [true true false nil])
+
+  (test/check
+   "compare-and-swap preparation binds the exact TAHTO-7 plan and state"
+   (let [result
+         (provider/prepare-compare-and-swap
+          success-result commit-verification)
+         call (get result :value)
+         request (get call :request)]
+     [(get result :ok)
+      (provider/host-call? call)
+      (get call :host-method)
+      (get request :expected-revision)
+      (get request :revision)
+      (get request :state)
+      (get request :plan-digest)])
+   [true
+    true
+    "compare-and-swap"
+    0
+    1
+    state
+    plan-digest])
+
+  (test/check
+   "a completed idempotent error result can use the same durable boundary"
+   (let [result
+         (provider/prepare-compare-and-swap
+          rejected-result commit-verification)]
+     [(get result :ok)
+      (get-in result [:value :host-method])
+      (get-in result [:value :request :result-digest])])
+   [true "compare-and-swap" result-digest])
+
+  (test/check
+   "mismatched commit evidence fails before a provider call is exposed"
+   (let [result
+         (provider/prepare-compare-and-swap
+          success-result
+          (assoc commit-verification :result-digest plan-digest))]
+     [(get result :ok) (error-code result)])
+   [false "tahto.provider/commit-verification-invalid"])
+
+  (test/check
+   "malformed transaction results never reach the metadata provider"
+   (let [result
+         (provider/prepare-compare-and-swap
+          {:ok true
+           :state state
+           :value {:protocol "not-a-plan"}
+           :effects []}
+          commit-verification)]
+     [(get result :ok) (error-code result)])
+   [false "tahto.provider/transaction-plan-invalid"])
+
+  (test/check
+   "provider requests reject paths credentials unknown operations and fields"
+   (let [request
+         (get-in
+          (provider/prepare-compare-and-swap
+           success-result commit-verification)
+          [:value :request])]
+     [(provider/provider-request? request)
+      (provider/provider-request?
+       (assoc request :database-path "/tmp/request-selected"))
+      (provider/provider-request?
+       {:protocol provider/request-protocol
+        :operation "execute"
+        :credential "secret"})])
+   [true nil false])
+
+  (test/check
+   "receipts are closed and match exact verified commit evidence"
+   [(provider/receipt? receipt)
+    (provider/receipt-matches? receipt commit-verification)
+    (provider/receipt-matches?
+     (assoc receipt :state-digest request-digest)
+     commit-verification)
+    (provider/receipt?
+     (assoc receipt :provider-command "run"))]
+   [true true false nil])
+
+  (test/check
+   "provider response profiles are operation-specific"
+   [(provider/provider-response? "load" nil)
+    (provider/provider-response? "load" snapshot)
+    (provider/provider-response? "initialize" snapshot)
+    (provider/provider-response? "compare-and-swap" receipt)
+    (provider/provider-response? "receipt" receipt)
+    (provider/provider-response? "initialize" receipt)]
+   [true true true true true false])
+
+  (test/check
+   "initialization accepts only the exact encoded state snapshot"
+   [(provider/initialize-result? state state-verification snapshot)
+    (provider/initialize-result?
+     state
+     state-verification
+     (assoc snapshot :state-digest request-digest))]
+   [true false])
+
+  (test/check
+   "a committed receipt closes the exact prepared transaction"
+   [(provider/commit-result?
+     success-result commit-verification receipt)
+    (provider/commit-result?
+     success-result
+     commit-verification
+     (assoc receipt :status "replayed"))
+    (provider/commit-result?
+     success-result
+     commit-verification
+     (assoc receipt :plan-digest request-digest))]
+   [true true false])
+
+  (test/check
+   "loaded-state returns only a validated snapshot state"
+   [(provider/loaded-state snapshot)
+    (provider/loaded-state
+     (assoc snapshot :state-digest "invalid"))]
+   [state nil])])

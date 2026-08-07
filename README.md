@@ -50,10 +50,11 @@ an optional adapter under `adapters/greenways-space/`.
 ```text
 src/tahto/node/       Hoplite control-plane application
 src/tahto/protocol/   application-neutral records and verification contracts
-src/tahto/store/      objects, history and atomic metadata transaction plans
-src/tahto/sync/       device and replication boundary (TAHTO-5/8)
+src/tahto/store/      objects, history and atomic metadata provider contracts
+src/tahto/sync/       device and replication boundary
 src/tahto/backup/     transfer and restore executors (future provider work)
-src/tahto/service/    inert service descriptors and durable jobs (TAHTO-6)
+src/tahto/service/    inert service descriptors and durable jobs
+native/               closed native ABIs and installed provider implementations
 protocol/             normative protocol documents and schemas
 test/                 executable Hara conformance suites
 conformance/          dependency-free protocol and architecture guards
@@ -172,16 +173,49 @@ See:
 - [`protocol/transactions.md`](protocol/transactions.md)
 - [`test/tahto/store/transaction_test.hal`](test/tahto/store/transaction_test.hal)
 
+## Metadata provider and host contracts
+
+The dependency-free native `tahto-metadata-store/1` ABI and the bundled SQLite
+provider define durable snapshot, exact revision compare-and-swap and commit
+receipt behavior. The SQLite implementation recomputes state SHA-256 identity,
+uses an immediate transaction, rejects stale writers and records the snapshot
+and receipt atomically.
+
+TAHTO-8 adds the Hara-side bridge. It accepts only canonical state and commit
+verification proofs, validates them against the exact TAHTO-7 state and plan,
+and exposes one fixed installed host service:
+
+```text
+tahto.metadata
+```
+
+The closed methods are `load`, `initialize`, `compare-and-swap` and `receipt`.
+Requests cannot select a database path, provider package, credential, upstream,
+callback or native command. Provider snapshots and receipts are revalidated as
+closed records before their state or evidence is accepted.
+
+This contract does not claim that Hoplite currently registers the service or
+encodes Hara state into canonical HTA bytes. That runtime bridge is the next
+integration slice.
+
+See:
+
+- [`protocol/metadata-store.md`](protocol/metadata-store.md)
+- [`protocol/metadata-host.md`](protocol/metadata-host.md)
+- [`test/tahto/store/provider_test.hal`](test/tahto/store/provider_test.hal)
+
 ## Current implementation status
 
 TAHTO-2 defines the stable application-neutral record envelopes. TAHTO-3
 provides the Hara object-vault kernel, TAHTO-4 provides immutable commits,
 atomic signed heads, backups and restore planning, TAHTO-5 provides device,
 replay and incremental-sync planning, TAHTO-6 provides inert service and
-durable-job state, and TAHTO-7 provides atomic metadata transaction plans.
+durable-job state, TAHTO-7 provides atomic metadata transaction plans, and
+TAHTO-8 defines the fixed Hara-to-native metadata host contract.
 
-The concrete durable metadata provider, canonical result/signature/freshness
-providers, nonce/idempotency retention compaction, native object-transfer and
+The native metadata ABI and SQLite provider are implemented. The Hoplite host
+registry and canonical HTA state bridge, canonical signature/freshness
+provider, nonce/idempotency retention compaction, native object-transfer and
 response-streaming executors, worker executor, pairing UX and complete
 two-device conformance scenario are not represented as complete. The status
 document reports these boundaries directly instead of emulating them with
