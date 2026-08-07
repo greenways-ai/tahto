@@ -1,0 +1,251 @@
+(ns tahto.sync.device
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]))
+
+(defn limits
+  [state]
+  (get state :limits))
+
+(defn device-entry-count
+  [entries device]
+  (reduce (fn [total entry]
+            (if (= device (get (val entry) :device))
+              (inc total)
+              total))
+          0
+          entries))
+
+(defn request-context
+  [record replayed]
+  {:protocol validate/request-context-protocol
+   :device (get record :device)
+   :operation (get record :operation)
+   :application (get record :application)
+   :namespace (get record :namespace)
+   :collection (get record :collection)
+   :request-digest (get record :request-digest)
+   :idempotency-key (get record :idempotency-key)
+   :status (get record :status)
+   :replayed replayed
+   :result-digest (get record :result-digest)})
+
+(defn same-idempotent-request?
+  [stored proof]
+  (= [(get stored :device)
+      (get stored :operation)
+      (get stored :application)
+      (get stored :namespace)
+      (get stored :collection)
+      (get stored :request-digest)]
+     [(get proof :device)
+      (get proof :operation)
+      (get proof :application)
+      (get proof :namespace)
+      (get proof :collection)
+      (get proof :request-digest)]))
+
+(defn enrol-device
+  [state proof]
+  (let [record (get proof :device)
+        device (get record :id)
+        public-key (get record :public-key)
+        existing (model/device-record state device)
+        key-owner (model/public-key-device state public-key)]
+    (cond
+      (not (validate/device-enrolment? proof))
+      (model/fail state "tahto.device/enrolment-proof-invalid")
+
+      (not (nil? existing))
+      (if (= existing record)
+        (model/ok state
+                  {:device existing
+                   :approval-digest (get proof :approval-digest)
+                   :administrator false
+                   :grants []})
+        (model/fail state "tahto.device/device-conflict" {:device device}))
+
+      (not (nil? key-owner))
+      (model/fail state "tahto.device/public-key-in-use"
+                  {:device device
+                   :existing key-owner})
+
+      (>= (count (get state :devices))
+          (get (limits state) :max-devices))
+      (model/fail state "tahto.device/device-limit-reached")
+
+      :else
+      (let [next-state
+            (assoc
+             (assoc state
+                    :devices
+                    (assoc (get state :devices) device record))
+             :device-public-keys
+             (assoc (get state :device-public-keys)
+                    (model/public-key-key public-key)
+                    device))]
+        (model/ok next-state
+                  {:device record
+                   :approval-digest (get proof :approval-digest)
+                   :administrator false
+                   :grants []})))))
+
+(defn revoke-device
+  [state proof]
+  (let [device (get proof :device)
+        existing (model/device-record state device)
+        revoked-at (get proof :revoked-at)]
+    (cond
+      (not (validate/device-revocation? proof))
+      (model/fail state "tahto.device/revocation-proof-invalid")
+
+      (nil? existing)
+      (model/fail state "tahto.device/device-missing" {:device device})
+
+      (not (= (get proof :node) (get existing :node)))
+      (model/fail state "tahto.device/node-mismatch" {:device device})
+
+      (= "revoked" (get existing :status))
+      (if (= revoked-at (get existing :revoked-at))
+        (model/ok state existing)
+        (model/fail state "tahto.device/revocation-conflict"
+                    {:device device
+                     :existing (get existing :revoked-at)
+                     :received revoked-at}))
+
+      :else
+      (let [updated (assoc (assoc existing :status "revoked")
+                           :revoked-at revoked-at)
+            next-state (assoc state
+                              :devices
+                              (assoc (get state :devices)
+                                     device updated))]
+        (model/ok next-state updated)))))
+
+(defn authorize-request
+  [state proof]
+  (let [device (get proof :device)
+        record (model/device-record state device)
+        nonce (get proof :nonce)
+        idempotency-key (get proof :idempotency-key)
+        nonce-record (model/request-nonce state device nonce)
+        existing (model/idempotency-record state device idempotency-key)]
+    (cond
+      (not (validate/device-request-verification? proof))
+      (model/fail state "tahto.device/request-proof-invalid")
+
+      (nil? record)
+      (model/fail state "tahto.device/device-missing" {:device device})
+
+      (not (= "enrolled" (get record :status)))
+      (model/fail state "tahto.device/device-revoked" {:device device})
+
+      (not (= (get proof :public-key) (get record :public-key)))
+      (model/fail state "tahto.device/public-key-mismatch" {:device device})
+
+      (not (nil? nonce-record))
+      (model/fail state "tahto.device/nonce-replayed"
+                  {:device device
+                   :nonce nonce})
+
+      (and (not (nil? existing))
+           (not (same-idempotent-request? existing proof)))
+      (model/fail state "tahto.device/idempotency-conflict"
+                  {:device device
+                   :idempotency-key idempotency-key})
+
+      (>= (device-entry-count (get state :request-nonces) device)
+          (get (limits state) :max-device-nonces))
+      (model/fail state "tahto.device/nonce-limit-reached" {:device device})
+
+      (and (nil? existing)
+           (>= (device-entry-count (get state :idempotency) device)
+               (get (limits state) :max-device-idempotency-keys)))
+      (model/fail state "tahto.device/idempotency-limit-reached"
+                  {:device device})
+
+      :else
+      (let [request-record
+            (if (nil? existing)
+              {:device device
+               :operation (get proof :operation)
+               :application (get proof :application)
+               :namespace (get proof :namespace)
+               :collection (get proof :collection)
+               :request-digest (get proof :request-digest)
+               :idempotency-key idempotency-key
+               :status "pending"
+               :result-digest nil
+               :created-at (get proof :timestamp)
+               :completed-at nil}
+              existing)
+            nonce-entry
+            {:device device
+             :request-digest (get proof :request-digest)
+             :timestamp (get proof :timestamp)}
+            next-state
+            (assoc
+             (assoc state
+                    :request-nonces
+                    (assoc (get state :request-nonces)
+                           (model/nonce-key device nonce)
+                           nonce-entry))
+             :idempotency
+             (assoc (get state :idempotency)
+                    (model/idempotency-key device idempotency-key)
+                    request-record))]
+        (model/ok next-state
+                  (request-context request-record (not (nil? existing))))))))
+
+(def completion-fields
+  #{:device :idempotency-key :request-digest
+    :result-digest :completed-at})
+
+(defn completion?
+  [value]
+  (and
+   (validate/exact-record? value completion-fields #{})
+   (model/identifier? (get value :device))
+   (validate/opaque-token? (get value :idempotency-key))
+   (model/canonical-digest? (get value :request-digest))
+   (model/canonical-digest? (get value :result-digest))
+   (validate/timestamp? (get value :completed-at))))
+
+(defn complete-request
+  [state completion]
+  (let [device (get completion :device)
+        key (get completion :idempotency-key)
+        existing (model/idempotency-record state device key)]
+    (cond
+      (not (completion? completion))
+      (model/fail state "tahto.device/completion-invalid")
+
+      (nil? existing)
+      (model/fail state "tahto.device/idempotency-missing"
+                  {:device device :idempotency-key key})
+
+      (not (= (get completion :request-digest)
+              (get existing :request-digest)))
+      (model/fail state "tahto.device/request-digest-mismatch")
+
+      (= "completed" (get existing :status))
+      (if (= (get completion :result-digest)
+             (get existing :result-digest))
+        (model/ok state (request-context existing true))
+        (model/fail state "tahto.device/completion-conflict"
+                    {:existing (get existing :result-digest)
+                     :received (get completion :result-digest)}))
+
+      :else
+      (let [updated
+            (assoc
+             (assoc existing :status "completed")
+             :result-digest (get completion :result-digest)
+             :completed-at (get completion :completed-at))
+            next-state
+            (assoc state
+                   :idempotency
+                   (assoc (get state :idempotency)
+                          (model/idempotency-key device key)
+                          updated))]
+        (model/ok next-state (request-context updated false))))))
