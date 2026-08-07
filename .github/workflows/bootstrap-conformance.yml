@@ -1,4 +1,4 @@
-name: Tahto protocol conformance
+name: Tahto conformance
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  conformance:
+  protocol:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,3 +21,42 @@ jobs:
         run: |
           python3 -m py_compile conformance/check-bootstrap.py
           python3 -m py_compile conformance/check-protocol.py
+      - name: Guard the Hara-only state-kernel boundary
+        run: |
+          test ! -e src-python
+          test ! -e test-python
+          test -f src/tahto/store/model.hal
+          test -f src/tahto/store/host.hal
+          test -f src/tahto/store/vault.hal
+          test -f src/tahto/store/graph.hal
+          test -f src/tahto/store/history.hal
+          test -f src/tahto/protocol/validate.hal
+          test -f test/tahto/store/vault_test.hal
+          test -f test/tahto/store/graph_test.hal
+          test -f test/tahto/store/history_test.hal
+          test -f test/tahto/store/vault_hardening_test.hal
+
+  hara-state:
+    runs-on: ubuntu-latest
+    env:
+      HARA_REVISION: 5ef7762c8b97d77f9976f7037bafed81499b42c5
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the reviewed Hara revision pin
+        run: test "$(tr -d '\n' < packaging/hara-revision)" = "$HARA_REVISION"
+      - name: Check out Hara after the namespace and metadata cuts
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara
+          ref: 5ef7762c8b97d77f9976f7037bafed81499b42c5
+          path: .hara
+          persist-credentials: false
+      - name: Install the Hara Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.78.0
+      - name: Build the reviewed Hara CLI
+        run: cargo build --locked --release --manifest-path .hara/core/rust/Cargo.toml --bin hara
+      - name: Run the Hara object, history and backup conformance suites
+        run: .hara/core/rust/target/release/hara --project "$GITHUB_WORKSPACE" test
