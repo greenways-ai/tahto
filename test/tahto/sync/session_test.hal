@@ -1,0 +1,365 @@
+(ns tahto.sync.session-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.sync.device :as device]
+            [tahto.sync.session :as session]))
+
+(def app "app.example")
+(def namespace "profile.primary")
+(def collection "archive")
+(def device-a "device.a")
+(def public-key-a "ed25519:device-a-public-key")
+
+(def object-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def object-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def commit-a
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def hidden-object
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def request-a
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def request-b
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def request-c
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def approval
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn add-object
+  [state application ns digest size]
+  (let [key (model/namespace-key application ns)
+        references (model/namespace-references state application ns)]
+    (assoc
+     (assoc state
+            :objects
+            (assoc (get state :objects)
+                   digest
+                   (model/object-record digest size)))
+     :references
+     (assoc (get state :references)
+            key
+            (conj references digest)))))
+
+(defn fixture-state
+  ([]
+   (fixture-state {}))
+  ([limits]
+   (let [initial (model/empty-state limits)
+         enrolled
+         (device/enrol-device
+          initial
+          {:protocol validate/device-enrolment-protocol
+           :authorized true
+           :node "node.home"
+           :approval-digest approval
+           :device
+           {:protocol model/device-protocol
+            :id device-a
+            :node "node.home"
+            :public-key public-key-a
+            :status "enrolled"
+            :enrolled-at "2026-08-07T00:00:00Z"}})
+         with-object
+         (add-object (result-state enrolled) app namespace object-a 4)
+         with-commit
+         (add-object with-object app namespace commit-a 512)
+         with-hidden
+         (add-object with-commit app "profile.other" hidden-object 9)
+         head-key
+         (model/head-key app namespace collection "main" "primary")
+         commit-record
+         {:protocol model/commit-protocol
+          :root commit-a
+          :application app
+          :namespace namespace
+          :collection collection
+          :device device-a
+          :parents []
+          :objects [object-a]}]
+     (assoc
+      (assoc
+       (assoc with-hidden
+              :edges
+              (assoc (get with-hidden :edges) commit-a [object-a]))
+       :commits
+       (assoc (get with-hidden :commits) commit-a commit-record))
+      :heads
+      (assoc (get with-hidden :heads)
+             head-key
+             {:protocol model/head-protocol
+              :application app
+              :namespace namespace
+              :collection collection
+              :kind "main"
+              :name "primary"
+              :commits [commit-a]})))))
+
+(defn proof
+  [operation digest nonce idempotency-key]
+  {:protocol validate/request-verification-protocol
+   :verified true
+   :device device-a
+   :public-key public-key-a
+   :operation operation
+   :application app
+   :namespace namespace
+   :collection collection
+   :request-digest digest
+   :nonce nonce
+   :idempotency-key idempotency-key
+   :timestamp "2026-08-07T00:01:00Z"})
+
+(defn authorize
+  [state operation digest nonce idempotency-key]
+  (device/authorize-request
+   state
+   (proof operation digest nonce idempotency-key)))
+
+(defn pull-plan
+  [state digest nonce idempotency-key known]
+  (let [authorized
+        (authorize state "sync.pull" digest nonce idempotency-key)]
+    (session/plan-pull
+     (result-state authorized)
+     (get authorized :value)
+     {:known-digests known})))
+
+(test/print-results
+ [(test/check
+   "pull planning returns only the sorted missing closure behind current heads"
+   (let [plan
+         (pull-plan (fixture-state)
+                    request-a
+                    "nonce-pull-0001"
+                    "request-pull-0001"
+                    [])]
+     [(get plan :ok)
+      (get-in plan [:value :protocol])
+      (get-in plan [:value :cursor])
+      (get-in plan [:value :heads])
+      (get-in plan [:value :missing])
+      (get-in plan [:value :complete])])
+   [true
+    session/sync-offer-protocol
+    1
+    [commit-a]
+    [object-a commit-a]
+    true])
+
+  (test/check
+   "known objects are excluded without hiding the current commit root"
+   (let [plan
+         (pull-plan (fixture-state)
+                    request-a
+                    "nonce-known-0001"
+                    "request-known-0001"
+                    [object-a])]
+     (get-in plan [:value :missing]))
+   [commit-a])
+
+  (test/check
+   "the same signed request receives the same pending offer"
+   (let [first-auth
+         (authorize (fixture-state)
+                    "sync.pull"
+                    request-a
+                    "nonce-repeat-0001"
+                    "request-repeat-0001")
+         first-plan
+         (session/plan-pull
+          (result-state first-auth)
+          (get first-auth :value)
+          {:known-digests []})
+         retry-auth
+         (authorize (result-state first-plan)
+                    "sync.pull"
+                    request-a
+                    "nonce-repeat-0002"
+                    "request-repeat-0001")
+         retry-plan
+         (session/plan-pull
+          (result-state retry-auth)
+          (get retry-auth :value)
+          {:known-digests []})]
+     [(get retry-plan :ok)
+      (= (get first-plan :value) (get retry-plan :value))])
+   [true true])
+
+  (test/check
+   "a second pull request cannot replace one unacknowledged offer"
+   (let [first
+         (pull-plan (fixture-state)
+                    request-a
+                    "nonce-pending-0001"
+                    "request-pending-0001"
+                    [])
+         second-auth
+         (authorize (result-state first)
+                    "sync.pull"
+                    request-b
+                    "nonce-pending-0002"
+                    "request-pending-0002")
+         second
+         (session/plan-pull
+          (result-state second-auth)
+          (get second-auth :value)
+          {:known-digests [object-a]})]
+     [(get second :ok) (error-code second)])
+   [false "tahto.sync/offer-pending"])
+
+  (test/check
+   "acknowledgement must match the exact offered cursor and digest batch"
+   (let [plan
+         (pull-plan (fixture-state)
+                    request-a
+                    "nonce-ack-invalid-0001"
+                    "request-ack-invalid-0001"
+                    [])
+         ack-auth
+         (authorize (result-state plan)
+                    "sync.ack"
+                    request-b
+                    "nonce-ack-invalid-0002"
+                    "request-ack-invalid-0002")
+         invalid
+         (session/acknowledge-pull
+          (result-state ack-auth)
+          (get ack-auth :value)
+          {:cursor 2
+           :offer-request-digest request-a
+           :received-digests [object-a commit-a]})]
+     [(get invalid :ok) (error-code invalid)])
+   [false "tahto.sync/cursor-mismatch"])
+
+  (test/check
+   "a complete offline acknowledgement advances the monotonic device cursor"
+   (let [plan
+         (pull-plan (fixture-state)
+                    request-a
+                    "nonce-ack-0001"
+                    "request-ack-0001"
+                    [])
+         ack-auth
+         (authorize (result-state plan)
+                    "sync.ack"
+                    request-b
+                    "nonce-ack-0002"
+                    "request-ack-0002")
+         ack
+         (session/acknowledge-pull
+          (result-state ack-auth)
+          (get ack-auth :value)
+          {:cursor 1
+           :offer-request-digest request-a
+           :received-digests [object-a commit-a]})
+         state (result-state ack)]
+     [(get ack :ok)
+      (get-in ack [:value :protocol])
+      (model/sync-cursor state device-a app namespace collection)
+      (nil? (model/sync-offer state device-a app namespace collection))])
+   [true session/sync-ack-protocol 1 true])
+
+  (test/check
+   "the next acknowledged round receives the next cursor"
+   (let [first
+         (pull-plan (fixture-state)
+                    request-a
+                    "nonce-round-0001"
+                    "request-round-0001"
+                    [])
+         ack-auth
+         (authorize (result-state first)
+                    "sync.ack"
+                    request-b
+                    "nonce-round-0002"
+                    "request-round-0002")
+         ack
+         (session/acknowledge-pull
+          (result-state ack-auth)
+          (get ack-auth :value)
+          {:cursor 1
+           :offer-request-digest request-a
+           :received-digests [object-a commit-a]})
+         second
+         (pull-plan (result-state ack)
+                    request-c
+                    "nonce-round-0003"
+                    "request-round-0003"
+                    [object-a commit-a])]
+     [(get second :ok)
+      (get-in second [:value :cursor])
+      (get-in second [:value :missing])])
+   [true 2 []])
+
+  (test/check
+   "bounded pull batches remain explicitly incomplete until another round"
+   (let [plan
+         (pull-plan
+          (fixture-state {:max-sync-missing-digests 1})
+          request-a
+          "nonce-bounded-0001"
+          "request-bounded-0001"
+          [])]
+     [(get-in plan [:value :missing])
+      (get-in plan [:value :complete])])
+   [[object-a] false])
+
+  (test/check
+   "an incomplete object closure cannot be advertised to another device"
+   (let [state (fixture-state)
+         broken
+         (assoc state :objects (dissoc (get state :objects) object-a))
+         plan
+         (pull-plan broken
+                    request-a
+                    "nonce-incomplete-0001"
+                    "request-incomplete-0001"
+                    [])]
+     [(get plan :ok) (error-code plan)])
+   [false "tahto.sync/closure-incomplete"])
+
+  (test/check
+   "push negotiation does not disclose a digest stored only for another namespace"
+   (let [authorized
+         (authorize (fixture-state)
+                    "sync.push"
+                    request-a
+                    "nonce-push-0001"
+                    "request-push-0001")
+         plan
+         (session/plan-push
+          (result-state authorized)
+          (get authorized :value)
+          {:digests [object-a hidden-object object-b]})]
+     [(get plan :ok)
+      (get-in plan [:value :present])
+      (get-in plan [:value :missing])])
+   [true [object-a] [hidden-object object-b]])
+
+  (test/check
+   "a context for another operation cannot be reused as sync authority"
+   (let [authorized
+         (authorize (fixture-state)
+                    "object.read"
+                    request-a
+                    "nonce-context-0001"
+                    "request-context-0001")
+         plan
+         (session/plan-pull
+          (result-state authorized)
+          (get authorized :value)
+          {:known-digests []})]
+     [(get plan :ok) (error-code plan)])
+   [false "tahto.sync/context-not-authorized"])] )
