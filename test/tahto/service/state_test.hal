@@ -1,0 +1,516 @@
+(ns tahto.service.state-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.service.state :as service]
+            [tahto.store.model :as model]
+            [tahto.sync.device :as device]))
+
+(def application "app.example")
+(def namespace "profile.primary")
+(def other-namespace "profile.other")
+(def collection "archive")
+(def service-id "service.archive.index")
+(def device-id "device.a")
+(def public-key "ed25519:device-a-public-key")
+
+(def object-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def object-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def hidden-object
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def artifact-a
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def artifact-b
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def request-a
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def request-b
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def request-c
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def request-d
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+(def approval
+  "sha256:4444444444444444444444444444444444444444444444444444444444444444")
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn add-object
+  [state app ns-id digest size]
+  (let [key (model/namespace-key app ns-id)
+        references (model/namespace-references state app ns-id)]
+    (assoc
+     (assoc state
+            :objects
+            (assoc (get state :objects)
+                   digest
+                   (model/object-record digest size)))
+     :references
+     (assoc (get state :references)
+            key
+            (conj references digest)))))
+
+(defn fixture-state
+  ([]
+   (fixture-state {}))
+  ([limits]
+   (let [enrolled
+         (device/enrol-device
+          (model/empty-state limits)
+          {:protocol validate/device-enrolment-protocol
+           :authorized true
+           :node "node.home"
+           :approval-digest approval
+           :device
+           {:protocol model/device-protocol
+            :id device-id
+            :node "node.home"
+            :public-key public-key
+            :status "enrolled"
+            :enrolled-at "2026-08-07T00:00:00Z"}})
+         with-input
+         (add-object (result-state enrolled)
+                     application namespace object-a 4)
+         with-output
+         (add-object with-input application namespace object-b 8)]
+     (add-object with-output
+                 application other-namespace hidden-object 16))))
+
+(defn proof
+  [operation digest nonce idempotency-key]
+  {:protocol validate/request-verification-protocol
+   :verified true
+   :device device-id
+   :public-key public-key
+   :operation operation
+   :application application
+   :namespace namespace
+   :collection collection
+   :request-digest digest
+   :nonce nonce
+   :idempotency-key idempotency-key
+   :timestamp "2026-08-07T00:01:00Z"})
+
+(defn authorize
+  [state operation digest nonce idempotency-key]
+  (device/authorize-request
+   state
+   (proof operation digest nonce idempotency-key)))
+
+(defn descriptor
+  ([]
+   (descriptor artifact-a))
+  ([artifact]
+   {:protocol service/service-protocol
+    :id service-id
+    :application application
+    :service-protocol "historia.archive.index/1"
+    :worker-version "1.0.0"
+    :artifact-digest artifact
+    :collections [collection]
+    :operations ["read" "job"]
+    :resources
+    {:max-memory-bytes 134217728
+     :max-cpu-millis 30000
+     :max-output-bytes 67108864}
+    :status "registered"}))
+
+(defn register
+  [state digest nonce idempotency-key record]
+  (let [authorized
+        (authorize state
+                   "service.register"
+                   digest nonce idempotency-key)]
+    (service/register-service
+     (result-state authorized)
+     (get authorized :value)
+     record)))
+
+(defn registered-state
+  ([]
+   (registered-state {}))
+  ([limits]
+   (result-state
+    (register (fixture-state limits)
+              request-a
+              "nonce-register-0001"
+              "request-register-0001"
+              (descriptor)))))
+
+(defn queued-job
+  ([]
+   (queued-job "job.one" "job-idempotency-0001" [object-a]))
+  ([job idempotency-key input-roots]
+   {:protocol service/job-protocol
+    :id job
+    :application application
+    :service service-id
+    :state "queued"
+    :input-roots input-roots
+    :output-roots []
+    :attempt 0
+    :idempotency-key idempotency-key
+    :created-at "2026-08-07T00:02:00Z"
+    :updated-at "2026-08-07T00:02:00Z"}))
+
+(defn enqueue
+  [state digest nonce job]
+  (let [authorized
+        (authorize state
+                   "job.enqueue"
+                   digest nonce (get job :idempotency-key))]
+    (service/enqueue-job
+     (result-state authorized)
+     (get authorized :value)
+     job)))
+
+(defn transition
+  [state digest nonce idempotency-key job]
+  (let [authorized
+        (authorize state
+                   "job.transition"
+                   digest nonce idempotency-key)]
+    (service/transition-job
+     (result-state authorized)
+     (get authorized :value)
+     job)))
+
+(defn running-job
+  [job]
+  (assoc
+   (assoc
+    (assoc job :state "running")
+    :attempt 1)
+   :updated-at "2026-08-07T00:03:00Z"))
+
+(defn completed-job
+  [job output-roots]
+  (assoc
+   (assoc
+    (assoc job :state "completed")
+    :output-roots output-roots)
+   :updated-at "2026-08-07T00:04:00Z"))
+
+(test/print-results
+ [(test/check
+   "service descriptors are closed inert records"
+   [(service/service? (descriptor))
+    (service/service?
+     (assoc (descriptor) :command "run-unreviewed-worker"))]
+   [true false])
+
+  (test/check
+   "registration stores an exact digest-pinned descriptor"
+   (let [result
+         (register (fixture-state)
+                   request-a
+                   "nonce-store-service-0001"
+                   "request-store-service-0001"
+                   (descriptor))
+         state (result-state result)]
+     [(get result :ok)
+      (= (descriptor)
+         (service/service-record state application service-id))
+      (get-in result [:value :receipt-action])
+      (get-in result [:value :service :artifact-digest])])
+   [true true "service.register" artifact-a])
+
+  (test/check
+   "a context for another operation cannot register a service"
+   (let [authorized
+         (authorize (fixture-state)
+                    "sync.pull"
+                    request-a
+                    "nonce-wrong-context-0001"
+                    "request-wrong-context-0001")
+         result
+         (service/register-service
+          (result-state authorized)
+          (get authorized :value)
+          (descriptor))]
+     [(get result :ok) (error-code result)])
+   [false "tahto.service/context-not-authorized"])
+
+  (test/check
+   "a service id cannot be rebound to a different artifact"
+   (let [first
+         (register (fixture-state)
+                   request-a
+                   "nonce-service-conflict-0001"
+                   "request-service-conflict-0001"
+                   (descriptor))
+         conflict
+         (register (result-state first)
+                   request-b
+                   "nonce-service-conflict-0002"
+                   "request-service-conflict-0002"
+                   (descriptor artifact-b))]
+     [(get conflict :ok) (error-code conflict)])
+   [false "tahto.service/descriptor-conflict"])
+
+  (test/check
+   "disabling a service prevents it from accepting new jobs"
+   (let [state (registered-state)
+         disable-authorized
+         (authorize state
+                    "service.disable"
+                    request-b
+                    "nonce-disable-0001"
+                    "request-disable-0001")
+         disabled
+         (service/disable-service
+          (result-state disable-authorized)
+          (get disable-authorized :value)
+          {:service service-id
+           :artifact-digest artifact-a})
+         queued (queued-job)
+         attempted
+         (enqueue (result-state disabled)
+                  request-c
+                  "nonce-disabled-enqueue-0001"
+                  queued)]
+     [(get-in disabled [:value :status])
+      (get attempted :ok)
+      (error-code attempted)])
+   ["disabled" false "tahto.job/service-not-authorized"])
+
+  (test/check
+   "enqueue is durable and idempotent for the exact signed request"
+   (let [job (queued-job)
+         first
+         (enqueue (registered-state)
+                  request-b
+                  "nonce-enqueue-0001"
+                  job)
+         retry
+         (enqueue (result-state first)
+                  request-b
+                  "nonce-enqueue-0002"
+                  job)]
+     [(get first :ok)
+      (get retry :ok)
+      (get-in retry [:value :replayed])
+      (count (service/jobs (result-state retry)))])
+   [true true true 1])
+
+  (test/check
+   "one job idempotency key cannot identify different work"
+   (let [first-job
+         (queued-job "job.one" "job-idempotency-0001" [object-a])
+         second-job
+         (queued-job "job.two" "job-idempotency-0001" [object-a])
+         first
+         (enqueue (registered-state)
+                  request-b
+                  "nonce-job-conflict-0001"
+                  first-job)
+         conflict
+         (enqueue (result-state first)
+                  request-b
+                  "nonce-job-conflict-0002"
+                  second-job)]
+     [(get conflict :ok) (error-code conflict)])
+   [false "tahto.job/idempotency-conflict"])
+
+  (test/check
+   "job inputs cannot cross their authorized namespace"
+   (let [job
+         (queued-job "job.hidden"
+                     "job-idempotency-hidden"
+                     [hidden-object])
+         result
+         (enqueue (registered-state)
+                  request-b
+                  "nonce-hidden-input-0001"
+                  job)]
+     [(get result :ok) (error-code result)])
+   [false "tahto.job/input-closure-not-authorized"])
+
+  (test/check
+   "claiming queued work increments the durable attempt exactly once"
+   (let [queued (queued-job)
+         enqueued
+         (enqueue (registered-state)
+                  request-b
+                  "nonce-claim-0001"
+                  queued)
+         running (running-job queued)
+         claimed
+         (transition (result-state enqueued)
+                     request-c
+                     "nonce-claim-0002"
+                     "request-claim-0002"
+                     running)]
+     [(get claimed :ok)
+      (get-in claimed [:value :job :state])
+      (get-in claimed [:value :job :attempt])])
+   [true "running" 1])
+
+  (test/check
+   "attempt counters cannot jump when work is claimed"
+   (let [queued (queued-job)
+         enqueued
+         (enqueue (registered-state)
+                  request-b
+                  "nonce-attempt-jump-0001"
+                  queued)
+         invalid
+         (assoc (running-job queued) :attempt 2)
+         result
+         (transition (result-state enqueued)
+                     request-c
+                     "nonce-attempt-jump-0002"
+                     "request-attempt-jump-0002"
+                     invalid)]
+     [(get result :ok) (error-code result)])
+   [false "tahto.job/attempt-invalid"])
+
+  (test/check
+   "completed outputs must be a complete authorized closure"
+   (let [queued (queued-job)
+         enqueued
+         (enqueue (registered-state)
+                  request-b
+                  "nonce-complete-0001"
+                  queued)
+         running (running-job queued)
+         claimed
+         (transition (result-state enqueued)
+                     request-c
+                     "nonce-complete-0002"
+                     "request-complete-0002"
+                     running)
+         completed
+         (transition (result-state claimed)
+                     request-d
+                     "nonce-complete-0003"
+                     "request-complete-0003"
+                     (completed-job running [object-b]))]
+     [(get completed :ok)
+      (get-in completed [:value :job :state])
+      (get-in completed [:value :job :output-roots])])
+   [true "completed" [object-b]])
+
+  (test/check
+   "a hidden output cannot be published as a completed job result"
+   (let [queued (queued-job)
+         enqueued
+         (enqueue (registered-state)
+                  request-b
+                  "nonce-hidden-output-0001"
+                  queued)
+         running (running-job queued)
+         claimed
+         (transition (result-state enqueued)
+                     request-c
+                     "nonce-hidden-output-0002"
+                     "request-hidden-output-0002"
+                     running)
+         result
+         (transition (result-state claimed)
+                     request-d
+                     "nonce-hidden-output-0003"
+                     "request-hidden-output-0003"
+                     (completed-job running [hidden-object]))]
+     [(get result :ok) (error-code result)])
+   [false "tahto.job/output-closure-not-authorized"])
+
+  (test/check
+   "completed and cancelled jobs are terminal"
+   (let [queued (queued-job)
+         enqueued
+         (enqueue (registered-state)
+                  request-b
+                  "nonce-terminal-0001"
+                  queued)
+         running (running-job queued)
+         claimed
+         (transition (result-state enqueued)
+                     request-c
+                     "nonce-terminal-0002"
+                     "request-terminal-0002"
+                     running)
+         completed
+         (transition (result-state claimed)
+                     request-d
+                     "nonce-terminal-0003"
+                     "request-terminal-0003"
+                     (completed-job running [object-b]))
+         mutated
+         (assoc
+          (assoc
+           (completed-job running [object-b])
+           :state "cancelled")
+          :output-roots [])
+         result
+         (transition (result-state completed)
+                     request-a
+                     "nonce-terminal-0004"
+                     "request-terminal-0004"
+                     mutated)]
+     [(get result :ok) (error-code result)])
+   [false "tahto.job/job-terminal"])
+
+  (test/check
+   "a disabled service may settle already-running work but cannot retry it"
+   (let [queued (queued-job)
+         enqueued
+         (enqueue (registered-state)
+                  request-b
+                  "nonce-settle-0001"
+                  queued)
+         running (running-job queued)
+         claimed
+         (transition (result-state enqueued)
+                     request-c
+                     "nonce-settle-0002"
+                     "request-settle-0002"
+                     running)
+         disable-authorized
+         (authorize (result-state claimed)
+                    "service.disable"
+                    request-d
+                    "nonce-settle-0003"
+                    "request-settle-0003")
+         disabled
+         (service/disable-service
+          (result-state disable-authorized)
+          (get disable-authorized :value)
+          {:service service-id
+           :artifact-digest artifact-a})
+         completed
+         (transition (result-state disabled)
+                     request-a
+                     "nonce-settle-0004"
+                     "request-settle-0004"
+                     (completed-job running [object-b]))]
+     [(get completed :ok)
+      (get-in completed [:value :job :state])])
+   [true "completed"])
+
+  (test/check
+   "service and job tables fail closed at configured bounds"
+   (let [service-limited
+         (register (fixture-state {:max-services 0})
+                   request-a
+                   "nonce-service-limit-0001"
+                   "request-service-limit-0001"
+                   (descriptor))
+         state (registered-state {:max-jobs 0})
+         job-limited
+         (enqueue state
+                  request-b
+                  "nonce-job-limit-0001"
+                  (queued-job))]
+     [(error-code service-limited)
+      (error-code job-limited)])
+   ["tahto.service/service-limit-reached"
+    "tahto.job/job-limit-reached"])] )
