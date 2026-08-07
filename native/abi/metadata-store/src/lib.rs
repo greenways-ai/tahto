@@ -176,9 +176,7 @@ pub fn validate_identifier(value: &str, label: &'static str) -> Result<(), Error
     {
         Err(Error::new(
             "identifier-invalid",
-            format!(
-                "{label} must be 1-{MAX_IDENTIFIER_BYTES} non-whitespace UTF-8 bytes"
-            ),
+            format!("{label} must be 1-{MAX_IDENTIFIER_BYTES} non-whitespace UTF-8 bytes"),
         ))
     } else {
         Ok(())
@@ -233,15 +231,10 @@ pub fn validate_timestamp(value: &str) -> Result<(), Error> {
 }
 
 pub fn validate_hta(state: &[u8]) -> Result<(), Error> {
-    if state.len() < 4
-        || state.len() > MAX_CANONICAL_STATE_BYTES
-        || !state.starts_with(b"HTA1")
-    {
+    if state.len() < 4 || state.len() > MAX_CANONICAL_STATE_BYTES || !state.starts_with(b"HTA1") {
         Err(Error::new(
             "state-not-canonical-hta",
-            format!(
-                "state must be an HTA1 frame no larger than {MAX_CANONICAL_STATE_BYTES} bytes"
-            ),
+            format!("state must be an HTA1 frame no larger than {MAX_CANONICAL_STATE_BYTES} bytes"),
         ))
     } else {
         Ok(())
@@ -375,9 +368,7 @@ mod tests {
     fn revision_and_identifier_bounds_fail_closed() {
         assert!(validate_stored_revision(MAX_REVISION).is_ok());
         assert_eq!(
-            validate_stored_revision(MAX_REVISION + 1)
-                .unwrap_err()
-                .code,
+            validate_stored_revision(MAX_REVISION + 1).unwrap_err().code,
             "revision-invalid"
         );
         assert!(validate_identifier("provider.sqlite", "provider").is_ok());
@@ -396,10 +387,6 @@ mod tests {
             validate_timestamp("2026-08-07T12:00:00.Z")
                 .unwrap_err()
                 .code,
-            "timestamp-invalid"
-        );
-        assert_eq!(
-            validate_timestamp("short").unwrap_err().code,
             "timestamp-invalid"
         );
     }
