@@ -154,7 +154,9 @@ impl SqliteMetadataStore {
         let snapshot = load_snapshot_on(&self.connection)?;
         let receipt_count: i64 = self
             .connection
-            .query_row("SELECT COUNT(*) FROM metadata_receipts", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM metadata_receipts", [], |row| {
+                row.get(0)
+            })
             .map_err(database_error)?;
         if snapshot.is_none() && receipt_count != 0 {
             return Err(Error::new(
@@ -166,7 +168,9 @@ impl SqliteMetadataStore {
         if let Some(snapshot) = snapshot {
             let maximum_receipt_revision: Option<i64> = self
                 .connection
-                .query_row("SELECT MAX(revision) FROM metadata_receipts", [], |row| row.get(0))
+                .query_row("SELECT MAX(revision) FROM metadata_receipts", [], |row| {
+                    row.get(0)
+                })
                 .map_err(database_error)?;
             if maximum_receipt_revision
                 .map(|revision| revision < 0 || revision as u64 > snapshot.revision)
@@ -187,7 +191,8 @@ impl SqliteMetadataStore {
             let rows = statement
                 .query_map([], |row| row.get::<_, String>(0))
                 .map_err(database_error)?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(database_error)?
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(database_error)?
         };
         for plan_digest in plan_digests {
             receipt_on(&self.connection, &plan_digest)?.ok_or_else(|| {
@@ -232,7 +237,9 @@ impl Adapter for SqliteMetadataStore {
         }
 
         let receipt_count: i64 = transaction
-            .query_row("SELECT COUNT(*) FROM metadata_receipts", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM metadata_receipts", [], |row| {
+                row.get(0)
+            })
             .map_err(database_error)?;
         if receipt_count != 0 {
             return Err(Error::new(
@@ -417,10 +424,7 @@ fn load_snapshot_on(connection: &Connection) -> Result<Option<Snapshot>, Error> 
     .transpose()
 }
 
-fn receipt_on(
-    connection: &Connection,
-    plan_digest: &str,
-) -> Result<Option<CommitReceipt>, Error> {
+fn receipt_on(connection: &Connection, plan_digest: &str) -> Result<Option<CommitReceipt>, Error> {
     validate_digest(plan_digest, "plan digest")?;
     let row: Option<(i64, String, String, String, String)> = connection
         .query_row(
