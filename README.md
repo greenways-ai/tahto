@@ -109,14 +109,14 @@ verified receipt evidence
 
 Large object bodies never become ordinary Hara values. The kernel emits a closed
 set of native effects using opaque body handles. Hoplite's merged bounded
-streaming ABI defines the transport contract, while runtime/Nginx wiring and
-durable metadata persistence remain explicit follow-up work.
+streaming ABI and Nginx body binding define the transport contract, while object
+transfer execution and durable metadata persistence remain explicit follow-up
+work.
 
 Commit, head, backup and receipt transitions consume
 `tahto.record-verification/1` proofs. The installed key provider must bind the
-exact canonical bytes, digest, key identity and signature. TAHTO-4 validates and
-uses that proof; key enrolment, cryptographic verification and revocation remain
-TAHTO-5.
+exact canonical bytes, digest, key identity and signature. The Hara kernel
+validates and uses that proof; it does not emulate cryptography.
 
 See:
 
@@ -125,16 +125,44 @@ See:
 - [`test/tahto/store/vault_test.hal`](test/tahto/store/vault_test.hal)
 - [`test/tahto/store/history_test.hal`](test/tahto/store/history_test.hal)
 
+## Device, synchronization and durable-job kernels
+
+TAHTO-5 adds device enrolment and revocation identity, durable nonce and request
+idempotency evidence, namespace-scoped pull offers, bounded push negotiation and
+monotonic per-device collection cursors.
+
+TAHTO-6 adds inert service registrations and durable job transitions. Service
+records pin immutable package or binary digests and contain no executable code.
+Jobs retain an internal application/namespace/collection coordinate, require
+complete authorized input and output closures, use exact enqueue idempotency,
+advance attempts only when work is claimed and preserve terminal states.
+
+Worker implementation and scheduling remain in application repositories and
+installed providers. Greenways OS retains worker installation, approval,
+credentials, grants and private keys.
+
+See:
+
+- [`protocol/sync.md`](protocol/sync.md)
+- [`protocol/services.md`](protocol/services.md)
+- [`test/tahto/sync/device_test.hal`](test/tahto/sync/device_test.hal)
+- [`test/tahto/sync/session_test.hal`](test/tahto/sync/session_test.hal)
+- [`test/tahto/service/state_test.hal`](test/tahto/service/state_test.hal)
+
 ## Current implementation status
 
 TAHTO-2 defines the stable application-neutral record envelopes. TAHTO-3
-provides the Hara object-vault kernel, and TAHTO-4 provides immutable commits,
-atomic signed heads, backups and restore planning.
+provides the Hara object-vault kernel, TAHTO-4 provides immutable commits,
+atomic signed heads, backups and restore planning, TAHTO-5 provides device,
+replay and incremental-sync planning, and TAHTO-6 provides inert service and
+durable-job state.
 
-The native byte data plane, durable metadata transaction provider, signed-device
-verifier, enrolment and incremental replication are not represented as complete.
-The status document reports these boundaries directly instead of emulating them
-with whole-file Python or in-memory production stores.
+The native object-transfer executor, durable metadata transaction provider,
+signature and request-freshness provider, nonce/idempotency retention
+compaction, worker executor, pairing UX and complete two-device conformance
+scenario are not represented as complete. The status document reports these
+boundaries directly instead of emulating them with whole-file Python or
+in-memory production stores.
 
 See [`LINEAGE.md`](LINEAGE.md) for the extracted Beacon history and
 [`protocol/tahto.md`](protocol/tahto.md) for the authority boundary.
