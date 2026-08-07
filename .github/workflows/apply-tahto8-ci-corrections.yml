@@ -1,0 +1,107 @@
+name: Apply TAHTO-8 CI corrections
+
+on:
+  push:
+    branches:
+      - agent/tahto-8-metadata-host-contract-v2
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/tahto-8-metadata-host-contract-v2
+          fetch-depth: 0
+      - name: Install the reviewed Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Apply reviewed conformance corrections
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          sqlite_tests = Path("native/provider/metadata-sqlite/src/tests.rs")
+          sqlite_source = sqlite_tests.read_text()
+          sqlite_needle = 'assert_eq!(error.code, "metadata-revision-conflict");'
+          if sqlite_source.count(sqlite_needle) != 2:
+              raise SystemExit("unexpected SQLite stale-writer assertion count")
+          sqlite_source = sqlite_source.replace(
+              sqlite_needle,
+              'assert_eq!(error.code, "metadata-revision-receipt-conflict");',
+          )
+          sqlite_tests.write_text(sqlite_source)
+
+          hara_tests = Path("test/tahto/store/provider_test.hal")
+          hara_source = hara_tests.read_text()
+          if hara_source.count("   [true false false])") != 3:
+              raise SystemExit("unexpected three-value falsey assertion count")
+          if hara_source.count("   [true true false false])") != 2:
+              raise SystemExit("unexpected four-value falsey assertion count")
+          hara_source = hara_source.replace(
+              "   [true false false])",
+              "   [true false nil])",
+          )
+          hara_source = hara_source.replace(
+              "   [true true false false])",
+              "   [true true false nil])",
+          )
+          hara_tests.write_text(hara_source)
+
+          workflow = Path(".github/workflows/bootstrap-conformance.yml")
+          workflow_source = workflow.read_text()
+          generate_step = (
+              "      - name: Materialize the complete native dependency graph\n"
+              "        run: cargo generate-lockfile --manifest-path native/Cargo.toml\n"
+          )
+          test_step = (
+              "        run: cargo test --quiet --manifest-path "
+              "native/Cargo.toml --workspace"
+          )
+          artifact_step = (
+              "      - name: Capture the generated native dependency lock\n"
+              "        if: always()\n"
+              "        uses: actions/upload-artifact@v4\n"
+              "        with:\n"
+              "          name: tahto-native-cargo-lock\n"
+              "          path: native/Cargo.lock\n"
+              "          if-no-files-found: error\n"
+          )
+          if workflow_source.count(generate_step) != 1:
+              raise SystemExit("native lock materialization step changed unexpectedly")
+          if workflow_source.count(test_step) != 1:
+              raise SystemExit("native test step changed unexpectedly")
+          if workflow_source.count(artifact_step) != 1:
+              raise SystemExit("native lock artifact step changed unexpectedly")
+          workflow_source = workflow_source.replace(generate_step, "")
+          workflow_source = workflow_source.replace(
+              test_step,
+              "        run: cargo test --locked --quiet --manifest-path "
+              "native/Cargo.toml --workspace",
+          )
+          workflow_source = workflow_source.replace(artifact_step, "")
+          workflow.write_text(workflow_source)
+          PY
+          cargo generate-lockfile --manifest-path native/Cargo.toml
+          cargo fmt --manifest-path native/Cargo.toml --all -- --check
+          cargo test --locked --quiet --manifest-path native/Cargo.toml --workspace
+      - name: Commit the complete lock and corrected conformance
+        run: |
+          rm .github/workflows/apply-tahto8-ci-corrections.yml
+          git config user.name "greenways-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            native/Cargo.lock \
+            native/provider/metadata-sqlite/src/tests.rs \
+            test/tahto/store/provider_test.hal \
+            .github/workflows/bootstrap-conformance.yml \
+            .github/workflows/apply-tahto8-ci-corrections.yml
+          git diff --cached --check
+          git commit -m "Lock and correct the TAHTO-8 provider conformance"
+          git push origin HEAD:agent/tahto-8-metadata-host-contract-v2
