@@ -217,11 +217,11 @@ pub fn validate_timestamp(value: &str) -> Result<(), Error> {
             .iter()
             .all(|index| bytes[*index].is_ascii_digit());
     let fractional = bytes.len() == 20
-        || (bytes[19] == b'.'
-            && bytes.len() > 21
+        || (bytes.len() > 21
+            && bytes[19] == b'.'
             && bytes[20..bytes.len() - 1]
                 .iter()
-                .all(u8::is_ascii_digit));
+                .all(|byte| byte.is_ascii_digit()));
     if fixed && fractional {
         Ok(())
     } else {
@@ -396,6 +396,10 @@ mod tests {
             validate_timestamp("2026-08-07T12:00:00.Z")
                 .unwrap_err()
                 .code,
+            "timestamp-invalid"
+        );
+        assert_eq!(
+            validate_timestamp("short").unwrap_err().code,
             "timestamp-invalid"
         );
     }
