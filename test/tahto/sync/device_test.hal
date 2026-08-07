@@ -1,0 +1,340 @@
+(ns tahto.sync.device-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.sync.device :as device]))
+
+(def node "node.home")
+(def device-a "device.a")
+(def device-b "device.b")
+(def public-key-a "ed25519:device-a-public-key")
+(def public-key-b "ed25519:device-b-public-key")
+(def approval-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def approval-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def request-a
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def request-b
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def result-a
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def result-b
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn device-record
+  [id public-key]
+  {:protocol model/device-protocol
+   :id id
+   :node node
+   :public-key public-key
+   :status "enrolled"
+   :enrolled-at "2026-08-07T00:00:00Z"})
+
+(defn enrolment
+  [record approval]
+  {:protocol validate/device-enrolment-protocol
+   :authorized true
+   :node node
+   :approval-digest approval
+   :device record})
+
+(defn revocation
+  [id]
+  {:protocol validate/device-revocation-protocol
+   :authorized true
+   :node node
+   :device id
+   :revoked-at "2026-08-07T00:10:00Z"
+   :approval-digest approval-b})
+
+(defn request-proof
+  [id public-key operation digest nonce idempotency-key]
+  {:protocol validate/request-verification-protocol
+   :verified true
+   :device id
+   :public-key public-key
+   :operation operation
+   :application "app.example"
+   :namespace "profile.primary"
+   :collection "archive"
+   :request-digest digest
+   :nonce nonce
+   :idempotency-key idempotency-key
+   :timestamp "2026-08-07T00:01:00Z"})
+
+(defn enrolled-state
+  []
+  (result-state
+   (device/enrol-device
+    (model/empty-state)
+    (enrolment (device-record device-a public-key-a) approval-a))))
+
+(test/print-results
+ [(test/check
+   "enrolment stores identity but mints no grants or administrator authority"
+   (let [result
+         (device/enrol-device
+          (model/empty-state)
+          (enrolment (device-record device-a public-key-a) approval-a))
+         state (result-state result)]
+     [(get result :ok)
+      (get (model/device-record state device-a) :status)
+      (model/public-key-device state public-key-a)
+      (get-in result [:value :administrator])
+      (get-in result [:value :grants])])
+   [true "enrolled" device-a false []])
+
+  (test/check
+   "the same approved device enrolment is idempotent"
+   (let [proof (enrolment (device-record device-a public-key-a) approval-a)
+         first (device/enrol-device (model/empty-state) proof)
+         second (device/enrol-device (result-state first) proof)]
+     [(get second :ok)
+      (= (result-state first) (result-state second))])
+   [true true])
+
+  (test/check
+   "one public key cannot be paired to a second device"
+   (let [first
+         (device/enrol-device
+          (model/empty-state)
+          (enrolment (device-record device-a public-key-a) approval-a))
+         second
+         (device/enrol-device
+          (result-state first)
+          (enrolment (device-record device-b public-key-a) approval-b))]
+     [(get second :ok) (error-code second)])
+   [false "tahto.device/public-key-in-use"])
+
+  (test/check
+   "one device identity cannot be silently rebound to another key"
+   (let [first
+         (device/enrol-device
+          (model/empty-state)
+          (enrolment (device-record device-a public-key-a) approval-a))
+         conflict
+         (device/enrol-device
+          (result-state first)
+          (enrolment (device-record device-a public-key-b) approval-b))]
+     [(get conflict :ok) (error-code conflict)])
+   [false "tahto.device/device-conflict"])
+
+  (test/check
+   "management operations are outside the signed application request vocabulary"
+   (validate/device-request-verification?
+    (request-proof device-a
+                   public-key-a
+                   "management.device.revoke"
+                   request-a
+                   "nonce-management-0001"
+                   "request-management-0001"))
+   false)
+
+  (test/check
+   "an enrolled device receives a bounded request context"
+   (let [result
+         (device/authorize-request
+          (enrolled-state)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-a
+                         "nonce-authorize-0001"
+                         "request-authorize-0001"))
+         state (result-state result)]
+     [(get result :ok)
+      (validate/device-request-context? (get result :value))
+      (get-in result [:value :status])
+      (get-in result [:value :replayed])
+      (get (model/request-nonce state device-a "nonce-authorize-0001")
+           :request-digest)])
+   [true true "pending" false request-a])
+
+  (test/check
+   "a nonce is rejected on its second use even for the same request"
+   (let [proof
+         (request-proof device-a
+                        public-key-a
+                        "sync.pull"
+                        request-a
+                        "nonce-replay-0001"
+                        "request-replay-0001")
+         first (device/authorize-request (enrolled-state) proof)
+         second (device/authorize-request (result-state first) proof)]
+     [(get second :ok) (error-code second)])
+   [false "tahto.device/nonce-replayed"])
+
+  (test/check
+   "a fresh nonce may retry the same idempotent request"
+   (let [first
+         (device/authorize-request
+          (enrolled-state)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-a
+                         "nonce-idempotent-0001"
+                         "request-idempotent-0001"))
+         second
+         (device/authorize-request
+          (result-state first)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-a
+                         "nonce-idempotent-0002"
+                         "request-idempotent-0001"))]
+     [(get second :ok)
+      (get-in second [:value :replayed])
+      (get-in second [:value :status])])
+   [true true "pending"])
+
+  (test/check
+   "an idempotency key cannot be reused for different canonical bytes"
+   (let [first
+         (device/authorize-request
+          (enrolled-state)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-a
+                         "nonce-conflict-0001"
+                         "request-conflict-0001"))
+         conflict
+         (device/authorize-request
+          (result-state first)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-b
+                         "nonce-conflict-0002"
+                         "request-conflict-0001"))]
+     [(get conflict :ok) (error-code conflict)])
+   [false "tahto.device/idempotency-conflict"])
+
+  (test/check
+   "completed idempotent requests return only the stored result digest"
+   (let [authorized
+         (device/authorize-request
+          (enrolled-state)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-a
+                         "nonce-complete-0001"
+                         "request-complete-0001"))
+         completion
+         {:device device-a
+          :idempotency-key "request-complete-0001"
+          :request-digest request-a
+          :result-digest result-a
+          :completed-at "2026-08-07T00:02:00Z"}
+         completed
+         (device/complete-request (result-state authorized) completion)
+         retried
+         (device/authorize-request
+          (result-state completed)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-a
+                         "nonce-complete-0002"
+                         "request-complete-0001"))]
+     [(get completed :ok)
+      (get-in completed [:value :status])
+      (get-in retried [:value :status])
+      (get-in retried [:value :replayed])
+      (get-in retried [:value :result-digest])])
+   [true "completed" "completed" true result-a])
+
+  (test/check
+   "a completed request result cannot be mutated"
+   (let [authorized
+         (device/authorize-request
+          (enrolled-state)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-a
+                         "nonce-result-0001"
+                         "request-result-0001"))
+         first
+         (device/complete-request
+          (result-state authorized)
+          {:device device-a
+           :idempotency-key "request-result-0001"
+           :request-digest request-a
+           :result-digest result-a
+           :completed-at "2026-08-07T00:02:00Z"})
+         conflict
+         (device/complete-request
+          (result-state first)
+          {:device device-a
+           :idempotency-key "request-result-0001"
+           :request-digest request-a
+           :result-digest result-b
+           :completed-at "2026-08-07T00:03:00Z"})]
+     [(get conflict :ok) (error-code conflict)])
+   [false "tahto.device/completion-conflict"])
+
+  (test/check
+   "revocation is durable and blocks subsequent signed requests"
+   (let [revoked (device/revoke-device (enrolled-state) (revocation device-a))
+         request
+         (device/authorize-request
+          (result-state revoked)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-a
+                         "nonce-revoked-0001"
+                         "request-revoked-0001"))]
+     [(get revoked :ok)
+      (get (model/device-record (result-state revoked) device-a) :status)
+      (get request :ok)
+      (error-code request)])
+   [true "revoked" false "tahto.device/device-revoked"])
+
+  (test/check
+   "device and replay tables fail closed at configured bounds"
+   (let [limited (model/empty-state {:max-devices 1
+                                     :max-device-nonces 1})
+         first
+         (device/enrol-device
+          limited
+          (enrolment (device-record device-a public-key-a) approval-a))
+         second
+         (device/enrol-device
+          (result-state first)
+          (enrolment (device-record device-b public-key-b) approval-b))
+         authorized
+         (device/authorize-request
+          (result-state first)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-a
+                         "nonce-limit-0001"
+                         "request-limit-0001"))
+         nonce-limit
+         (device/authorize-request
+          (result-state authorized)
+          (request-proof device-a
+                         public-key-a
+                         "sync.pull"
+                         request-b
+                         "nonce-limit-0002"
+                         "request-limit-0002"))]
+     [(error-code second) (error-code nonce-limit)])
+   ["tahto.device/device-limit-reached"
+    "tahto.device/nonce-limit-reached"])] )

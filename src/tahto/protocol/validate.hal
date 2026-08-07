@@ -7,12 +7,32 @@
 (def verification-request-protocol "tahto.record-verification-request/1")
 (def verification-protocol "tahto.record-verification/1")
 (def restore-manifest-protocol "tahto.restore-manifest/1")
+(def device-enrolment-protocol "tahto.device-enrolment/1")
+(def device-revocation-protocol "tahto.device-revocation/1")
+(def request-verification-protocol "tahto.request-verification/1")
+(def request-context-protocol "tahto.device-request-context/1")
 
 (def signature-algorithms
   #{"ed25519" "p256-sha256"})
 
 (def head-kinds
   #{"device" "main"})
+
+(def device-statuses
+  #{"enrolled" "revoked"})
+
+(def device-operations
+  #{"object.negotiate"
+    "object.upload"
+    "object.read"
+    "commit.accept"
+    "head.read"
+    "head.update"
+    "backup.pin"
+    "restore.read"
+    "sync.push"
+    "sync.pull"
+    "sync.ack"})
 
 (def receipt-actions
   #{"object.store"
@@ -90,6 +110,22 @@
                   (recur (inc index))
                   false)))))))))
 
+(defn opaque-token?
+  [value]
+  (and (string? value)
+       (>= (count value) 8)
+       (<= (count value) 512)
+       (not (string/includes? value "\r"))
+       (not (string/includes? value "\n"))))
+
+(defn public-key?
+  [value]
+  (and (string? value)
+       (>= (count value) 16)
+       (<= (count value) 8192)
+       (not (string/includes? value "\r"))
+       (not (string/includes? value "\n"))))
+
 (defn signature?
   [value]
   (and
@@ -103,6 +139,98 @@
    (model/non-empty-string? (get value :value))
    (>= (count (get value :value)) 16)
    (<= (count (get value :value)) 8192)))
+
+(defn device?
+  [value]
+  (and
+   (exact-record?
+    value
+    #{:protocol :id :node :public-key :status :enrolled-at}
+    #{:revoked-at})
+   (= model/device-protocol (get value :protocol))
+   (model/identifier? (get value :id))
+   (model/identifier? (get value :node))
+   (public-key? (get value :public-key))
+   (has? device-statuses (get value :status))
+   (timestamp? (get value :enrolled-at))
+   (or
+    (and (= "enrolled" (get value :status))
+         (not (has? value :revoked-at)))
+    (and (= "revoked" (get value :status))
+         (has? value :revoked-at)
+         (timestamp? (get value :revoked-at))))))
+
+(defn device-enrolment?
+  [value]
+  (and
+   (exact-record?
+    value
+    #{:protocol :authorized :node :approval-digest :device}
+    #{})
+   (= device-enrolment-protocol (get value :protocol))
+   (= true (get value :authorized))
+   (model/identifier? (get value :node))
+   (model/canonical-digest? (get value :approval-digest))
+   (device? (get value :device))
+   (= "enrolled" (get-in value [:device :status]))
+   (= (get value :node) (get-in value [:device :node]))))
+
+(defn device-revocation?
+  [value]
+  (and
+   (exact-record?
+    value
+    #{:protocol :authorized :node :device :revoked-at :approval-digest}
+    #{})
+   (= device-revocation-protocol (get value :protocol))
+   (= true (get value :authorized))
+   (model/identifier? (get value :node))
+   (model/identifier? (get value :device))
+   (timestamp? (get value :revoked-at))
+   (model/canonical-digest? (get value :approval-digest))))
+
+(defn device-request-verification?
+  [value]
+  (and
+   (exact-record?
+    value
+    #{:protocol :verified :device :public-key :operation
+      :application :namespace :collection :request-digest
+      :nonce :idempotency-key :timestamp}
+    #{})
+   (= request-verification-protocol (get value :protocol))
+   (= true (get value :verified))
+   (model/identifier? (get value :device))
+   (public-key? (get value :public-key))
+   (has? device-operations (get value :operation))
+   (model/identifier? (get value :application))
+   (model/identifier? (get value :namespace))
+   (model/identifier? (get value :collection))
+   (model/canonical-digest? (get value :request-digest))
+   (opaque-token? (get value :nonce))
+   (opaque-token? (get value :idempotency-key))
+   (timestamp? (get value :timestamp))))
+
+(defn device-request-context?
+  [value]
+  (and
+   (exact-record?
+    value
+    #{:protocol :device :operation :application :namespace :collection
+      :request-digest :idempotency-key :status :replayed :result-digest}
+    #{})
+   (= request-context-protocol (get value :protocol))
+   (model/identifier? (get value :device))
+   (has? device-operations (get value :operation))
+   (model/identifier? (get value :application))
+   (model/identifier? (get value :namespace))
+   (model/identifier? (get value :collection))
+   (model/canonical-digest? (get value :request-digest))
+   (opaque-token? (get value :idempotency-key))
+   (has? #{"pending" "completed"} (get value :status))
+   (boolean? (get value :replayed))
+   (or (nil? (get value :result-digest))
+       (model/canonical-digest? (get value :result-digest)))))
 
 (defn verification-request
   [record-protocol digest maximum-bytes]

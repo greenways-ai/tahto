@@ -1,0 +1,250 @@
+(ns tahto.sync.session
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.graph :as graph]
+            [tahto.store.model :as model]
+            [tahto.store.vault :as vault]))
+
+(def sync-offer-protocol "tahto.sync-offer/1")
+(def sync-ack-protocol "tahto.sync-ack/1")
+(def sync-push-plan-protocol "tahto.sync-push-plan/1")
+
+(defn limits
+  [state]
+  (get state :limits))
+
+(defn authorized-context?
+  [context operation]
+  (and (validate/device-request-context? context)
+       (= "pending" (get context :status))
+       (= operation (get context :operation))))
+
+(defn collection-head-roots
+  [state application namespace collection]
+  (vec
+   (sort
+    (distinct
+     (reduce
+      (fn [roots entry]
+        (let [head (val entry)]
+          (if (and (= application (get head :application))
+                   (= namespace (get head :namespace))
+                   (= collection (get head :collection)))
+            (into roots (get head :commits))
+            roots)))
+      []
+      (get state :heads))))))
+
+(defn bounded-prefix
+  [values maximum]
+  (loop [index 0
+         output []]
+    (if (or (= index (count values))
+            (= index maximum))
+      output
+      (recur (inc index) (conj output (nth values index))))))
+
+(defn missing-from-known
+  [visited known]
+  (let [known-set (into #{} known)]
+    (vec
+     (sort
+      (reduce (fn [output digest]
+                (if (has? known-set digest)
+                  output
+                  (conj output digest)))
+              []
+              visited)))))
+
+(def pull-request-fields
+  #{:known-digests})
+
+(defn pull-request?
+  [value maximum]
+  (and
+   (validate/exact-record? value pull-request-fields #{})
+   (validate/digest-vector? (get value :known-digests))
+   (<= (count (get value :known-digests)) maximum)))
+
+(defn same-offer-request?
+  [offer context request]
+  (and (= (get offer :request-digest)
+          (get context :request-digest))
+       (= (get offer :known-digests)
+          (get request :known-digests))))
+
+(defn plan-pull
+  [state context request]
+  (let [device (get context :device)
+        application (get context :application)
+        namespace (get context :namespace)
+        collection (get context :collection)
+        existing (model/sync-offer
+                  state device application namespace collection)
+        known-maximum (get (limits state) :max-sync-known-digests)]
+    (cond
+      (not (authorized-context? context "sync.pull"))
+      (model/fail state "tahto.sync/context-not-authorized")
+
+      (not (pull-request? request known-maximum))
+      (model/fail state "tahto.sync/pull-request-invalid")
+
+      (not (nil? existing))
+      (if (same-offer-request? existing context request)
+        (model/ok state existing)
+        (model/fail state "tahto.sync/offer-pending"
+                    {:cursor (get existing :cursor)}))
+
+      :else
+      (let [heads (collection-head-roots
+                   state application namespace collection)]
+        (if (> (count heads) (get (limits state) :max-sync-heads))
+          (model/fail state "tahto.sync/head-set-too-wide"
+                      {:count (count heads)})
+          (let [closure (graph/closure-report-value state heads)]
+            (cond
+              (get closure :overflow)
+              (model/fail state "tahto.sync/closure-overflow")
+
+              (not (get closure :complete))
+              (model/fail state "tahto.sync/closure-incomplete"
+                          {:missing (get closure :missing)})
+
+              :else
+              (let [missing
+                    (missing-from-known
+                     (get closure :visited)
+                     (get request :known-digests))
+                    maximum (get (limits state) :max-sync-missing-digests)
+                    batch (bounded-prefix missing maximum)
+                    cursor
+                    (inc (model/sync-cursor
+                          state device application namespace collection))
+                    offer
+                    {:protocol sync-offer-protocol
+                     :direction "pull"
+                     :device device
+                     :application application
+                     :namespace namespace
+                     :collection collection
+                     :cursor cursor
+                     :request-digest (get context :request-digest)
+                     :known-digests (get request :known-digests)
+                     :heads heads
+                     :missing batch
+                     :complete (= (count batch) (count missing))}
+                    key (model/sync-key
+                         device application namespace collection)
+                    next-state
+                    (assoc state
+                           :sync-offers
+                           (assoc (get state :sync-offers) key offer))]
+                (model/ok next-state offer)))))))))
+
+(def ack-request-fields
+  #{:cursor :offer-request-digest :received-digests})
+
+(defn ack-request?
+  [value]
+  (and
+   (validate/exact-record? value ack-request-fields #{})
+   (model/positive-integer? (get value :cursor))
+   (model/canonical-digest? (get value :offer-request-digest))
+   (validate/digest-vector? (get value :received-digests))))
+
+(defn acknowledge-pull
+  [state context request]
+  (let [device (get context :device)
+        application (get context :application)
+        namespace (get context :namespace)
+        collection (get context :collection)
+        key (model/sync-key device application namespace collection)
+        offer (model/sync-offer
+               state device application namespace collection)]
+    (cond
+      (not (authorized-context? context "sync.ack"))
+      (model/fail state "tahto.sync/context-not-authorized")
+
+      (not (ack-request? request))
+      (model/fail state "tahto.sync/ack-request-invalid")
+
+      (nil? offer)
+      (model/fail state "tahto.sync/offer-missing")
+
+      (not (= (get request :cursor) (get offer :cursor)))
+      (model/fail state "tahto.sync/cursor-mismatch"
+                  {:expected (get offer :cursor)
+                   :received (get request :cursor)})
+
+      (not (= (get request :offer-request-digest)
+              (get offer :request-digest)))
+      (model/fail state "tahto.sync/offer-digest-mismatch")
+
+      (not (= (get request :received-digests)
+              (get offer :missing)))
+      (model/fail state "tahto.sync/acknowledgement-incomplete"
+                  {:expected (get offer :missing)
+                   :received (get request :received-digests)})
+
+      :else
+      (let [ack
+            {:protocol sync-ack-protocol
+             :device device
+             :application application
+             :namespace namespace
+             :collection collection
+             :cursor (get offer :cursor)
+             :heads (get offer :heads)
+             :received (get offer :missing)
+             :complete (get offer :complete)
+             :request-digest (get context :request-digest)}
+            next-state
+            (assoc
+             (assoc state
+                    :sync-cursors
+                    (assoc (get state :sync-cursors)
+                           key
+                           (get offer :cursor)))
+             :sync-offers
+             (dissoc (get state :sync-offers) key))]
+        (model/ok next-state ack)))))
+
+(def push-request-fields
+  #{:digests})
+
+(defn push-request?
+  [value maximum]
+  (and
+   (validate/exact-record? value push-request-fields #{})
+   (validate/digest-vector? (get value :digests))
+   (<= (count (get value :digests)) maximum)))
+
+(defn plan-push
+  [state context request]
+  (cond
+    (not (authorized-context? context "sync.push"))
+    (model/fail state "tahto.sync/context-not-authorized")
+
+    (not (push-request? request
+                        (get (limits state) :max-negotiate-digests)))
+    (model/fail state "tahto.sync/push-request-invalid")
+
+    :else
+    (let [negotiated
+          (vault/negotiate
+           state
+           {:application (get context :application)
+            :namespace (get context :namespace)
+            :digests (get request :digests)})]
+      (if (not (get negotiated :ok))
+        negotiated
+        (model/ok
+         state
+         {:protocol sync-push-plan-protocol
+          :device (get context :device)
+          :application (get context :application)
+          :namespace (get context :namespace)
+          :collection (get context :collection)
+          :present (get-in negotiated [:value :present])
+          :missing (get-in negotiated [:value :missing])
+          :request-digest (get context :request-digest)})))))
