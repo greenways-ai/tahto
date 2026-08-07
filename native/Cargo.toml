@@ -1,4 +1,10 @@
 [workspace]
-members = ["abi/metadata-store"]
-default-members = ["abi/metadata-store"]
+members = [
+  "abi/metadata-store",
+  "provider/metadata-sqlite",
+]
+default-members = [
+  "abi/metadata-store",
+  "provider/metadata-sqlite",
+]
 resolver = "2"
