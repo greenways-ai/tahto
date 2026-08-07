@@ -32,7 +32,11 @@
     "restore.read"
     "sync.push"
     "sync.pull"
-    "sync.ack"})
+    "sync.ack"
+    "service.register"
+    "service.disable"
+    "job.enqueue"
+    "job.transition"})
 
 (def receipt-actions
   #{"object.store"
