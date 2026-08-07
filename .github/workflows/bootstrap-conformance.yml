@@ -25,12 +25,15 @@ jobs:
         run: |
           test ! -e src-python
           test ! -e test-python
+          test ! -e .github/workflows/materialize-native-metadata-lock.yml
+          test ! -e .github/workflows/promote-native-metadata-sqlite.yml
           test -f src/tahto/store/model.hal
           test -f src/tahto/store/host.hal
           test -f src/tahto/store/vault.hal
           test -f src/tahto/store/graph.hal
           test -f src/tahto/store/history.hal
           test -f src/tahto/store/transaction.hal
+          test -f src/tahto/store/provider.hal
           test -f src/tahto/sync/device.hal
           test -f src/tahto/sync/session.hal
           test -f src/tahto/service/state.hal
@@ -40,12 +43,14 @@ jobs:
           test -f test/tahto/store/history_test.hal
           test -f test/tahto/store/vault_hardening_test.hal
           test -f test/tahto/store/transaction_test.hal
+          test -f test/tahto/store/provider_test.hal
           test -f test/tahto/sync/device_test.hal
           test -f test/tahto/sync/session_test.hal
           test -f test/tahto/service/state_test.hal
           test -f protocol/services.md
           test -f protocol/transactions.md
           test -f protocol/metadata-store.md
+          test -f protocol/metadata-host.md
           test -f native/.gitignore
           test -f native/Cargo.toml
           test -f native/Cargo.lock
@@ -56,6 +61,7 @@ jobs:
           test -f native/abi/metadata-store/tests/contract.rs
           test -f native/provider/metadata-sqlite/Cargo.toml
           test -f native/provider/metadata-sqlite/README.md
+          test -f native/provider/metadata-sqlite/CONFORMANCE.md
           test -f native/provider/metadata-sqlite/src/lib.rs
           test -f native/provider/metadata-sqlite/src/tests.rs
 
@@ -93,9 +99,16 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt
+      - name: Materialize the complete native dependency graph
+        run: cargo generate-lockfile --manifest-path native/Cargo.toml
       - name: Check native contract and provider formatting
         run: cargo fmt --manifest-path native/Cargo.toml --all -- --check
       - name: Test the metadata-store ABI and SQLite provider
-        run: cargo test --manifest-path native/Cargo.toml --workspace
-      - name: Print the generated native dependency lock
-        run: cat native/Cargo.lock
+        run: cargo test --quiet --manifest-path native/Cargo.toml --workspace
+      - name: Capture the generated native dependency lock
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tahto-native-cargo-lock
+          path: native/Cargo.lock
+          if-no-files-found: error
