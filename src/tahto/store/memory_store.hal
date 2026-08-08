@@ -1,0 +1,257 @@
+(ns tahto.store.memory-store
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
+
+;; Deterministic reference implementation of the generic `hara.store`
+;; mechanics. The driver deliberately treats values and receipts as opaque.
+;; Tahto state, transaction and receipt validation happens in
+;; `tahto.store.provider` before and after this boundary.
+
+(def fault-phases
+  #{"before-commit" "after-commit"})
+
+(def generic-operations
+  #{"load" "initialize" "compare-and-swap" "receipt"})
+
+(defn create
+  []
+  (atom {:snapshot nil
+         :receipts {}
+         :fail-next-cas nil}))
+
+(defn memory-state
+  [memory]
+  @memory)
+
+(defn snapshot-entry
+  [memory]
+  (get @memory :snapshot))
+
+(defn receipt-entry
+  [memory receipt-key]
+  (get (get @memory :receipts) receipt-key))
+
+(defn fail-next-compare-and-swap!
+  [memory phase]
+  (if
+   (has? fault-phases phase)
+   (do
+     (swap! memory
+            (fn [current]
+              (assoc current :fail-next-cas phase)))
+     true)
+   false))
+
+(defn generic-request?
+  [request]
+  (and
+   (map? request)
+   (= provider/request-protocol (get request :protocol))
+   (has? generic-operations (get request :operation))
+   (cond
+     (= "load" (get request :operation))
+     (validate/exact-record?
+      request
+      #{:protocol :operation}
+      #{})
+
+     (= "receipt" (get request :operation))
+     (and
+      (validate/exact-record?
+       request
+       #{:protocol :operation :receipt-key}
+       #{})
+      (model/canonical-digest? (get request :receipt-key)))
+
+     (= "initialize" (get request :operation))
+     (and
+      (validate/exact-record?
+       request
+       #{:protocol :operation :revision :value :value-digest}
+       #{})
+      (provider/provider-revision? (get request :revision))
+      (model/canonical-digest? (get request :value-digest)))
+
+     (= "compare-and-swap" (get request :operation))
+     (and
+      (validate/exact-record?
+       request
+       #{:protocol :operation :expected-revision :revision
+         :value :value-digest :receipt-key :receipt}
+       #{})
+      (provider/provider-revision?
+       (get request :expected-revision))
+      (provider/provider-revision? (get request :revision))
+      (< (get request :expected-revision)
+         provider/max-provider-revision)
+      (= (inc (get request :expected-revision))
+         (get request :revision))
+      (model/canonical-digest? (get request :value-digest))
+      (model/canonical-digest? (get request :receipt-key))
+      (not (nil? (get request :receipt))))
+
+     :else false)))
+
+(defn snapshot-result
+  [operation entry]
+  {:protocol provider/result-protocol
+   :operation operation
+   :revision (get entry :revision)
+   :value (get entry :value)
+   :value-digest (get entry :value-digest)})
+
+(defn receipt-result
+  [operation status entry]
+  {:protocol provider/result-protocol
+   :operation operation
+   :status status
+   :revision (get entry :revision)
+   :receipt-key (get entry :receipt-key)
+   :receipt (get entry :receipt)})
+
+(defn snapshot-matches-request?
+  [entry request]
+  (and
+   (map? entry)
+   (= (get entry :revision) (get request :revision))
+   (= (get entry :value) (get request :value))
+   (= (get entry :value-digest)
+      (get request :value-digest))))
+
+(defn receipt-matches-request?
+  [entry request]
+  (and
+   (map? entry)
+   (= (get entry :revision) (get request :revision))
+   (= (get entry :value) (get request :value))
+   (= (get entry :value-digest)
+      (get request :value-digest))
+   (= (get entry :receipt-key) (get request :receipt-key))
+   (= (get entry :receipt) (get request :receipt))))
+
+(defn load-value
+  [memory]
+  (let [entry (snapshot-entry memory)]
+    (if (map? entry)
+      (snapshot-result "load" entry)
+      nil)))
+
+(defn initialize-value
+  [memory request]
+  (let [current (snapshot-entry memory)
+        next-entry {:revision (get request :revision)
+                    :value (get request :value)
+                    :value-digest (get request :value-digest)}]
+    (cond
+      (nil? current)
+      (do
+        (swap! memory
+               (fn [store]
+                 (assoc store :snapshot next-entry)))
+        (snapshot-result "initialize" next-entry))
+
+      (snapshot-matches-request? current request)
+      (snapshot-result "initialize" current)
+
+      :else nil)))
+
+(defn clear-fault
+  [memory]
+  (let [phase (get @memory :fail-next-cas)]
+    (if (nil? phase)
+      nil
+      (do
+        (swap! memory
+               (fn [store]
+                 (assoc store :fail-next-cas nil)))
+        phase))))
+
+(defn eligible-compare-and-swap?
+  [current request]
+  (and
+   (map? current)
+   (= (get current :revision)
+      (get request :expected-revision))))
+
+(defn commit-compare-and-swap!
+  [memory request]
+  (let [next-snapshot {:revision (get request :revision)
+                       :value (get request :value)
+                       :value-digest (get request :value-digest)}
+        next-receipt {:revision (get request :revision)
+                      :value (get request :value)
+                      :value-digest (get request :value-digest)
+                      :receipt-key (get request :receipt-key)
+                      :receipt (get request :receipt)}]
+    (swap!
+     memory
+     (fn [store]
+       (assoc
+        (assoc store :snapshot next-snapshot)
+        :receipts
+        (assoc (get store :receipts)
+               (get request :receipt-key)
+               next-receipt))))
+    next-receipt))
+
+(defn compare-and-swap-value
+  [memory request]
+  (let [existing
+        (receipt-entry memory (get request :receipt-key))]
+    (cond
+      (map? existing)
+      (if
+       (receipt-matches-request? existing request)
+       (receipt-result "compare-and-swap" "replayed" existing)
+       nil)
+
+      :else
+      (let [current (snapshot-entry memory)]
+        (if
+         (eligible-compare-and-swap? current request)
+         (let [phase (clear-fault memory)]
+           (cond
+             (= phase "before-commit")
+             nil
+
+             :else
+             (let [committed (commit-compare-and-swap! memory request)]
+               (if
+                (= phase "after-commit")
+                nil
+                (receipt-result
+                 "compare-and-swap" "applied" committed)))))
+         nil)))))
+
+(defn receipt-value
+  [memory request]
+  (let [entry (receipt-entry memory (get request :receipt-key))]
+    (if
+     (map? entry)
+     (receipt-result "receipt" "replayed" entry)
+     nil)))
+
+(defn invoke
+  [memory service operation request]
+  (if
+   (and
+    (= provider/host-service service)
+    (= operation (get request :operation))
+    (generic-request? request))
+   (cond
+     (= operation "load")
+     (load-value memory)
+
+     (= operation "initialize")
+     (initialize-value memory request)
+
+     (= operation "compare-and-swap")
+     (compare-and-swap-value memory request)
+
+     (= operation "receipt")
+     (receipt-value memory request)
+
+     :else nil)
+   nil))
