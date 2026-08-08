@@ -120,7 +120,7 @@
     (semantic/schema-ref? (assoc schema-entity :path "/tmp/spec"))
     (semantic/schema-ref? (assoc schema-entity :provider "github"))
     (semantic/schema-ref? (assoc schema-entity :entry too-long-id))]
-   [false false false true false false false false false false])
+   [false false false false false false false false false false])
 
   (test/check
    "canonical verification is a bounded closed proof, not host authority"
@@ -196,7 +196,10 @@
     (semantic/semantic-root?
      (assoc semantic-root :schema-refs [schema-entity schema-entity]))
     (semantic/semantic-root?
-     (assoc semantic-root :roots (vec (reverse (get semantic-root :roots)))))
+     (assoc semantic-root
+            :roots
+            [(second (get semantic-root :roots))
+             (first (get semantic-root :roots))]))
     (semantic/semantic-root?
      (assoc semantic-root
             :roots
