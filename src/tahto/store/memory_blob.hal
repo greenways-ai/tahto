@@ -38,23 +38,23 @@
          :opened-sources {}
          :next-source-handle initial-output-handle}))
 
-(defn state
+(defn memory-state
   [memory]
   @memory)
 
-(defn staging
+(defn staging-entry
   [memory staging-key]
   (get (get @memory :staging) staging-key))
 
-(defn object
+(defn object-entry
   [memory digest]
   (get (get @memory :objects) digest))
 
-(defn source
+(defn input-source-entry
   [memory source-handle]
   (get (get @memory :sources) source-handle))
 
-(defn opened-source
+(defn output-source-entry
   [memory source-handle]
   (get (get @memory :opened-sources) source-handle))
 
@@ -76,7 +76,9 @@
            (assoc
             (get current :sources)
             source-handle
-            (assoc fixture :consumed false)))))
+            (assoc
+             (assoc fixture :consumed false)
+             :closed false)))))
        true)
      false)))
 
@@ -116,7 +118,7 @@
 (defn staging-open
   [memory request]
   (let [staging-key (get request :staging-key)
-        current (staging memory staging-key)]
+        current (staging-entry memory staging-key)]
     (cond
       (nil? current)
       (let [opened {:staging-key staging-key
@@ -154,6 +156,7 @@
    (map? current)
    (map? source-fixture)
    (= false (get source-fixture :consumed))
+   (= false (get source-fixture :closed))
    (= work-id (get source-fixture :work-id))
    (= (get request :offset) (get current :offset))
    (= (get request :offset) (get source-fixture :offset))
@@ -169,8 +172,8 @@
   [memory work-id request]
   (let [staging-key (get request :staging-key)
         source-handle (get request :source-handle)
-        current (staging memory staging-key)
-        source-fixture (source memory source-handle)]
+        current (staging-entry memory staging-key)
+        source-fixture (input-source-entry memory source-handle)]
     (if
      (append-valid? work-id current source-fixture request)
      (let [next-offset
@@ -180,7 +183,10 @@
             (assoc current :offset next-offset)
             :source-handles
             (conj (get current :source-handles) source-handle))
-           next-source (assoc source-fixture :consumed true)]
+           next-source
+           (assoc
+            (assoc source-fixture :consumed true)
+            :closed true)]
        (swap!
         memory
         (fn [store]
@@ -249,8 +255,8 @@
   [memory request]
   (let [staging-key (get request :staging-key)
         digest (get request :expected-digest)
-        current (staging memory staging-key)
-        installed (object memory digest)]
+        current (staging-entry memory staging-key)
+        installed (object-entry memory digest)]
     (cond
       (staging-complete? current request)
       (let [object-value {:digest digest
@@ -289,7 +295,7 @@
 
 (defn object-open-source
   [memory work-id request]
-  (let [current (object memory (get request :digest))]
+  (let [current (object-entry memory (get request :digest))]
     (if
      (range-valid? current request)
      (let [store @memory
