@@ -1,5 +1,7 @@
 (ns tahto.store.capability
   (:require [std.foundation :refer :all]
+            [std.foundation.coroutine :as coroutine]
+            [std.foundation.host :as foundation-host]
             [tahto.store.host :as host]
             [tahto.store.model :as model]))
 
@@ -286,6 +288,61 @@
         (= (get request :end) (get result :end)))
 
        :else false))))
+
+(defn accept-result
+  [state call result]
+  (cond
+    (not (host-call? call))
+    (model/fail state "tahto.capability/call-invalid")
+
+    (not (result? result))
+    (model/fail state
+                "tahto.capability/result-invalid"
+                {:operation (get call :host-method)})
+
+    (not (result-matches-call? call result))
+    (model/fail state
+                "tahto.capability/result-mismatch"
+                {:operation (get call :host-method)})
+
+    :else
+    (model/ok state result)))
+
+(defn execute-call-with
+  [state call invoke]
+  (if
+   (host-call? call)
+   (accept-result
+    state
+    call
+    (invoke
+     (get call :host-service)
+     (get call :host-method)
+     (get call :request)))
+   (model/fail state "tahto.capability/call-invalid")))
+
+(defn execute-with
+  [state effect invoke]
+  (let [prepared (prepare state effect)]
+    (if
+     (get prepared :ok)
+     (execute-call-with state (get prepared :value) invoke)
+     prepared)))
+
+(defn ^:async execute
+  [state effect]
+  (let [prepared (prepare state effect)]
+    (if
+     (get prepared :ok)
+     (let [call (get prepared :value)
+           result
+           (coroutine/await
+            (foundation-host/call
+             (get call :host-service)
+             (get call :host-method)
+             (get call :request)))]
+       (accept-result state call result))
+     prepared)))
 
 (defn verified-install-result
   [effect result]
