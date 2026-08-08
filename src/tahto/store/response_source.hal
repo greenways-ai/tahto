@@ -1,0 +1,110 @@
+(ns tahto.store.response-source
+  (:require [std.foundation :refer :all]
+            [std.foundation.coroutine :as coroutine]
+            [std.foundation.response-source :as response-source]
+            [tahto.store.capability :as capability]
+            [tahto.store.host :as host]
+            [tahto.store.model :as model]
+            [tahto.store.vault :as vault]))
+
+;; Tahto authorizes a logical object range and asks the generic hara.blob host
+;; capability to open it. This namespace removes the remaining Tahto meaning
+;; from the validated result and returns only the closed portable descriptor
+;; understood by response hosts such as Hoplite.
+
+(defn range-effect?
+  [effect]
+  (and
+   (host/effect? effect)
+   (= "object/read-range" (get effect :operation))))
+
+(defn transition-effect
+  [transition]
+  (let [effects (get transition :effects)]
+    (if
+     (and (vector? effects)
+          (= 1 (count effects)))
+     (first effects)
+     nil)))
+
+(defn descriptor-from-result
+  [effect result]
+  (let [request (get effect :request)
+        opened (capability/opened-source-result effect result)]
+    (if
+     (and
+      (range-effect? effect)
+      (host/opened-range?
+       opened
+       (get request :digest)
+       (get request :start)
+       (get request :end)))
+     (let [descriptor
+           {:protocol response-source/protocol
+            :source-handle (get opened :source-handle)
+            :offset (get opened :start)
+            :length (get opened :length)}]
+       (if
+        (response-source/response-source? descriptor)
+        descriptor
+        nil))
+     nil)))
+
+(defn accept-executed
+  [state effect executed]
+  (if
+   (not (get executed :ok))
+   executed
+   (let [descriptor
+         (descriptor-from-result effect (get executed :value))]
+     (if
+      (nil? descriptor)
+      (model/fail state "tahto.response-source/result-invalid")
+      (model/ok state descriptor)))))
+
+(defn execute-transition-with
+  [state transition invoke]
+  (if
+   (not (get transition :ok))
+   transition
+   (let [effect (transition-effect transition)]
+     (if
+      (not (range-effect? effect))
+      (model/fail state "tahto.response-source/effect-invalid")
+      (accept-executed
+       state
+       effect
+       (capability/execute-with
+        (get transition :state)
+        effect
+        invoke))))))
+
+(defn open-with
+  [state request invoke]
+  (execute-transition-with
+   state
+   (vault/plan-range state request)
+   invoke))
+
+(defn ^:async execute-transition
+  [state transition]
+  (if
+   (not (get transition :ok))
+   transition
+   (let [effect (transition-effect transition)]
+     (if
+      (not (range-effect? effect))
+      (model/fail state "tahto.response-source/effect-invalid")
+      (let [executed
+            (coroutine/await
+             (capability/execute
+              (get transition :state)
+              effect))]
+        (accept-executed state effect executed))))))
+
+(defn ^:async open
+  [state request]
+  (coroutine/await
+   (execute-transition
+    state
+    (vault/plan-range state request))))

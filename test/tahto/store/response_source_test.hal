@@ -1,0 +1,217 @@
+(ns tahto.store.response-source-test
+  (:require [std.foundation :refer :all]
+            [std.foundation.response-source :as portable]
+            [std.lib.test :as test]
+            [tahto.store.capability :as capability]
+            [tahto.store.host :as host]
+            [tahto.store.model :as model]
+            [tahto.store.response-source :as source]
+            [tahto.store.vault :as vault]))
+
+(def digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn upload-object
+  [state]
+  (let [begun
+        (vault/begin-upload
+         state
+         {:upload-id "upload.range"
+          :application "app"
+          :namespace "space"
+          :digest digest
+          :size 12
+          :media-type "application/octet-stream"})
+        appended
+        (vault/append-upload
+         (result-state begun)
+         {:upload-id "upload.range"
+          :offset 0
+          :length 12
+          :body-handle 17})
+        requested
+        (vault/request-install
+         (result-state appended)
+         {:upload-id "upload.range"})]
+    (vault/accept-install
+     (result-state requested)
+     {:protocol host/result-protocol
+      :operation "upload/verify-install"
+      :upload-id "upload.range"
+      :digest digest
+      :size 12
+      :verified true
+      :installed true})))
+
+(defn source-result
+  [handle offset length]
+  {:protocol capability/result-protocol
+   :operation "object/open-source"
+   :source-handle handle
+   :digest digest
+   :offset offset
+   :length length})
+
+(def range-effect
+  (host/effect
+   "object/read-range"
+   {:digest digest
+    :start 2
+    :end 9}))
+
+(test/print-results
+ [(test/check
+   "a validated Tahto range result becomes one closed portable descriptor"
+   (let [descriptor
+         (source/descriptor-from-result
+          range-effect
+          (source-result 31 2 7))]
+     [(portable/response-source? descriptor)
+      descriptor
+      (into #{} (keys descriptor))
+      (has? descriptor :digest)
+      (has? descriptor :start)
+      (has? descriptor :end)
+      (has? descriptor :provider)
+      (has? descriptor :work)])
+   [true
+    {:protocol "hara.response-source/1"
+     :source-handle 31
+     :offset 2
+     :length 7}
+    #{:protocol :source-handle :offset :length}
+    false false false false false])
+
+  (test/check
+   "authorized range execution returns the descriptor without moving bytes"
+   (let [installed
+         (upload-object
+          (model/empty-state {:max-range-bytes 8}))
+         state (result-state installed)
+         opened
+         (source/open-with
+          state
+          {:application "app"
+           :namespace "space"
+           :digest digest
+           :start 2
+           :end 9}
+          (fn [service operation request]
+            (if
+             (and
+              (= "hara.blob" service)
+              (= "object/open-source" operation)
+              (= digest (get request :digest))
+              (= 2 (get request :offset))
+              (= 7 (get request :length))
+              (not (has? request :start))
+              (not (has? request :end)))
+             (source-result 41 2 7)
+             nil)))]
+     [(get opened :ok)
+      (= state (get opened :state))
+      (get opened :value)
+      (has? (get opened :value) :bytes)
+      (has? (get opened :value) :path)])
+   [true
+    true
+    {:protocol "hara.response-source/1"
+     :source-handle 41
+     :offset 2
+     :length 7}
+    false
+    false])
+
+  (test/check
+   "namespace authorization fails before a response source is opened"
+   (let [installed (upload-object (model/empty-state))
+         denied
+         (source/open-with
+          (result-state installed)
+          {:application "other"
+           :namespace "space"
+           :digest digest
+           :start 2
+           :end 9}
+          (fn [service operation request]
+            (source-result 43 2 7)))]
+     [(get denied :ok)
+      (error-code denied)
+      (get denied :effects)])
+   [false "tahto.store/object-not-authorized" []])
+
+  (test/check
+   "provider mismatches and extra authority remain capability failures"
+   (let [installed (upload-object (model/empty-state))
+         state (result-state installed)
+         request {:application "app"
+                  :namespace "space"
+                  :digest digest
+                  :start 2
+                  :end 9}
+         mismatched
+         (source/open-with
+          state request
+          (fn [service operation request]
+            (source-result 47 3 7)))
+         extended
+         (source/open-with
+          state request
+          (fn [service operation request]
+            (assoc (source-result 47 2 7)
+                   :provider "memory")))]
+     [(get mismatched :ok)
+      (error-code mismatched)
+      (get extended :ok)
+      (error-code extended)])
+   [false
+    "tahto.capability/result-mismatch"
+    false
+    "tahto.capability/result-invalid"])
+
+  (test/check
+   "portable safe-integer bounds reject otherwise positive host handles"
+   (let [installed (upload-object (model/empty-state))
+         state (result-state installed)
+         rejected
+         (source/open-with
+          state
+          {:application "app"
+           :namespace "space"
+           :digest digest
+           :start 2
+           :end 9}
+          (fn [service operation request]
+            (source-result
+             (+ portable/safe-integer-max 1)
+             2
+             7)))]
+     [(get rejected :ok)
+      (error-code rejected)
+      (= state (get rejected :state))])
+   [false "tahto.response-source/result-invalid" true])
+
+  (test/check
+   "the portable half-open interval cannot exceed its safe integer domain"
+   (let [start portable/safe-integer-max
+         effect
+         (host/effect
+          "object/read-range"
+          {:digest digest
+           :start start
+           :end (+ start 1)})
+         descriptor
+         (source/descriptor-from-result
+          effect
+          (source-result 53 start 1))]
+     [(host/effect? effect)
+      descriptor])
+   [true nil])])
