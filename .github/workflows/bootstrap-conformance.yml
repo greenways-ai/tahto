@@ -29,6 +29,7 @@ jobs:
           test ! -e .github/workflows/promote-native-metadata-sqlite.yml
           test -f src/tahto/store/model.hal
           test -f src/tahto/store/host.hal
+          test -f src/tahto/store/capability.hal
           test -f src/tahto/store/vault.hal
           test -f src/tahto/store/graph.hal
           test -f src/tahto/store/history.hal
@@ -44,6 +45,7 @@ jobs:
           test -f test/tahto/store/vault_hardening_test.hal
           test -f test/tahto/store/transaction_test.hal
           test -f test/tahto/store/provider_test.hal
+          test -f test/tahto/store/capability_test.hal
           test -f test/tahto/sync/device_test.hal
           test -f test/tahto/sync/session_test.hal
           test -f test/tahto/service/state_test.hal
@@ -51,6 +53,7 @@ jobs:
           test -f protocol/transactions.md
           test -f protocol/metadata-store.md
           test -f protocol/metadata-host.md
+          test -f protocol/host-capabilities.md
           test -f native/.gitignore
           test -f native/Cargo.toml
           test -f native/Cargo.lock
@@ -64,6 +67,11 @@ jobs:
           test -f native/provider/metadata-sqlite/CONFORMANCE.md
           test -f native/provider/metadata-sqlite/src/lib.rs
           test -f native/provider/metadata-sqlite/src/tests.rs
+
+          grep -F '(def host-service "hara.blob")' src/tahto/store/capability.hal
+          grep -F '(def native-abi "hara-blob-store/1")' src/tahto/store/capability.hal
+          ! grep -F '(def host-service "tahto.' src/tahto/store/capability.hal
+          ! grep -F '(def native-abi "tahto-' src/tahto/store/capability.hal
 
   hara-state:
     runs-on: ubuntu-latest

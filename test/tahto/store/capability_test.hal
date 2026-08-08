@@ -1,0 +1,203 @@
+(ns tahto.store.capability-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.store.capability :as capability]
+            [tahto.store.host :as host]))
+
+(def digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def open-effect
+  (host/effect
+   "upload/open"
+   {:upload-id "upload.a"
+    :digest digest
+    :size 12
+    :media-type "application/octet-stream"}))
+
+(def append-effect
+  (host/effect
+   "upload/append"
+   {:upload-id "upload.a"
+    :offset 4
+    :length 5
+    :body-handle 17}))
+
+(def abort-effect
+  (host/effect
+   "upload/abort"
+   {:upload-id "upload.a"}))
+
+(def verify-effect
+  (host/effect
+   "upload/verify-install"
+   {:upload-id "upload.a"
+    :digest digest
+    :size 12}))
+
+(def range-effect
+  (host/effect
+   "object/read-range"
+   {:digest digest
+    :start 2
+    :end 9}))
+
+(def manifest-effect
+  (host/effect
+   "manifest/verify"
+   {:digest digest
+    :max-chunks 8}))
+
+(def verify-result
+  {:protocol capability/result-protocol
+   :operation "staging-verify-commit"
+   :staging-id "upload.a"
+   :verified true
+   :committed true
+   :digest digest
+   :size 12})
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "Tahto upload effects map to an application-neutral blob service"
+   (let [open-call (capability/call-from-effect open-effect)
+         append-call (capability/call-from-effect append-effect)
+         abort-call (capability/call-from-effect abort-effect)
+         verify-call (capability/call-from-effect verify-effect)
+         range-call (capability/call-from-effect range-effect)]
+     [(get open-call :host-service)
+      (get open-call :native-abi)
+      (get open-call :host-method)
+      (get append-call :host-method)
+      (get abort-call :host-method)
+      (get verify-call :host-method)
+      (get range-call :host-method)
+      (every? capability/host-call?
+              [open-call append-call abort-call verify-call range-call])])
+   ["hara.blob"
+    "hara-blob-store/1"
+    "staging-open"
+    "staging-append-request"
+    "staging-abort"
+    "staging-verify-commit"
+    "object-open-range"
+    true])
+
+  (test/check
+   "the HAL adapter preserves closed upload fields without exposing bytes"
+   (let [open-request
+         (get-in (capability/call-from-effect open-effect) [:request])
+         append-request
+         (get-in (capability/call-from-effect append-effect) [:request])]
+     [(get open-request :staging-id)
+      (get open-request :digest)
+      (get open-request :size)
+      (get append-request :staging-id)
+      (get append-request :offset)
+      (get append-request :length)
+      (get append-request :body-handle)
+      (has? append-request :bytes)
+      (has? append-request :path)])
+   ["upload.a" digest 12 "upload.a" 4 5 17 false false])
+
+  (test/check
+   "generic capability requests reject paths raw bodies and extra authority"
+   (let [request
+         (get-in (capability/call-from-effect append-effect) [:request])]
+     [(capability/request? request)
+      (capability/request? (assoc request :path "/tmp/unsafe"))
+      (capability/request? (assoc request :bytes [1 2 3]))
+      (capability/request? (assoc request :credential "secret"))])
+   [true false false false])
+
+  (test/check
+   "unsupported and malformed Tahto effects fail before host dispatch"
+   (let [unsupported (capability/prepare {} manifest-effect)
+         malformed
+         (capability/prepare
+          {}
+          {:protocol host/effect-protocol
+           :operation "upload/append"
+           :request {:upload-id "upload.a"
+                     :offset 0
+                     :length 1
+                     :body-handle 0}})]
+     [(get unsupported :ok)
+      (error-code unsupported)
+      (get malformed :ok)
+      (error-code malformed)
+      (capability/call-from-effect manifest-effect)])
+   [false
+    "tahto.capability/effect-unsupported"
+    false
+    "tahto.capability/effect-invalid"
+    nil])
+
+  (test/check
+   "prepared calls preserve state and expose only the generic call plan"
+   (let [state {:marker "unchanged"}
+         result (capability/prepare state append-effect)]
+     [(get result :ok)
+      (get result :state)
+      (capability/host-call? (get result :value))
+      (get-in result [:value :host-service])])
+   [true {:marker "unchanged"} true "hara.blob"])
+
+  (test/check
+   "generic results are exact operation-specific records"
+   [(capability/result? verify-result)
+    (capability/result?
+     (assoc verify-result :destination "/tmp/object"))
+    (capability/result?
+     (assoc verify-result :operation "upload/verify-install"))]
+   [true false false])
+
+  (test/check
+   "generic results must match the exact planned call"
+   (let [call (capability/call-from-effect verify-effect)]
+     [(capability/result-matches-call? call verify-result)
+      (capability/result-matches-call?
+       call
+       (assoc verify-result :size 13))
+      (capability/result-matches-call?
+       call
+       (assoc verify-result :staging-id "upload.b"))])
+   [true false false])
+
+  (test/check
+   "verified generic commits translate back into Tahto result records in HAL"
+   (let [translated
+         (capability/verified-install-result verify-effect verify-result)]
+     [(get translated :protocol)
+      (get translated :operation)
+      (get translated :verified)
+      (get translated :installed)
+      (get translated :upload-id)
+      (get translated :digest)
+      (get translated :size)
+      (host/verified-install?
+       translated
+       {:id "upload.a" :digest digest :size 12})])
+   [host/result-protocol
+    "upload/verify-install"
+    true
+    true
+    "upload.a"
+    digest
+    12
+    true])
+
+  (test/check
+   "mismatched generic commits are never accepted as Tahto installation proof"
+   [(capability/verified-install-result
+     verify-effect
+     (assoc verify-result :digest
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+    (capability/verified-install-result
+     open-effect
+     verify-result)]
+   [nil nil])])

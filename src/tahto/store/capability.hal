@@ -1,0 +1,304 @@
+(ns tahto.store.capability
+  (:require [std.foundation :refer :all]
+            [tahto.store.host :as host]
+            [tahto.store.model :as model]))
+
+;; Tahto owns the domain effects. This namespace maps those effects to an
+;; application-neutral host capability without introducing a Tahto native ABI.
+(def host-service "hara.blob")
+(def native-abi "hara-blob-store/1")
+(def request-protocol "hara.blob-request/1")
+(def result-protocol "hara.blob-result/1")
+
+(def supported-effect-operations
+  #{"upload/open"
+    "upload/append"
+    "upload/abort"
+    "upload/verify-install"
+    "object/read-range"})
+
+(def capability-operations
+  #{"staging-open"
+    "staging-append-request"
+    "staging-abort"
+    "staging-verify-commit"
+    "object-open-range"})
+
+(def host-call-fields
+  #{:host-service :host-method :native-abi :request})
+
+(defn supported-effect?
+  [effect]
+  (and (host/effect? effect)
+       (has? supported-effect-operations
+             (get effect :operation))))
+
+(defn capability-operation?
+  [operation]
+  (has? capability-operations operation))
+
+(defn request-record
+  [operation fields]
+  (assoc
+   (assoc fields :protocol request-protocol)
+   :operation operation))
+
+(defn request?
+  [value]
+  (and
+   (host/record-safe? value)
+   (= request-protocol (get value :protocol))
+   (capability-operation? (get value :operation))
+   (cond
+     (= "staging-open" (get value :operation))
+     (and
+      (host/exact-keys?
+       value
+       #{:protocol :operation :staging-id :digest :size :media-type})
+      (model/identifier? (get value :staging-id))
+      (model/canonical-digest? (get value :digest))
+      (model/non-negative-integer? (get value :size))
+      (model/media-type? (get value :media-type)))
+
+     (= "staging-append-request" (get value :operation))
+     (and
+      (host/exact-keys?
+       value
+       #{:protocol :operation :staging-id :offset :length :body-handle})
+      (model/identifier? (get value :staging-id))
+      (model/non-negative-integer? (get value :offset))
+      (model/positive-integer? (get value :length))
+      (model/positive-integer? (get value :body-handle)))
+
+     (= "staging-abort" (get value :operation))
+     (and
+      (host/exact-keys?
+       value
+       #{:protocol :operation :staging-id})
+      (model/identifier? (get value :staging-id)))
+
+     (= "staging-verify-commit" (get value :operation))
+     (and
+      (host/exact-keys?
+       value
+       #{:protocol :operation :staging-id :digest :size})
+      (model/identifier? (get value :staging-id))
+      (model/canonical-digest? (get value :digest))
+      (model/non-negative-integer? (get value :size)))
+
+     (= "object-open-range" (get value :operation))
+     (and
+      (host/exact-keys?
+       value
+       #{:protocol :operation :digest :start :end})
+      (model/canonical-digest? (get value :digest))
+      (model/non-negative-integer? (get value :start))
+      (model/positive-integer? (get value :end))
+      (< (get value :start) (get value :end)))
+
+     :else false)))
+
+(defn request-from-effect
+  [effect]
+  (if
+   (supported-effect? effect)
+   (let [operation (get effect :operation)
+         request (get effect :request)]
+     (cond
+       (= operation "upload/open")
+       (request-record
+        "staging-open"
+        {:staging-id (get request :upload-id)
+         :digest (get request :digest)
+         :size (get request :size)
+         :media-type (get request :media-type)})
+
+       (= operation "upload/append")
+       (request-record
+        "staging-append-request"
+        {:staging-id (get request :upload-id)
+         :offset (get request :offset)
+         :length (get request :length)
+         :body-handle (get request :body-handle)})
+
+       (= operation "upload/abort")
+       (request-record
+        "staging-abort"
+        {:staging-id (get request :upload-id)})
+
+       (= operation "upload/verify-install")
+       (request-record
+        "staging-verify-commit"
+        {:staging-id (get request :upload-id)
+         :digest (get request :digest)
+         :size (get request :size)})
+
+       (= operation "object/read-range")
+       (request-record
+        "object-open-range"
+        {:digest (get request :digest)
+         :start (get request :start)
+         :end (get request :end)})
+
+       :else nil))
+   nil))
+
+(defn host-call
+  [request]
+  {:host-service host-service
+   :host-method (get request :operation)
+   :native-abi native-abi
+   :request request})
+
+(defn host-call?
+  [value]
+  (and
+   (host/exact-keys? value host-call-fields)
+   (= host-service (get value :host-service))
+   (= native-abi (get value :native-abi))
+   (request? (get value :request))
+   (= (get value :host-method)
+      (get-in value [:request :operation]))))
+
+(defn call-from-effect
+  [effect]
+  (let [request (request-from-effect effect)]
+    (if (request? request)
+      (host-call request)
+      nil)))
+
+(defn prepare
+  [state effect]
+  (cond
+    (not (host/effect? effect))
+    (model/fail state "tahto.capability/effect-invalid")
+
+    (not (supported-effect? effect))
+    (model/fail state
+                "tahto.capability/effect-unsupported"
+                {:operation (get effect :operation)})
+
+    :else
+    (let [call (call-from-effect effect)]
+      (if (host-call? call)
+        (model/ok state call)
+        (model/fail state
+                    "tahto.capability/request-invalid"
+                    {:operation (get effect :operation)})))))
+
+(defn result?
+  [value]
+  (and
+   (host/record-safe? value)
+   (= result-protocol (get value :protocol))
+   (capability-operation? (get value :operation))
+   (cond
+     (= "staging-open" (get value :operation))
+     (and
+      (host/exact-keys?
+       value
+       #{:protocol :operation :staging-id :opened :offset})
+      (model/identifier? (get value :staging-id))
+      (= true (get value :opened))
+      (model/non-negative-integer? (get value :offset)))
+
+     (= "staging-append-request" (get value :operation))
+     (and
+      (host/exact-keys?
+       value
+       #{:protocol :operation :staging-id :consumed :offset :length})
+      (model/identifier? (get value :staging-id))
+      (= true (get value :consumed))
+      (model/non-negative-integer? (get value :offset))
+      (model/positive-integer? (get value :length)))
+
+     (= "staging-abort" (get value :operation))
+     (and
+      (host/exact-keys?
+       value
+       #{:protocol :operation :staging-id :aborted})
+      (model/identifier? (get value :staging-id))
+      (= true (get value :aborted)))
+
+     (= "staging-verify-commit" (get value :operation))
+     (and
+      (host/exact-keys?
+       value
+       #{:protocol :operation :staging-id :verified :committed
+         :digest :size})
+      (model/identifier? (get value :staging-id))
+      (= true (get value :verified))
+      (= true (get value :committed))
+      (model/canonical-digest? (get value :digest))
+      (model/non-negative-integer? (get value :size)))
+
+     (= "object-open-range" (get value :operation))
+     (and
+      (host/exact-keys?
+       value
+       #{:protocol :operation :source-handle :digest
+         :start :end :length})
+      (model/positive-integer? (get value :source-handle))
+      (model/canonical-digest? (get value :digest))
+      (model/non-negative-integer? (get value :start))
+      (model/positive-integer? (get value :end))
+      (< (get value :start) (get value :end))
+      (= (- (get value :end) (get value :start))
+         (get value :length)))
+
+     :else false)))
+
+(defn result-matches-call?
+  [call result]
+  (and
+   (host-call? call)
+   (result? result)
+   (= (get call :host-method)
+      (get result :operation))
+   (let [operation (get call :host-method)
+         request (get call :request)]
+     (cond
+       (= operation "staging-open")
+       (and
+        (= (get request :staging-id) (get result :staging-id))
+        (= 0 (get result :offset)))
+
+       (= operation "staging-append-request")
+       (and
+        (= (get request :staging-id) (get result :staging-id))
+        (= (get request :length) (get result :length))
+        (= (+ (get request :offset) (get request :length))
+           (get result :offset)))
+
+       (= operation "staging-abort")
+       (= (get request :staging-id) (get result :staging-id))
+
+       (= operation "staging-verify-commit")
+       (and
+        (= (get request :staging-id) (get result :staging-id))
+        (= (get request :digest) (get result :digest))
+        (= (get request :size) (get result :size)))
+
+       (= operation "object-open-range")
+       (and
+        (= (get request :digest) (get result :digest))
+        (= (get request :start) (get result :start))
+        (= (get request :end) (get result :end)))
+
+       :else false))))
+
+(defn verified-install-result
+  [effect result]
+  (let [call (call-from-effect effect)]
+    (if
+     (and
+      (= "upload/verify-install" (get effect :operation))
+      (result-matches-call? call result))
+     {:protocol host/result-protocol
+      :operation "upload/verify-install"
+      :verified true
+      :installed true
+      :upload-id (get result :staging-id)
+      :digest (get result :digest)
+      :size (get result :size)}
+     nil)))
