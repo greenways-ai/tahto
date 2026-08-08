@@ -176,7 +176,7 @@
     false
     "initialize"
     [:opaque {:nested [1 2 3]}]
-    false
+    nil
     nil])
 
   (test/check
