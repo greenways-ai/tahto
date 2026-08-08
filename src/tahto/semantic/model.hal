@@ -103,12 +103,17 @@
   [value]
   (truth-value (has? semantic-protocols value)))
 
-(defn bounded-positive-integer?
-  [value maximum]
+(defn bounded-count?
+  [value minimum maximum]
   (truth-value
    (and
-    (model/positive-integer? value)
+    (integer? value)
+    (<= minimum value)
     (<= value maximum))))
+
+(defn bounded-positive-integer?
+  [value maximum]
+  (bounded-count? value 1 maximum))
 
 (defn package-version?
   [value]
@@ -193,8 +198,7 @@
   (truth-value
    (and
     (vector? values)
-    (> (count values) 0)
-    (<= (count values) max-schema-refs)
+    (bounded-count? (count values) 1 max-schema-refs)
     (every? schema-ref? values)
     (strictly-increasing-by? values schema-ref-coordinate))))
 
@@ -237,7 +241,7 @@
   (truth-value
    (and
     (vector? values)
-    (<= (count values) max-links)
+    (bounded-count? (count values) 0 max-links)
     (every? semantic-link? values)
     (strictly-increasing-by? values semantic-link-coordinate))))
 
@@ -276,8 +280,7 @@
     (let [entries (get value :entries)]
       (and
        (vector? entries)
-       (> (count entries) 0)
-       (<= (count entries) max-index-entries)
+       (bounded-count? (count entries) 1 max-index-entries)
        (every? semantic-index-entry? entries)
        (strictly-increasing-by?
         entries
@@ -301,8 +304,7 @@
   (truth-value
    (and
     (vector? values)
-    (> (count values) 0)
-    (<= (count values) max-root-entries)
+    (bounded-count? (count values) 1 max-root-entries)
     (every? semantic-root-entry? values)
     (strictly-increasing-by?
      values
