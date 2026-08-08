@@ -1,39 +1,57 @@
-# Native provider contracts and adapters
+# Transitional native metadata migration source
 
-Tahto's authoritative transition rules remain deterministic Hara code under `src/tahto/`. Native crates under this directory define closed provider boundaries for work that Hara must not emulate, including durable storage, canonical byte identity and object transfer.
+Tahto's authoritative implementation is HAL under `src/tahto/`. This directory
+is retained temporarily so the reviewed durability behavior can be migrated to
+an application-neutral `hara.store` capability without losing executable
+conformance evidence.
 
-The metadata boundary is split deliberately:
+It is **not** the target Tahto architecture and must not gain new Tahto domain
+semantics.
 
 ```text
 abi/metadata-store
-  dependency-free tahto-metadata-store/1 contract
+  superseded tahto-metadata-store/1 contract retained for migration
 
 provider/metadata-sqlite
-  local SQLite implementation of that exact contract
+  SQLite behavior used as the compatibility fixture for Hoplite issue #45
 ```
 
-The contract carries only:
+## Generic mechanics to extract
 
 ```text
-canonical HTA state bytes
-current and expected metadata revisions
-canonical plan, request, result and state digests
-bounded completion timestamps
-applied or replayed commit receipts
+canonical HTA value persistence
+bounded revisions
+initialize-if-absent
+exact compare-and-swap
+atomic value and opaque receipt commit
+receipt-key lookup and replay
+state digest recomputation
+restart and fault safety
 ```
 
-A provider may load one snapshot, initialize an empty store, atomically compare-and-swap one TAHTO-7 plan, and retrieve a receipt by plan digest. The SQLite provider recomputes every state digest and commits snapshot replacement plus receipt insertion in one immediate transaction.
+Those mechanics belong in generic host infrastructure.
 
-Native providers do not:
+## Tahto semantics that stay in HAL
 
 ```text
-execute Hara transitions
-parse application payloads
-choose divergent-head winners
-verify user consent or application grants
-hold private keys or credentials
-install remote code
-claim an in-memory map is durable
+state and object graph meaning
+transaction-plan validation
+request and result evidence
+receipt payload interpretation
+applied-versus-replayed policy
+recovery and merge decisions
+authorization and quotas
 ```
 
-Greenways OS retains installation, consent, grants, credentials and private-key authority. Tahto owns the state and concurrency laws. Installed provider packages own concrete persistence. A separate host integration must still encode canonical HTA state and invoke the selected provider from the Tahto node.
+The revised `tahto.store.provider` calls `hara.store` with an opaque state value,
+digest, revision and receipt payload. The generic driver must not parse the
+Tahto payload. A native ABI version, database path, driver, provider package or
+credential is selected only by trusted host installation and never appears in
+HAL application values.
+
+## Removal condition
+
+This tree is deleted after a generic in-memory driver and the migrated SQLite
+driver pass equivalent load, initialize, CAS, receipt, restart and fault
+fixtures through Hoplite. Git history remains the permanent archive of the
+superseded Tahto-specific ABI.
