@@ -1,17 +1,25 @@
 (ns tahto.store.provider
   (:require [std.foundation :refer :all]
+            [std.foundation.host :as native]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
             [tahto.store.transaction :as transaction]))
 
-(def host-service "tahto.metadata")
-(def native-abi "tahto-metadata-store/1")
-(def request-protocol "tahto.metadata-provider-request/1")
+;; Tahto owns snapshot, transaction, receipt and recovery semantics. The host
+;; service supplies application-neutral durable value storage and exact
+;; revision compare-and-swap only. A native ABI or driver identity never enters
+;; the HAL call plan.
+(def host-service "hara.store")
+(def request-protocol "hara.store-request/1")
+(def result-protocol "hara.store-result/1")
+
 (def snapshot-protocol "tahto.metadata-snapshot/1")
 (def state-verification-protocol
   "tahto.state-encoding-verification/1")
 (def commit-verification-protocol
   "tahto.metadata-commit-verification/1")
+(def receipt-payload-protocol
+  "tahto.metadata-receipt-payload/1")
 (def receipt-protocol "tahto.metadata-commit-receipt/1")
 
 (def max-provider-revision 9223372036854775807)
@@ -132,6 +140,56 @@
    (= (get plan :result-digest)
       (get verification :result-digest))))
 
+;; The generic store persists this record as an opaque canonical value. It does
+;; not interpret Tahto evidence or assign replay meaning. HAL adds the final
+;; receipt status after the generic store reports `applied` or `replayed`.
+(def receipt-payload-fields
+  #{:protocol :revision :plan-digest :request-digest
+    :result-digest :state-digest :completed-at})
+
+(defn receipt-payload
+  [plan verification]
+  {:protocol receipt-payload-protocol
+   :revision (get verification :revision)
+   :plan-digest (get verification :plan-digest)
+   :request-digest (get plan :request-digest)
+   :result-digest (get plan :result-digest)
+   :state-digest (get verification :state-digest)
+   :completed-at (get verification :completed-at)})
+
+(defn receipt-payload?
+  [value]
+  (and
+   (validate/exact-record? value receipt-payload-fields #{})
+   (= receipt-payload-protocol (get value :protocol))
+   (provider-revision? (get value :revision))
+   (> (get value :revision) 0)
+   (model/canonical-digest? (get value :plan-digest))
+   (model/canonical-digest? (get value :request-digest))
+   (model/canonical-digest? (get value :result-digest))
+   (model/canonical-digest? (get value :state-digest))
+   (validate/timestamp? (get value :completed-at))))
+
+(defn receipt-payload-matches?
+  [payload plan verification]
+  (and
+   (receipt-payload? payload)
+   (commit-verification-matches? verification plan
+                                  {:metadata-revision
+                                   (get verification :revision)})
+   (= (get payload :revision)
+      (get verification :revision))
+   (= (get payload :plan-digest)
+      (get verification :plan-digest))
+   (= (get payload :request-digest)
+      (get plan :request-digest))
+   (= (get payload :result-digest)
+      (get plan :result-digest))
+   (= (get payload :state-digest)
+      (get verification :state-digest))
+   (= (get payload :completed-at)
+      (get verification :completed-at))))
+
 (def receipt-fields
   #{:protocol :status :revision :plan-digest
     :request-digest :result-digest :state-digest :completed-at})
@@ -178,7 +236,7 @@
   (if (model/canonical-digest? plan-digest)
     {:protocol request-protocol
      :operation "receipt"
-     :plan-digest plan-digest}
+     :receipt-key plan-digest}
     nil))
 
 (defn initialize-request
@@ -186,8 +244,8 @@
   {:protocol request-protocol
    :operation "initialize"
    :revision (get verification :revision)
-   :state state
-   :state-digest (get verification :state-digest)})
+   :value state
+   :value-digest (get verification :state-digest)})
 
 (defn compare-and-swap-request
   [state plan verification]
@@ -195,12 +253,10 @@
    :operation "compare-and-swap"
    :expected-revision (get plan :expected-revision)
    :revision (get plan :revision)
-   :plan-digest (get verification :plan-digest)
-   :request-digest (get plan :request-digest)
-   :result-digest (get plan :result-digest)
-   :state state
-   :state-digest (get verification :state-digest)
-   :completed-at (get verification :completed-at)})
+   :value state
+   :value-digest (get verification :state-digest)
+   :receipt-key (get verification :plan-digest)
+   :receipt (receipt-payload plan verification)})
 
 (defn provider-request?
   [request]
@@ -217,62 +273,80 @@
      (= "receipt" (get request :operation))
      (and
       (validate/exact-record? request
-                              #{:protocol :operation :plan-digest}
+                              #{:protocol :operation :receipt-key}
                               #{})
-      (model/canonical-digest? (get request :plan-digest)))
+      (model/canonical-digest? (get request :receipt-key)))
 
      (= "initialize" (get request :operation))
      (and
       (validate/exact-record? request
                               #{:protocol :operation :revision
-                                :state :state-digest}
+                                :value :value-digest}
                               #{})
-      (state-revision-valid? (get request :state)
+      (state-revision-valid? (get request :value)
                              (get request :revision))
-      (model/canonical-digest? (get request :state-digest)))
+      (model/canonical-digest? (get request :value-digest)))
 
      (= "compare-and-swap" (get request :operation))
-     (and
-      (validate/exact-record?
-       request
-       #{:protocol :operation :expected-revision :revision
-         :plan-digest :request-digest :result-digest
-         :state :state-digest :completed-at}
-       #{})
-      (provider-revision? (get request :expected-revision))
-      (provider-revision? (get request :revision))
-      (< (get request :expected-revision) max-provider-revision)
-      (= (inc (get request :expected-revision))
-         (get request :revision))
-      (state-revision-valid? (get request :state)
-                             (get request :revision))
-      (model/canonical-digest? (get request :plan-digest))
-      (model/canonical-digest? (get request :request-digest))
-      (model/canonical-digest? (get request :result-digest))
-      (model/canonical-digest? (get request :state-digest))
-      (validate/timestamp? (get request :completed-at)))
+     (let [payload (get request :receipt)]
+       (and
+        (validate/exact-record?
+         request
+         #{:protocol :operation :expected-revision :revision
+           :value :value-digest :receipt-key :receipt}
+         #{})
+        (provider-revision? (get request :expected-revision))
+        (provider-revision? (get request :revision))
+        (< (get request :expected-revision) max-provider-revision)
+        (= (inc (get request :expected-revision))
+           (get request :revision))
+        (state-revision-valid? (get request :value)
+                               (get request :revision))
+        (model/canonical-digest? (get request :value-digest))
+        (model/canonical-digest? (get request :receipt-key))
+        (receipt-payload? payload)
+        (= (get request :receipt-key)
+           (get payload :plan-digest))
+        (= (get request :revision)
+           (get payload :revision))
+        (= (get request :value-digest)
+           (get payload :state-digest))))
 
      :else false)))
 
 (def host-call-fields
-  #{:host-service :host-method :native-abi :request})
+  #{:service :operation :arguments})
 
 (defn host-call
   [request]
-  {:host-service host-service
-   :host-method (get request :operation)
-   :native-abi native-abi
-   :request request})
+  {:service host-service
+   :operation (get request :operation)
+   :arguments [request]})
+
+(defn call-request
+  [call]
+  (get-in call [:arguments 0]))
 
 (defn host-call?
   [value]
-  (and
-   (validate/exact-record? value host-call-fields #{})
-   (= host-service (get value :host-service))
-   (= native-abi (get value :native-abi))
-   (provider-request? (get value :request))
-   (= (get value :host-method)
-      (get-in value [:request :operation]))))
+  (let [arguments (get value :arguments)
+        request (call-request value)]
+    (and
+     (validate/exact-record? value host-call-fields #{})
+     (= host-service (get value :service))
+     (vector? arguments)
+     (= 1 (count arguments))
+     (provider-request? request)
+     (= (get value :operation)
+        (get request :operation)))))
+
+(defn execute-call
+  [call]
+  (if (host-call? call)
+    (native/call (get call :service)
+                 (get call :operation)
+                 (call-request call))
+    nil))
 
 (defn request-result
   [state request]
@@ -317,52 +391,128 @@
        state
        (compare-and-swap-request state plan verification)))))
 
+(def store-snapshot-result-fields
+  #{:protocol :operation :revision :value :value-digest})
+
+(def store-receipt-result-fields
+  #{:protocol :operation :status :revision :receipt-key :receipt})
+
+(defn store-snapshot-result?
+  [operation value]
+  (and
+   (has? #{"load" "initialize"} operation)
+   (validate/exact-record? value store-snapshot-result-fields #{})
+   (= result-protocol (get value :protocol))
+   (= operation (get value :operation))
+   (state-revision-valid? (get value :value)
+                          (get value :revision))
+   (model/canonical-digest? (get value :value-digest))))
+
+(defn store-receipt-result?
+  [operation value]
+  (let [payload (get value :receipt)]
+    (and
+     (has? #{"compare-and-swap" "receipt"} operation)
+     (validate/exact-record? value store-receipt-result-fields #{})
+     (= result-protocol (get value :protocol))
+     (= operation (get value :operation))
+     (has? receipt-statuses (get value :status))
+     (or (= operation "compare-and-swap")
+         (= "replayed" (get value :status)))
+     (provider-revision? (get value :revision))
+     (> (get value :revision) 0)
+     (model/canonical-digest? (get value :receipt-key))
+     (receipt-payload? payload)
+     (= (get value :receipt-key)
+        (get payload :plan-digest))
+     (= (get value :revision)
+        (get payload :revision)))))
+
 (defn provider-response?
   [operation value]
   (and
    (has? provider-operations operation)
    (cond
      (= operation "load")
-     (or (nil? value) (snapshot? value))
+     (or (nil? value)
+         (store-snapshot-result? operation value))
 
      (= operation "initialize")
-     (snapshot? value)
+     (store-snapshot-result? operation value)
 
      (= operation "compare-and-swap")
-     (receipt? value)
+     (store-receipt-result? operation value)
 
      (= operation "receipt")
-     (or (nil? value) (receipt? value))
+     (or (nil? value)
+         (store-receipt-result? operation value))
 
      :else false)))
 
 (defn host-result?
   [call value]
   (and (host-call? call)
-       (provider-response? (get call :host-method) value)))
+       (provider-response? (get call :operation) value)))
+
+(defn snapshot-from-store-result
+  [value]
+  (if
+   (and (map? value)
+        (has? #{"load" "initialize"} (get value :operation))
+        (store-snapshot-result? (get value :operation) value))
+   {:protocol snapshot-protocol
+    :revision (get value :revision)
+    :state (get value :value)
+    :state-digest (get value :value-digest)}
+   nil))
+
+(defn receipt-from-store-result
+  [value]
+  (if
+   (and (map? value)
+        (has? #{"compare-and-swap" "receipt"}
+              (get value :operation))
+        (store-receipt-result? (get value :operation) value))
+   (let [payload (get value :receipt)]
+     {:protocol receipt-protocol
+      :status (get value :status)
+      :revision (get payload :revision)
+      :plan-digest (get payload :plan-digest)
+      :request-digest (get payload :request-digest)
+      :result-digest (get payload :result-digest)
+      :state-digest (get payload :state-digest)
+      :completed-at (get payload :completed-at)})
+   nil))
 
 (defn initialize-result?
-  [state verification snapshot]
-  (and
-   (state-verification? verification state)
-   (snapshot? snapshot)
-   (= state (get snapshot :state))
-   (= (get verification :revision)
-      (get snapshot :revision))
-   (= (get verification :state-digest)
-      (get snapshot :state-digest))))
+  [state verification store-result]
+  (let [snapshot (snapshot-from-store-result store-result)]
+    (and
+     (state-verification? verification state)
+     (snapshot? snapshot)
+     (= state (get snapshot :state))
+     (= (get verification :revision)
+        (get snapshot :revision))
+     (= (get verification :state-digest)
+        (get snapshot :state-digest)))))
 
 (defn commit-result?
-  [transition-result verification receipt]
+  [transition-result verification store-result]
   (let [state (get transition-result :state)
-        plan (transaction-plan transition-result)]
+        plan (transaction-plan transition-result)
+        receipt (receipt-from-store-result store-result)]
     (and
      (transaction-plan? plan state)
      (commit-verification-matches? verification plan state)
      (receipt-matches? receipt verification))))
 
+(defn loaded-snapshot
+  [store-result]
+  (snapshot-from-store-result store-result))
+
 (defn loaded-state
-  [snapshot]
-  (if (snapshot? snapshot)
-    (get snapshot :state)
-    nil))
+  [store-result]
+  (let [snapshot (loaded-snapshot store-result)]
+    (if (snapshot? snapshot)
+      (get snapshot :state)
+      nil)))
