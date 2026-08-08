@@ -133,13 +133,16 @@
               (not (has? request :start))
               (not (has? request :end)))
              (source-result 41 2 7)
-             nil)))]
+             nil)))
+         value (get opened :value)]
      [(get opened :ok)
+      (error-code opened)
       (= state (get opened :state))
-      (get opened :value)
-      (has? (get opened :value) :bytes)
-      (has? (get opened :value) :path)])
+      value
+      (and (map? value) (has? value :bytes))
+      (and (map? value) (has? value :path))])
    [true
+    nil
     true
     {:protocol "hara.response-source/1"
      :source-handle 41
