@@ -31,6 +31,7 @@ jobs:
           test -f src/tahto/store/host.hal
           test -f src/tahto/store/capability.hal
           test -f src/tahto/store/upload.hal
+          test -f src/tahto/store/response_source.hal
           test -f src/tahto/store/memory_blob.hal
           test -f src/tahto/store/memory_store.hal
           test -f src/tahto/store/vault.hal
@@ -50,6 +51,7 @@ jobs:
           test -f test/tahto/store/provider_test.hal
           test -f test/tahto/store/capability_test.hal
           test -f test/tahto/store/upload_test.hal
+          test -f test/tahto/store/response_source_test.hal
           test -f test/tahto/store/memory_blob_test.hal
           test -f test/tahto/store/memory_store_test.hal
           test -f test/tahto/sync/device_test.hal
@@ -61,10 +63,13 @@ jobs:
           test -f protocol/metadata-host.md
           test -f protocol/host-capabilities.md
           test -f protocol/upload-integration.md
+          test -f protocol/response-sources.md
 
           grep -F '(def host-service "hara.blob")' src/tahto/store/capability.hal
           grep -F '(def host-service "hara.store")' src/tahto/store/provider.hal
           grep -F '(ns tahto.store.upload' src/tahto/store/upload.hal
+          grep -F '(ns tahto.store.response-source' src/tahto/store/response_source.hal
+          grep -F 'response-source/response-source?' src/tahto/store/response_source.hal
           grep -F '(ns tahto.store.memory-blob' src/tahto/store/memory_blob.hal
           grep -F '(ns tahto.store.memory-store' src/tahto/store/memory_store.hal
           grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
@@ -76,7 +81,7 @@ jobs:
   hara-state:
     runs-on: ubuntu-latest
     env:
-      HARA_REVISION: 5ef7762c8b97d77f9976f7037bafed81499b42c5
+      HARA_REVISION: b97f85180c57c320c1b8f011a1a91ddba4be2c46
       CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +91,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hara-lang/hara
-          ref: 5ef7762c8b97d77f9976f7037bafed81499b42c5
+          ref: ${{ env.HARA_REVISION }}
           path: .hara
           persist-credentials: false
       - name: Install the Cargo toolchain required by the locked graph
