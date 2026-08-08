@@ -1,0 +1,218 @@
+(ns tahto.semantic.admission
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.model :as semantic]
+            [tahto.store.graph :as graph]
+            [tahto.store.model :as model]))
+
+;; Pure acceptance law for one already-installed semantic-object envelope. The
+;; production bounded object decoder is a later host-capability slice; this
+;; namespace owns only application-neutral validation, projection and graph law.
+
+(def admission-fields
+  #{:application
+    :namespace
+    :collection
+    :root
+    :semantic-object
+    :verification})
+
+(def projection-fields
+  #{:root
+    :application
+    :namespace
+    :collection
+    :id
+    :schema-ref
+    :value-root
+    :value-size
+    :links})
+
+(defn semantic-objects
+  [state]
+  (model/value-or state :semantic-objects {}))
+
+(defn semantic-object-record
+  [state root]
+  (model/value-or (semantic-objects state) root nil))
+
+(defn semantic-projection?
+  [value]
+  (and
+   (validate/exact-record? value projection-fields #{})
+   (model/canonical-digest? (get value :root))
+   (model/identifier? (get value :application))
+   (model/identifier? (get value :namespace))
+   (model/identifier? (get value :collection))
+   (model/identifier? (get value :id))
+   (semantic/schema-ref? (get value :schema-ref))
+   (model/canonical-digest? (get value :value-root))
+   (semantic/bounded-positive-integer?
+    (get value :value-size)
+    semantic/max-semantic-value-bytes)
+   (semantic/semantic-link-vector? (get value :links))))
+
+(defn installed-and-authorized?
+  [state application namespace root]
+  (and
+   (not (nil? (model/stored-object state root)))
+   (graph/namespace-reachable?
+    state application namespace root)))
+
+(defn verification-matches?
+  [verification object-value]
+  (and
+   (semantic/canonical-value-verification? verification)
+   (= (get verification :schema-ref)
+      (get object-value :schema-ref))
+   (= (get verification :value-root)
+      (get object-value :value-root))
+   (= (get verification :value-size)
+      (get object-value :value-size))))
+
+(defn link-target-roots
+  [object-value]
+  (vec
+   (map (fn [link]
+          (get link :target-root))
+        (get object-value :links))))
+
+(defn child-roots
+  [object-value]
+  (vec
+   (distinct
+    (concat
+     [(get object-value :value-root)]
+     (link-target-roots object-value)))))
+
+(defn projection
+  [request]
+  (let [object-value (get request :semantic-object)]
+    {:root (get request :root)
+     :application (get request :application)
+     :namespace (get request :namespace)
+     :collection (get request :collection)
+     :id (get object-value :id)
+     :schema-ref (get object-value :schema-ref)
+     :value-root (get object-value :value-root)
+     :value-size (get object-value :value-size)
+     :links (get object-value :links)}))
+
+(defn every-link-target-authorized?
+  [state application namespace object-value]
+  (every?
+   (fn [root]
+     (installed-and-authorized?
+      state application namespace root))
+   (link-target-roots object-value)))
+
+(defn admit-projected
+  [state request]
+  (if
+   (not
+    (validate/exact-record? request admission-fields #{}))
+   (model/fail state "tahto.semantic/admission-invalid")
+   (let [application (get request :application)
+         namespace (get request :namespace)
+         collection (get request :collection)
+         root (get request :root)
+         object-value (get request :semantic-object)
+         verification (get request :verification)]
+     (cond
+       (not (model/identifier? application))
+       (model/fail state "tahto.semantic/application-invalid")
+
+       (not (model/identifier? namespace))
+       (model/fail state "tahto.semantic/namespace-invalid")
+
+       (not (model/identifier? collection))
+       (model/fail state "tahto.semantic/collection-invalid")
+
+       (not (model/canonical-digest? root))
+       (model/fail state "tahto.semantic/root-invalid")
+
+       (not (semantic/semantic-object? object-value))
+       (model/fail state "tahto.semantic/object-invalid")
+
+       (not
+        (installed-and-authorized?
+         state application namespace root))
+       (model/fail
+        state
+        "tahto.semantic/envelope-not-authorized"
+        {:root root})
+
+       (not
+        (installed-and-authorized?
+         state
+         application
+         namespace
+         (get object-value :value-root)))
+       (model/fail
+        state
+        "tahto.semantic/value-not-authorized"
+        {:root (get object-value :value-root)})
+
+       (not
+        (= (get object-value :value-size)
+           (model/object-size
+            state
+            (get object-value :value-root))))
+       (model/fail
+        state
+        "tahto.semantic/value-size-mismatch"
+        {:root (get object-value :value-root)})
+
+       (not
+        (verification-matches? verification object-value))
+       (model/fail
+        state
+        "tahto.semantic/verification-mismatch")
+
+       (not
+        (every-link-target-authorized?
+         state application namespace object-value))
+       (model/fail
+        state
+        "tahto.semantic/link-target-not-authorized")
+
+       :else
+       (let [candidate (projection request)
+             children (child-roots object-value)
+             existing (semantic-object-record state root)
+             existing-edges
+             (model/value-or (get state :edges) root nil)]
+         (cond
+           (not (nil? existing))
+           (if
+            (and
+             (= existing candidate)
+             (= existing-edges children))
+            (model/ok state existing)
+            (model/fail
+             state
+             "tahto.semantic/object-conflict"
+             {:root root}))
+
+           (not (nil? existing-edges))
+           (model/fail
+            state
+            "tahto.semantic/edge-conflict"
+            {:root root})
+
+           :else
+           (let [next-state
+                 (assoc
+                  (assoc
+                   state
+                   :semantic-objects
+                   (assoc
+                    (semantic-objects state)
+                    root
+                    candidate))
+                  :edges
+                  (assoc
+                   (get state :edges)
+                   root
+                   children))]
+             (model/ok next-state candidate))))))))
