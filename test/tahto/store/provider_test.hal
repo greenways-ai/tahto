@@ -349,7 +349,90 @@
     (provider/provider-response?
      "receipt"
      (assoc receipt-result :status "applied"))]
-   [true true true true true false false])
+   [true true true true true false nil])
+
+  (test/check
+   "accepted store results preserve state only after closed validation"
+   (let [call (get (provider/prepare-load state) :value)
+         accepted (provider/accept-result state call load-result)
+         absent (provider/accept-result state call nil)
+         mismatched
+         (provider/accept-result state call initialize-result)
+         malformed
+         (provider/accept-result
+          state call (assoc load-result :database-path "/tmp/unsafe"))]
+     [(get accepted :ok)
+      (get accepted :state)
+      (get accepted :value)
+      (get absent :ok)
+      (get absent :value)
+      (get mismatched :ok)
+      (error-code mismatched)
+      (get malformed :ok)
+      (error-code malformed)])
+   [true
+    state
+    load-result
+    true
+    nil
+    false
+    "tahto.provider/result-invalid"
+    false
+    "tahto.provider/result-invalid"])
+
+  (test/check
+   "an injected generic store executes the prepared Host/call contract"
+   (let [result
+         (provider/execute-prepared-with
+          (provider/prepare-load state)
+          (fn [service operation request]
+            (if
+             (and (= "hara.store" service)
+                  (= "load" operation)
+                  (= provider/request-protocol
+                     (get request :protocol)))
+             load-result
+             nil)))]
+     [(get result :ok)
+      (get result :state)
+      (get result :value)])
+   [true state load-result])
+
+  (test/check
+   "injected stores cannot widen absence or operation semantics"
+   (let [load-absent
+         (provider/execute-prepared-with
+          (provider/prepare-load state)
+          (fn [service operation request] nil))
+         initialize-absent
+         (provider/execute-prepared-with
+          (provider/prepare-initialize state state-verification)
+          (fn [service operation request] nil))
+         wrong-operation
+         (provider/execute-prepared-with
+          (provider/prepare-compare-and-swap
+           success-result commit-verification)
+          (fn [service operation request] receipt-result))
+         malformed-prepared
+         (provider/execute-prepared-with
+          {:state state}
+          (fn [service operation request] load-result))]
+     [(get load-absent :ok)
+      (get load-absent :value)
+      (get initialize-absent :ok)
+      (error-code initialize-absent)
+      (get wrong-operation :ok)
+      (error-code wrong-operation)
+      (get malformed-prepared :ok)
+      (error-code malformed-prepared)])
+   [true
+    nil
+    false
+    "tahto.provider/result-invalid"
+    false
+    "tahto.provider/result-invalid"
+    false
+    "tahto.provider/prepared-invalid"])
 
   (test/check
    "generic snapshots translate into the closed Tahto snapshot profile"
