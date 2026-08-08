@@ -1,6 +1,7 @@
 (ns tahto.store.provider
   (:require [std.foundation :refer :all]
-            [std.foundation.host :as native]
+            [std.foundation.coroutine :as coroutine]
+            [std.foundation.host :as foundation-host]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
             [tahto.store.transaction :as transaction]))
@@ -340,14 +341,6 @@
      (= (get value :operation)
         (get request :operation)))))
 
-(defn execute-call
-  [call]
-  (if (host-call? call)
-    (native/call (get call :service)
-                 (get call :operation)
-                 (call-request call))
-    nil))
-
 (defn request-result
   [state request]
   (model/ok state (host-call request)))
@@ -453,6 +446,66 @@
   [call value]
   (and (host-call? call)
        (provider-response? (get call :operation) value)))
+
+(defn accept-result
+  [state call result]
+  (cond
+    (not (host-call? call))
+    (model/fail state "tahto.provider/call-invalid")
+
+    (not (host-result? call result))
+    (model/fail state
+                "tahto.provider/result-invalid"
+                {:operation (get call :operation)})
+
+    :else
+    (model/ok state result)))
+
+(defn execute-call-with
+  [state call invoke]
+  (if
+   (host-call? call)
+   (accept-result
+    state
+    call
+    (invoke
+     (get call :service)
+     (get call :operation)
+     (call-request call)))
+   (model/fail state "tahto.provider/call-invalid")))
+
+(defn execute-prepared-with
+  [prepared invoke]
+  (if
+   (and (map? prepared)
+        (boolean? (get prepared :ok)))
+   (if
+    (get prepared :ok)
+    (execute-call-with
+     (get prepared :state)
+     (get prepared :value)
+     invoke)
+    prepared)
+   (model/fail {} "tahto.provider/prepared-invalid")))
+
+(defn ^:async execute-prepared
+  [prepared]
+  (if
+   (and (map? prepared)
+        (boolean? (get prepared :ok)))
+   (if
+    (get prepared :ok)
+    (let [state (get prepared :state)
+          call (get prepared :value)
+          result
+          (coroutine/await
+           (foundation-host/call
+            (get call :service)
+            (get call :operation)
+            (call-request call)))]
+      (accept-result state call result))
+    prepared)
+   (model/fail {} "tahto.provider/prepared-invalid")))
 
 (defn snapshot-from-store-result
   [value]
