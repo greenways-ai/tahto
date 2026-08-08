@@ -1,5 +1,6 @@
 (ns tahto.semantic.model
   (:require [std.foundation :refer :all]
+            [std.foundation.string :as string]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]))
 
@@ -41,6 +42,9 @@
 (def max-index-entries 4096)
 (def max-root-entries 64)
 (def max-semantic-value-bytes 1048576)
+
+(def version-start-characters
+  #{"0" "1" "2" "3" "4" "5" "6" "7" "8" "9"})
 
 (def schema-ref-fields
   #{:protocol
@@ -101,6 +105,13 @@
    (model/positive-integer? value)
    (<= value maximum)))
 
+(defn package-version?
+  [value]
+  (and
+   (model/identifier? value)
+   (has? version-start-characters
+         (string/slice value 0 1))))
+
 (defn coordinate-part
   [value]
   (let [text (str value)]
@@ -110,17 +121,20 @@
   [values coordinate]
   (and
    (vector? values)
-   (loop [index 1]
-     (if
-      (= index (count values))
-      true
+   (if
+    (<= (count values) 1)
+    true
+    (loop [index 1]
       (if
-       (< (compare
-           (coordinate (nth values (dec index)))
-           (coordinate (nth values index)))
-          0)
-       (recur (inc index))
-       false)))))
+       (= index (count values))
+       true
+       (if
+        (< (compare
+            (coordinate (nth values (dec index)))
+            (coordinate (nth values index)))
+           0)
+        (recur (inc index))
+        false))))))
 
 (defn schema-ref-coordinate
   [value]
@@ -140,7 +154,7 @@
    (model/identifier? (get value :schema))
    (model/positive-integer? (get value :schema-version))
    (model/identifier? (get value :package))
-   (model/identifier? (get value :package-version))
+   (package-version? (get value :package-version))
    (model/canonical-digest? (get value :package-root))
    (model/identifier? (get value :entry))))
 
