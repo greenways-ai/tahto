@@ -1,0 +1,333 @@
+(ns tahto.store.upload-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.store.capability :as capability]
+            [tahto.store.host :as host]
+            [tahto.store.memory-blob :as memory-blob]
+            [tahto.store.model :as model]
+            [tahto.store.upload :as upload]))
+
+(def digest-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def begin-request
+  {:upload-id "upload.a"
+   :application "app.a"
+   :namespace "space.a"
+   :digest digest-a
+   :size 9
+   :media-type "application/octet-stream"})
+
+(def append-first-request
+  {:upload-id "upload.a"
+   :offset 0
+   :length 4
+   :body-handle 17})
+
+(def append-second-request
+  {:upload-id "upload.a"
+   :offset 4
+   :length 5
+   :body-handle 18})
+
+(def install-request
+  {:upload-id "upload.a"})
+
+(def abort-request
+  {:upload-id "upload.a"})
+
+(def open-effect
+  (host/effect
+   "upload/open"
+   {:upload-id "upload.a"
+    :digest digest-a
+    :size 9
+    :media-type "application/octet-stream"}))
+
+(def append-first-effect
+  (host/effect
+   "upload/append"
+   {:upload-id "upload.a"
+    :offset 0
+    :length 4
+    :body-handle 17}))
+
+(defn fixture
+  [work-id offset length]
+  {:work-id work-id
+   :offset offset
+   :length length
+   :object-digest digest-a
+   :object-size 9})
+
+(defn executor
+  [memory work-id]
+  (fn [service operation request]
+    (memory-blob/invoke memory work-id service operation request)))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "upload integration commits Tahto state only after exact generic results"
+   (let [memory (memory-blob/create)
+         first-source
+         (memory-blob/register-source!
+          memory 17 (fixture "work.a" 0 4))
+         second-source
+         (memory-blob/register-source!
+          memory 18 (fixture "work.a" 4 5))
+         invoke (executor memory "work.a")
+         initial (model/empty-state)
+         begun (upload/begin-with initial begin-request invoke)
+         appended-first
+         (upload/append-with
+          (get begun :state)
+          append-first-request
+          invoke)
+         appended-second
+         (upload/append-with
+          (get appended-first :state)
+          append-second-request
+          invoke)
+         installed
+         (upload/install-with
+          (get appended-second :state)
+          install-request
+          invoke)
+         state (get installed :state)]
+     [first-source
+      second-source
+      (get begun :ok)
+      (get-in begun [:value :offset])
+      (count (get begun :effects))
+      (get appended-first :ok)
+      (get-in appended-first [:value :offset])
+      (get appended-second :ok)
+      (get-in appended-second [:value :offset])
+      (get installed :ok)
+      (get-in installed [:value :protocol])
+      (get-in installed [:value :digest])
+      (get-in installed [:value :size])
+      (model/upload state "upload.a")
+      (model/namespace-reference?
+       state "app.a" "space.a" digest-a)
+      (memory-blob/staging-entry memory "upload.a")
+      (get (memory-blob/object-entry memory digest-a) :size)
+      (get (memory-blob/input-source-entry memory 17) :consumed)
+      (get (memory-blob/input-source-entry memory 17) :closed)
+      (get (memory-blob/input-source-entry memory 18) :consumed)
+      (get (memory-blob/input-source-entry memory 18) :closed)
+      (count (get installed :effects))])
+   [true
+    true
+    true
+    0
+    0
+    true
+    4
+    true
+    9
+    true
+    "tahto.object/1"
+    digest-a
+    9
+    nil
+    true
+    nil
+    9
+    true
+    true
+    true
+    true
+    0])
+
+  (test/check
+   "a verified provider resume offset is reconciled into the Tahto upload"
+   (let [memory (memory-blob/create)
+         first-source
+         (memory-blob/register-source!
+          memory 17 (fixture "work.a" 0 4))
+         second-source
+         (memory-blob/register-source!
+          memory 18 (fixture "work.a" 4 5))
+         invoke (executor memory "work.a")
+         provider-opened
+         (capability/execute-with {} open-effect invoke)
+         provider-appended
+         (capability/execute-with {} append-first-effect invoke)
+         resumed
+         (upload/begin-with
+          (model/empty-state)
+          begin-request
+          invoke)
+         appended
+         (upload/append-with
+          (get resumed :state)
+          append-second-request
+          invoke)
+         installed
+         (upload/install-with
+          (get appended :state)
+          install-request
+          invoke)]
+     [first-source
+      second-source
+      (get provider-opened :ok)
+      (get provider-appended :ok)
+      (get resumed :ok)
+      (get-in resumed [:value :offset])
+      (get-in appended [:value :offset])
+      (get installed :ok)
+      (model/upload (get installed :state) "upload.a")
+      (model/namespace-reference?
+       (get installed :state)
+       "app.a"
+       "space.a"
+       digest-a)])
+   [true true true true true 4 9 true nil true])
+
+  (test/check
+   "a wrong-work source failure rolls back the optimistic append transition"
+   (let [memory (memory-blob/create)
+         registered
+         (memory-blob/register-source!
+          memory 17 (fixture "work.a" 0 4))
+         begun
+         (upload/begin-with
+          (model/empty-state)
+          begin-request
+          (executor memory "work.a"))
+         before (get begun :state)
+         failed
+         (upload/append-with
+          before
+          append-first-request
+          (executor memory "work.b"))]
+     [registered
+      (get begun :ok)
+      (get failed :ok)
+      (error-code failed)
+      (= before (get failed :state))
+      (get (model/upload (get failed :state) "upload.a") :offset)
+      (get (memory-blob/input-source-entry memory 17) :consumed)
+      (get (memory-blob/input-source-entry memory 17) :closed)
+      (count (get failed :effects))])
+   [true
+    true
+    false
+    "tahto.capability/result-invalid"
+    true
+    0
+    false
+    false
+    0])
+
+  (test/check
+   "incomplete installs fail before dispatch and never leak verifying state"
+   (let [memory (memory-blob/create)
+         registered
+         (memory-blob/register-source!
+          memory 17 (fixture "work.a" 0 4))
+         invoke (executor memory "work.a")
+         begun
+         (upload/begin-with
+          (model/empty-state)
+          begin-request
+          invoke)
+         appended
+         (upload/append-with
+          (get begun :state)
+          append-first-request
+          invoke)
+         before (get appended :state)
+         calls (atom 0)
+         failed
+         (upload/install-with
+          before
+          install-request
+          (fn [service operation request]
+            (do
+             (swap! calls inc)
+             nil)))]
+     [registered
+      (get begun :ok)
+      (get appended :ok)
+      (get failed :ok)
+      (error-code failed)
+      (= before (get failed :state))
+      (get (model/upload (get failed :state) "upload.a") :status)
+      @calls])
+   [true
+    true
+    true
+    false
+    "tahto.store/upload-incomplete"
+    true
+    "open"
+    0])
+
+  (test/check
+   "abort candidate state rolls back on provider failure and commits on success"
+   (let [memory (memory-blob/create)
+         invoke (executor memory "work.a")
+         begun
+         (upload/begin-with
+          (model/empty-state)
+          begin-request
+          invoke)
+         before (get begun :state)
+         failed
+         (upload/abort-with
+          before
+          abort-request
+          (fn [service operation request] nil))
+         aborted
+         (upload/abort-with before abort-request invoke)]
+     [(get begun :ok)
+      (get failed :ok)
+      (error-code failed)
+      (= before (get failed :state))
+      (get (model/upload (get failed :state) "upload.a") :status)
+      (get aborted :ok)
+      (get aborted :value)
+      (model/upload (get aborted :state) "upload.a")
+      (memory-blob/staging-entry memory "upload.a")])
+   [true
+    false
+    "tahto.capability/result-invalid"
+    true
+    "open"
+    true
+    "upload.a"
+    nil
+    nil])
+
+  (test/check
+   "upload orchestration excludes range effects reserved for the later read path"
+   (let [state (model/empty-state)
+         calls (atom 0)
+         range-effect
+         (host/effect
+          "object/read-range"
+          {:digest digest-a
+           :start 0
+           :end 1})
+         transition
+         (model/ok state {} [range-effect])
+         result
+         (upload/execute-transition-with
+          state
+          transition
+          (fn [service operation request]
+            (do
+             (swap! calls inc)
+             nil)))]
+     [(upload/upload-effect? range-effect)
+      (get result :ok)
+      (error-code result)
+      (= state (get result :state))
+      @calls])
+   [false false "tahto.upload/effect-invalid" true 0])])

@@ -1,0 +1,221 @@
+(ns tahto.store.upload
+  (:require [std.foundation :refer :all]
+            [std.foundation.coroutine :as coroutine]
+            [tahto.store.capability :as capability]
+            [tahto.store.host :as host]
+            [tahto.store.model :as model]
+            [tahto.store.vault :as vault]))
+
+;; This namespace is the atomic HAL orchestration boundary between Tahto's
+;; candidate upload transitions and the generic `hara.blob` capability. Native
+;; code moves bytes; only an exact generic result commits the candidate state.
+(def upload-effect-operations
+  #{"upload/open"
+    "upload/append"
+    "upload/abort"
+    "upload/verify-install"})
+
+(defn upload-effect?
+  [effect]
+  (and
+   (host/effect? effect)
+   (has? upload-effect-operations
+         (get effect :operation))))
+
+(defn transition-effect
+  [transition]
+  (let [effects (get transition :effects)]
+    (if
+     (and (vector? effects)
+          (= 1 (count effects)))
+     (first effects)
+     nil)))
+
+(defn rollback
+  [state result]
+  (let [error (get result :error)]
+    (model/fail
+     state
+     (model/value-or error :code "tahto.upload/provider-failed")
+     (model/value-or error :details {}))))
+
+(defn candidate-upload-matches-open?
+  [upload effect result]
+  (let [request (get effect :request)]
+    (and
+     (map? upload)
+     (= "open" (get upload :status))
+     (= (get request :upload-id) (get upload :id))
+     (= (get request :digest) (get upload :digest))
+     (= (get request :size) (get upload :size))
+     (= (get request :media-type) (get upload :media-type))
+     (model/non-negative-integer? (get result :offset))
+     (<= (get result :offset) (get upload :size)))))
+
+(defn accept-open
+  [original candidate effect result]
+  (let [upload-id (get-in effect [:request :upload-id])
+        upload (model/upload candidate upload-id)]
+    (if
+     (candidate-upload-matches-open? upload effect result)
+     (let [updated (assoc upload :offset (get result :offset))
+           next-state
+           (assoc
+            candidate
+            :uploads
+            (assoc (get candidate :uploads)
+                   upload-id
+                   updated))]
+       (model/ok next-state updated))
+     (model/fail original "tahto.upload/open-state-mismatch"))))
+
+(defn accept-append
+  [original candidate effect result]
+  (let [upload-id (get-in effect [:request :upload-id])
+        upload (model/upload candidate upload-id)]
+    (if
+     (and
+      (map? upload)
+      (= "open" (get upload :status))
+      (= upload-id (get upload :id))
+      (= (get result :offset) (get upload :offset)))
+     (model/ok candidate upload)
+     (model/fail original "tahto.upload/append-state-mismatch"))))
+
+(defn accept-abort
+  [original candidate effect]
+  (let [upload-id (get-in effect [:request :upload-id])]
+    (if
+     (nil? (model/upload candidate upload-id))
+     (model/ok candidate upload-id)
+     (model/fail original "tahto.upload/abort-state-mismatch"))))
+
+(defn accept-install
+  [original candidate effect result]
+  (let [translated
+        (capability/verified-install-result effect result)]
+    (if
+     (nil? translated)
+     (model/fail original "tahto.upload/install-result-invalid")
+     (let [accepted (vault/accept-install candidate translated)]
+       (if
+        (get accepted :ok)
+        accepted
+        (rollback original accepted))))))
+
+(defn accept-executed
+  [original transition effect executed]
+  (if
+   (not (get executed :ok))
+   (rollback original executed)
+   (let [candidate (get transition :state)
+         result (get executed :value)
+         operation (get effect :operation)]
+     (cond
+       (= operation "upload/open")
+       (accept-open original candidate effect result)
+
+       (= operation "upload/append")
+       (accept-append original candidate effect result)
+
+       (= operation "upload/abort")
+       (accept-abort original candidate effect)
+
+       (= operation "upload/verify-install")
+       (accept-install original candidate effect result)
+
+       :else
+       (model/fail
+        original
+        "tahto.upload/effect-unsupported"
+        {:operation operation})))))
+
+(defn execute-transition-with
+  [state transition invoke]
+  (if
+   (not (get transition :ok))
+   transition
+   (let [effect (transition-effect transition)]
+     (if
+      (not (upload-effect? effect))
+      (model/fail state "tahto.upload/effect-invalid")
+      (accept-executed
+       state
+       transition
+       effect
+       (capability/execute-with
+        (get transition :state)
+        effect
+        invoke))))))
+
+(defn begin-with
+  [state request invoke]
+  (execute-transition-with
+   state
+   (vault/begin-upload state request)
+   invoke))
+
+(defn append-with
+  [state request invoke]
+  (execute-transition-with
+   state
+   (vault/append-upload state request)
+   invoke))
+
+(defn abort-with
+  [state request invoke]
+  (execute-transition-with
+   state
+   (vault/abort-upload state request)
+   invoke))
+
+(defn install-with
+  [state request invoke]
+  (execute-transition-with
+   state
+   (vault/request-install state request)
+   invoke))
+
+(defn ^:async execute-transition
+  [state transition]
+  (if
+   (not (get transition :ok))
+   transition
+   (let [effect (transition-effect transition)]
+     (if
+      (not (upload-effect? effect))
+      (model/fail state "tahto.upload/effect-invalid")
+      (let [executed
+            (coroutine/await
+             (capability/execute
+              (get transition :state)
+              effect))]
+        (accept-executed state transition effect executed))))))
+
+(defn ^:async begin
+  [state request]
+  (coroutine/await
+   (execute-transition
+    state
+    (vault/begin-upload state request))))
+
+(defn ^:async append
+  [state request]
+  (coroutine/await
+   (execute-transition
+    state
+    (vault/append-upload state request))))
+
+(defn ^:async abort
+  [state request]
+  (coroutine/await
+   (execute-transition
+    state
+    (vault/abort-upload state request))))
+
+(defn ^:async install
+  [state request]
+  (coroutine/await
+   (execute-transition
+    state
+    (vault/request-install state request))))
