@@ -4,15 +4,16 @@ This directory contains the Hara-owned TAHTO state, transaction and
 capability-interpreter logic.
 
 ```text
-model.hal        canonical identity, limits and immutable state
-host.hal         closed Tahto domain effects and result validation
-capability.hal   pure-HAL mapping to generic blob/source capabilities
-memory_blob.hal  deterministic pure-HAL hara.blob reference provider
-graph.hal        verified manifests, shared closure, roots and dry-run GC
-vault.hal        uploads, installation, namespace references, quotas and ranges
-history.hal      immutable commits, CAS heads, backups, restore and receipts
-transaction.hal  atomic verified request-to-metadata commit plans
-provider.hal     pure-HAL mapping to a generic durable value store
+model.hal         canonical identity, limits and immutable state
+host.hal          closed Tahto domain effects and result validation
+capability.hal    pure-HAL mapping to generic blob/source capabilities
+memory_blob.hal   deterministic pure-HAL hara.blob reference provider
+graph.hal         verified manifests, shared closure, roots and dry-run GC
+vault.hal         uploads, installation, namespace references, quotas and ranges
+history.hal       immutable commits, CAS heads, backups, restore and receipts
+transaction.hal   atomic verified request-to-metadata commit plans
+provider.hal      pure-HAL mapping to a generic durable value store
+memory_store.hal  deterministic pure-HAL hara.store reference driver
 ```
 
 Record shape and signed verification contracts live in:
@@ -60,7 +61,7 @@ results remain pure HAL. Hoplite or another host may implement byte movement,
 hashing, atomic installation and backpressured response streaming without
 containing Tahto upload, quota, graph or authorization rules.
 
-### Deterministic reference profile
+### Deterministic blob reference profile
 
 `tahto.store.memory-blob` implements the same generic `hara.blob` request and
 result profile entirely in HAL for conformance tests. It models:
@@ -99,10 +100,46 @@ receipt value. It does not parse Tahto state or receipt fields. Its mechanical
 `applied` or `replayed` result receives Tahto meaning only after HAL translates
 and validates the stored payload.
 
+### Deterministic store reference profile
+
+`tahto.store.memory-store` implements the generic `hara.store` mechanics in HAL
+without depending on Tahto record shapes. Its own request validator checks only:
+
+```text
+closed operation-specific keys
+revision bounds and one-step CAS revisions
+opaque value digests and receipt keys
+presence of an opaque receipt value
+```
+
+It models:
+
+```text
+absent and initialized stores
+idempotent exact initialization
+single-revision compare-and-swap
+atomic snapshot and receipt publication
+exact receipt-key replay
+stale-writer and key-collision rejection
+before-commit interruption
+post-commit lost-result recovery
+```
+
+Replay is bound to the exact opaque value, value digest, receipt key and receipt
+value. A caller cannot reuse a prior key to substitute another value, even when
+the receipt payload itself is unchanged.
+
+The reference driver keeps Hara values directly and preserves the supplied
+value/digest pairing. It does not claim to recompute a canonical HTA digest over
+encoded bytes. Production drivers must encode the opaque value canonically,
+verify the supplied digest over those bytes, and commit the value and receipt in
+one durable transaction. That byte-level guarantee belongs to the generic host
+driver rather than Tahto semantics.
+
 The Rust metadata implementation under `native/` is a temporary migration
 source for Hoplite issue #45, not Tahto's target implementation. It is removed
-once generic in-memory and SQLite drivers pass equivalent restart and fault
-conformance.
+once the generic SQLite driver passes the same restart and fault conformance as
+`memory-store`.
 
 Tahto preserves divergent valid commit roots. Applications, not the fabric,
 decide whether and how those roots are reconciled.
