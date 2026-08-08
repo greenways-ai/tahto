@@ -1,0 +1,603 @@
+(ns tahto.semantic.admission-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.semantic.admission :as admission]
+            [tahto.semantic.model :as semantic]
+            [tahto.store.graph :as graph]
+            [tahto.store.host :as host]
+            [tahto.store.model :as model]
+            [tahto.store.vault :as vault]))
+
+(def package-root
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+(def envelope-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def envelope-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def value-a
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def value-b
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def target-a
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def target-b
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+
+(def schema-ref
+  {:protocol semantic/schema-ref-protocol
+   :schema "fixture.entity"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root
+   :entry "fixture.entity/spec"})
+
+(def child-link
+  {:protocol semantic/semantic-link-protocol
+   :role "world.child"
+   :target-id "entity/leaf"
+   :target-root target-a})
+
+(def parent-link
+  {:protocol semantic/semantic-link-protocol
+   :role "world.parent"
+   :target-id "world/main"
+   :target-root target-b})
+
+(def object-zero
+  {:protocol semantic/semantic-object-protocol
+   :id "entity/zero"
+   :schema-ref schema-ref
+   :value-root value-a
+   :value-size 512
+   :links []})
+
+(def object-multiple
+  {:protocol semantic/semantic-object-protocol
+   :id "entity/tree"
+   :schema-ref schema-ref
+   :value-root value-a
+   :value-size 512
+   :links [child-link parent-link]})
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn install-object
+  [state upload-id application namespace digest size]
+  (let [begun
+        (vault/begin-upload
+         state
+         {:upload-id upload-id
+          :application application
+          :namespace namespace
+          :digest digest
+          :size size
+          :media-type "application/octet-stream"})
+        appended
+        (vault/append-upload
+         (result-state begun)
+         {:upload-id upload-id
+          :offset 0
+          :length size
+          :body-handle 17})
+        requested
+        (vault/request-install
+         (result-state appended)
+         {:upload-id upload-id})
+        accepted
+        (vault/accept-install
+         (result-state requested)
+         {:protocol host/result-protocol
+          :operation "upload/verify-install"
+          :upload-id upload-id
+          :digest digest
+          :size size
+          :verified true
+          :installed true})]
+    (result-state accepted)))
+
+(defn install-specs
+  [specs]
+  (reduce
+   (fn [state spec]
+     (install-object
+      state
+      (get spec :upload-id)
+      (get spec :application)
+      (get spec :namespace)
+      (get spec :digest)
+      (get spec :size)))
+   (model/empty-state)
+   specs))
+
+(defn standard-spec
+  [upload-id digest size]
+  {:upload-id upload-id
+   :application "fixture.world"
+   :namespace "world.a"
+   :digest digest
+   :size size})
+
+(defn base-state
+  []
+  (install-specs
+   [(standard-spec "upload.envelope.a" envelope-a 256)
+    (standard-spec "upload.value.a" value-a 512)
+    (standard-spec "upload.target.a" target-a 128)
+    (standard-spec "upload.target.b" target-b 128)]))
+
+(defn verification-for
+  [semantic-object]
+  {:protocol semantic/canonical-value-verification-protocol
+   :verified true
+   :profile semantic/canonical-value-profile
+   :schema-ref (get semantic-object :schema-ref)
+   :value-root (get semantic-object :value-root)
+   :value-size (get semantic-object :value-size)})
+
+(defn admission-input
+  [root semantic-object verification]
+  {:application "fixture.world"
+   :namespace "world.a"
+   :collection "scene"
+   :root root
+   :semantic-object semantic-object
+   :verification verification})
+
+(test/print-results
+ [(test/check
+   "semantic projection state is additive and absent before first admission"
+   (let [state (model/empty-state)]
+     [(has? state :semantic-objects)
+      (admission/semantic-objects state)
+      (admission/semantic-object-projection state envelope-a)])
+   [false {} nil])
+
+  (test/check
+   "valid zero-link and multi-link envelopes retain bounded projections and edges"
+   (let [state (base-state)
+         zero
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-a
+           object-zero
+           (verification-for object-zero)))
+         multiple
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-a
+           object-multiple
+           (verification-for object-multiple)))
+         zero-projection (get zero :value)
+         multiple-projection (get multiple :value)]
+     [(get zero :ok)
+      zero-projection
+      (get-in zero [:state :edges envelope-a])
+      (get multiple :ok)
+      multiple-projection
+      (get-in multiple [:state :edges envelope-a])
+      (admission/projection? zero-projection)
+      (admission/projection? multiple-projection)])
+   [true
+    {:root envelope-a
+     :id "entity/zero"
+     :schema-ref schema-ref
+     :value-root value-a
+     :value-size 512
+     :links []}
+    [value-a]
+    true
+    {:root envelope-a
+     :id "entity/tree"
+     :schema-ref schema-ref
+     :value-root value-a
+     :value-size 512
+     :links [child-link parent-link]}
+    [value-a target-a target-b]
+    true
+    true])
+
+  (test/check
+   "exact replay is idempotent while another projection for one root conflicts"
+   (let [state (base-state)
+         input
+         (admission-input
+          envelope-a
+          object-multiple
+          (verification-for object-multiple))
+         first (admission/admit-projected state input)
+         replay
+         (admission/admit-projected
+          (result-state first)
+          input)
+         changed (assoc object-multiple :id "entity/other")
+         conflict
+         (admission/admit-projected
+          (result-state first)
+          (admission-input
+           envelope-a
+           changed
+           (verification-for changed)))]
+     [(get replay :ok)
+      (= (result-state first) (result-state replay))
+      (= (get first :value) (get replay :value))
+      (get conflict :ok)
+      (error-code conflict)
+      (= (result-state first) (result-state conflict))])
+   [true true true false "tahto.semantic/projection-conflict" true])
+
+  (test/check
+   "an existing non-semantic edge cannot be overwritten by admission"
+   (let [state (base-state)
+         occupied
+         (assoc state
+                :edges
+                (assoc (get state :edges)
+                       envelope-a
+                       [target-a]))
+         result
+         (admission/admit-projected
+          occupied
+          (admission-input
+           envelope-a
+           object-zero
+           (verification-for object-zero)))]
+     [(get result :ok)
+      (error-code result)
+      (= occupied (result-state result))])
+   [false "tahto.semantic/edge-conflict" true])
+
+  (test/check
+   "missing and unauthorized envelope roots fail before projection"
+   (let [missing-state
+         (install-specs
+          [(standard-spec "upload.value.a" value-a 512)])
+         missing
+         (admission/admit-projected
+          missing-state
+          (admission-input
+           envelope-a
+           object-zero
+           (verification-for object-zero)))
+         unauthorized-state
+         (install-specs
+          [{:upload-id "upload.envelope.other"
+            :application "other.app"
+            :namespace "world.a"
+            :digest envelope-a
+            :size 256}
+           (standard-spec "upload.value.a" value-a 512)])
+         unauthorized
+         (admission/admit-projected
+          unauthorized-state
+          (admission-input
+           envelope-a
+           object-zero
+           (verification-for object-zero)))]
+     [(error-code missing)
+      (= missing-state (result-state missing))
+      (error-code unauthorized)
+      (= unauthorized-state (result-state unauthorized))])
+   ["tahto.semantic/envelope-missing"
+    true
+    "tahto.semantic/envelope-not-authorized"
+    true])
+
+  (test/check
+   "the semantic envelope and application value roots remain distinct"
+   (let [state
+         (install-specs
+          [(standard-spec "upload.envelope.a" envelope-a 256)])
+         self-object
+         {:protocol semantic/semantic-object-protocol
+          :id "entity/self"
+          :schema-ref schema-ref
+          :value-root envelope-a
+          :value-size 256
+          :links []}
+         result
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-a
+           self-object
+           (verification-for self-object)))]
+     [(get result :ok)
+      (error-code result)
+      (= state (result-state result))])
+   [false "tahto.semantic/value-root-not-distinct" true])
+
+  (test/check
+   "value roots must be installed authorized and size-exact"
+   (let [missing-state
+         (install-specs
+          [(standard-spec "upload.envelope.a" envelope-a 256)])
+         missing
+         (admission/admit-projected
+          missing-state
+          (admission-input
+           envelope-a object-zero (verification-for object-zero)))
+         wrong-size-state
+         (install-specs
+          [(standard-spec "upload.envelope.a" envelope-a 256)
+           (standard-spec "upload.value.a" value-a 511)])
+         wrong-size
+         (admission/admit-projected
+          wrong-size-state
+          (admission-input
+           envelope-a object-zero (verification-for object-zero)))
+         unauthorized-state
+         (install-specs
+          [(standard-spec "upload.envelope.a" envelope-a 256)
+           {:upload-id "upload.value.other"
+            :application "fixture.world"
+            :namespace "other"
+            :digest value-a
+            :size 512}])
+         unauthorized
+         (admission/admit-projected
+          unauthorized-state
+          (admission-input
+           envelope-a object-zero (verification-for object-zero)))]
+     [(error-code missing)
+      (= missing-state (result-state missing))
+      (error-code wrong-size)
+      (= wrong-size-state (result-state wrong-size))
+      (error-code unauthorized)
+      (= unauthorized-state (result-state unauthorized))])
+   ["tahto.semantic/value-missing"
+    true
+    "tahto.semantic/value-size-mismatch"
+    true
+    "tahto.semantic/value-not-authorized"
+    true])
+
+  (test/check
+   "verification evidence must match schema root and size exactly"
+   (let [state (base-state)
+         proof (verification-for object-zero)
+         other-schema
+         (assoc schema-ref
+                :package-root
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+         schema-mismatch
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-a
+           object-zero
+           (assoc proof :schema-ref other-schema)))
+         root-mismatch
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-a
+           object-zero
+           (assoc proof :value-root value-b)))
+         size-mismatch
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-a
+           object-zero
+           (assoc proof :value-size 511)))
+         malformed
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-a
+           object-zero
+           (assoc proof :provider "memory")))]
+     [(error-code schema-mismatch)
+      (error-code root-mismatch)
+      (error-code size-mismatch)
+      (error-code malformed)
+      (= state (result-state schema-mismatch))
+      (= state (result-state root-mismatch))
+      (= state (result-state size-mismatch))
+      (= state (result-state malformed))])
+   ["tahto.semantic/verification-schema-mismatch"
+    "tahto.semantic/verification-root-mismatch"
+    "tahto.semantic/verification-size-mismatch"
+    "tahto.semantic/verification-invalid"
+    true true true true])
+
+  (test/check
+   "link targets must be installed and namespace-authorized"
+   (let [missing-state
+         (install-specs
+          [(standard-spec "upload.envelope.a" envelope-a 256)
+           (standard-spec "upload.value.a" value-a 512)])
+         missing
+         (admission/admit-projected
+          missing-state
+          (admission-input
+           envelope-a
+           object-multiple
+           (verification-for object-multiple)))
+         unauthorized-state
+         (install-specs
+          [(standard-spec "upload.envelope.a" envelope-a 256)
+           (standard-spec "upload.value.a" value-a 512)
+           (standard-spec "upload.target.a" target-a 128)
+           {:upload-id "upload.target.other"
+            :application "fixture.world"
+            :namespace "other"
+            :digest target-b
+            :size 128}])
+         unauthorized
+         (admission/admit-projected
+          unauthorized-state
+          (admission-input
+           envelope-a
+           object-multiple
+           (verification-for object-multiple)))]
+     [(error-code missing)
+      (= missing-state (result-state missing))
+      (error-code unauthorized)
+      (= unauthorized-state (result-state unauthorized))])
+   ["tahto.semantic/link-target-missing"
+    true
+    "tahto.semantic/link-target-not-authorized"
+    true])
+
+  (test/check
+   "installed targets need not be semantically admitted yet"
+   (let [state (base-state)
+         result
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-a
+           object-multiple
+           (verification-for object-multiple)))
+         next-state (result-state result)]
+     [(get result :ok)
+      (nil? (admission/semantic-object-projection next-state target-a))
+      (nil? (admission/semantic-object-projection next-state target-b))
+      (= [value-a target-a target-b]
+         (get-in next-state [:edges envelope-a]))])
+   [true true true true])
+
+  (test/check
+   "bounded cyclic semantic graphs can be admitted in either order"
+   (let [link-a
+         {:protocol semantic/semantic-link-protocol
+          :role "peer"
+          :target-id "node/b"
+          :target-root envelope-b}
+         link-b
+         {:protocol semantic/semantic-link-protocol
+          :role "peer"
+          :target-id "node/a"
+          :target-root envelope-a}
+         object-a
+         {:protocol semantic/semantic-object-protocol
+          :id "node/a"
+          :schema-ref schema-ref
+          :value-root value-a
+          :value-size 512
+          :links [link-a]}
+         object-b
+         {:protocol semantic/semantic-object-protocol
+          :id "node/b"
+          :schema-ref schema-ref
+          :value-root value-b
+          :value-size 384
+          :links [link-b]}
+         state
+         (install-specs
+          [(standard-spec "upload.envelope.a" envelope-a 256)
+           (standard-spec "upload.envelope.b" envelope-b 256)
+           (standard-spec "upload.value.a" value-a 512)
+           (standard-spec "upload.value.b" value-b 384)])
+         a-first
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-a object-a (verification-for object-a)))
+         b-second
+         (admission/admit-projected
+          (result-state a-first)
+          (admission-input
+           envelope-b object-b (verification-for object-b)))
+         b-first
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-b object-b (verification-for object-b)))
+         a-second
+         (admission/admit-projected
+          (result-state b-first)
+          (admission-input
+           envelope-a object-a (verification-for object-a)))
+         report-a
+         (graph/closure-report-value
+          (result-state b-second)
+          [envelope-a])
+         report-b
+         (graph/closure-report-value
+          (result-state a-second)
+          [envelope-b])]
+     [(get a-first :ok)
+      (get b-second :ok)
+      (get b-first :ok)
+      (get a-second :ok)
+      (get report-a :complete)
+      (get report-a :overflow)
+      (get report-b :complete)
+      (get report-b :overflow)])
+   [true true true true true false true false])
+
+  (test/check
+   "two immutable versions may share one stable logical ID"
+   (let [object-a
+         (assoc object-zero :id "entity/shared")
+         object-b
+         {:protocol semantic/semantic-object-protocol
+          :id "entity/shared"
+          :schema-ref schema-ref
+          :value-root value-b
+          :value-size 384
+          :links []}
+         state
+         (install-specs
+          [(standard-spec "upload.envelope.a" envelope-a 256)
+           (standard-spec "upload.envelope.b" envelope-b 256)
+           (standard-spec "upload.value.a" value-a 512)
+           (standard-spec "upload.value.b" value-b 384)])
+         first
+         (admission/admit-projected
+          state
+          (admission-input
+           envelope-a object-a (verification-for object-a)))
+         second
+         (admission/admit-projected
+          (result-state first)
+          (admission-input
+           envelope-b object-b (verification-for object-b)))
+         projections
+         (admission/semantic-objects (result-state second))]
+     [(get first :ok)
+      (get second :ok)
+      (= 2 (count projections))
+      (= "entity/shared" (get-in projections [envelope-a :id]))
+      (= "entity/shared" (get-in projections [envelope-b :id]))])
+   [true true true true true])
+
+  (test/check
+   "admission inputs are closed and durable projections contain no host authority"
+   (let [state (base-state)
+         input
+         (admission-input
+          envelope-a
+          object-multiple
+          (verification-for object-multiple))
+         extended
+         (admission/admit-projected
+          state
+          (assoc input :provider "memory"))
+         admitted (admission/admit-projected state input)
+         projection (get admitted :value)]
+     [(error-code extended)
+      (= state (result-state extended))
+      (admission/projection? projection)
+      (has? projection :value)
+      (has? projection :application)
+      (has? projection :namespace)
+      (has? projection :collection)
+      (has? projection :provider)
+      (has? projection :path)
+      (has? projection :source-handle)])
+   ["tahto.semantic/admission-input-invalid"
+    true
+    true
+    false false false false false false false])])
