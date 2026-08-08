@@ -212,21 +212,85 @@ portable Tahto application state.
 
 ## Execution profiles
 
-The same interpreter supports:
+The mapping and result translation functions remain deterministic. The same
+closed validator is used for injected tests and installed production providers.
+A successful host promise is not accepted merely because it completed.
 
-1. deterministic HAL tests with a pure in-memory capability;
-2. a Hara CLI host with generic byte sources and stores; and
-3. Hoplite, where request and response resources are bound to Nginx work
-   lifetimes.
+### Pure or injected execution
 
-Mapping and validation remain pure. `execute-call` is the thin asynchronous HAL
-edge that invokes `std.foundation.host/call` after the call plan is validated.
+Tests and non-Hoplite hosts can supply an ordinary HAL function:
+
+```clojure
+(capability/execute-with
+ state
+ effect
+ (fn [service operation request]
+   (in-memory-capability service operation request)))
+```
+
+`execute-with` prepares the exact generic call and invokes the supplied
+capability only after the call has passed the closed request profile. The result
+then passes through `accept-result`, including exact operation, staging key,
+offset, length, size and digest matching, before the original Tahto state is
+returned in `model/ok`.
+
+Malformed and mismatched provider values become closed
+`tahto.capability/result-*` failures. An injected provider cannot bypass the
+same validation that production uses.
+
+### Production host execution
+
+A Hoplite handler or another coroutine-enabled Hara host calls:
+
+```clojure
+(coroutine/await
+ (capability/execute state effect))
+```
+
+`capability/execute` is an async HAL function. It invokes:
+
+```clojure
+(foundation-host/call service operation request)
+```
+
+After the promise settles, the result passes through the same pure
+`accept-result` function used by `execute-with`. Host rejection remains a
+rejected coroutine operation; application code decides how that failure affects
+its transaction or HTTP response.
+
+The interpreter therefore runs unchanged in:
+
+1. **Pure HAL tests** — injected in-memory capability.
+2. **Hara CLI hosts** — installed generic blob driver.
+3. **Hoplite** — registered provider ABI with request and response resources
+   bound to Nginx work lifetimes.
+
+No public raw host-call helper is a substitute for result validation.
 
 ## Metadata follows the same rule
 
 `tahto.store.provider` targets `hara.store`, not `tahto.metadata`. The generic
 store persists opaque canonical values and receipt payloads with revision CAS.
 Tahto snapshot and receipt meaning remains in HAL.
+
+Metadata has several preparation functions rather than one domain effect, so
+its execution surface accepts the prepared result:
+
+```clojure
+(provider/execute-prepared-with
+ (provider/prepare-load state)
+ in-memory-store)
+
+(coroutine/await
+ (provider/execute-prepared
+  (provider/prepare-compare-and-swap transition verification)))
+```
+
+Both paths validate the exact `hara.store` response before returning it. `nil`
+is accepted only where the operation profile allows absence (`load` and
+`receipt`); it is rejected for `initialize` and `compare-and-swap`. Applied and
+replayed receipt meaning is still constructed in Tahto HAL after the generic
+response is validated.
 
 The existing Rust metadata code under `native/` is a transitional migration
 source for Hoplite issue #45. It is not Tahto's implementation architecture and
@@ -242,6 +306,7 @@ will be removed after the generic driver passes equivalent conformance.
 - Native handles are work-scoped and never durable application state.
 - Range requests use offset plus length across the generic boundary.
 - Result translation happens in HAL and requires exact request/result identity.
+- Injected and production execution share the same result validator.
 - Host cancellation precedes work-scope closure.
 - Production and in-memory capabilities are substitutable beneath the same HAL
   interpreter.
