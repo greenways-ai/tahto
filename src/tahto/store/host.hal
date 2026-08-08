@@ -13,8 +13,12 @@
     "manifest/verify"
     "object/read-range"})
 
+;; Domain effects may carry opaque work-scoped handles, but never native
+;; installation authority or operating-system identities.
 (def forbidden-record-fields
-  #{:path :destination :upstream :url :bytes :body :command :executable})
+  #{:path :destination :upstream :url :bytes :body :command :executable
+    :credential :secret :token :driver :provider :native-abi :library
+    :file-descriptor :pointer})
 
 (defn operation?
   [value]
@@ -112,6 +116,23 @@
    (= (get upload :id) (get result :upload-id))
    (= (get upload :digest) (get result :digest))
    (= (get upload :size) (get result :size))))
+
+(defn opened-range?
+  [result digest start end]
+  (and
+   (result? result
+            "object/read-range"
+            #{:protocol :operation :opened :digest
+              :start :end :length :source-handle})
+   (= true (get result :opened))
+   (= digest (get result :digest))
+   (= start (get result :start))
+   (= end (get result :end))
+   (model/non-negative-integer? start)
+   (model/positive-integer? end)
+   (< start end)
+   (= (- end start) (get result :length))
+   (model/positive-integer? (get result :source-handle))))
 
 (defn manifest-chunk?
   [chunk]
