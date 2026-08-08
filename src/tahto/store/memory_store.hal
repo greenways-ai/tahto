@@ -125,6 +125,9 @@
   (and
    (map? entry)
    (= (get entry :revision) (get request :revision))
+   (= (get entry :value) (get request :value))
+   (= (get entry :value-digest)
+      (get request :value-digest))
    (= (get entry :receipt-key) (get request :receipt-key))
    (= (get entry :receipt) (get request :receipt))))
 
@@ -178,6 +181,8 @@
                        :value (get request :value)
                        :value-digest (get request :value-digest)}
         next-receipt {:revision (get request :revision)
+                      :value (get request :value)
+                      :value-digest (get request :value-digest)
                       :receipt-key (get request :receipt-key)
                       :receipt (get request :receipt)}]
     (swap!
@@ -203,22 +208,22 @@
        nil)
 
       :else
-      (let [current (snapshot-entry memory)
-            phase (clear-fault memory)]
-        (cond
-          (not (eligible-compare-and-swap? current request))
-          nil
-
-          (= phase "before-commit")
-          nil
-
-          :else
-          (let [committed (commit-compare-and-swap! memory request)]
-            (if
-             (= phase "after-commit")
+      (let [current (snapshot-entry memory)]
+        (if
+         (eligible-compare-and-swap? current request)
+         (let [phase (clear-fault memory)]
+           (cond
+             (= phase "before-commit")
              nil
-             (receipt-result
-              "compare-and-swap" "applied" committed))))))))
+
+             :else
+             (let [committed (commit-compare-and-swap! memory request)]
+               (if
+                (= phase "after-commit")
+                nil
+                (receipt-result
+                 "compare-and-swap" "applied" committed)))))
+         nil)))))
 
 (defn receipt-value
   [memory request]
