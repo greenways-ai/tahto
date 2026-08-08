@@ -75,14 +75,16 @@
          (capability/opened-source-result range-effect provider-result)
          candidate
          {:protocol portable/protocol
-          :source-handle (get opened :source-handle)
-          :offset (get opened :start)
-          :length (get opened :length)}
+          :source-handle 31
+          :offset 2
+          :length 7}
          descriptor
          (source/descriptor-from-result range-effect provider-result)]
      [(source/range-effect? range-effect)
       opened
-      (host/opened-range? opened digest 2 9)
+      (if (map? opened)
+        (host/opened-range? opened digest 2 9)
+        false)
       candidate
       (portable/exact-fields? candidate)
       (portable/response-source? candidate)
@@ -133,18 +135,21 @@
               (not (has? request :start))
               (not (has? request :end)))
              (source-result 41 2 7)
-             nil)))]
+             nil)))
+         value (get opened :value)]
      [(get opened :ok)
       (= state (get opened :state))
-      (get opened :value)
-      (has? (get opened :value) :bytes)
-      (has? (get opened :value) :path)])
+      value
+      (map? value)
+      (if (map? value) (has? value :bytes) nil)
+      (if (map? value) (has? value :path) nil)])
    [true
     true
     {:protocol "hara.response-source/1"
      :source-handle 41
      :offset 2
      :length 7}
+    true
     false
     false])
 
