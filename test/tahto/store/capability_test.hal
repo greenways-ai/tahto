@@ -48,6 +48,21 @@
    {:digest digest
     :max-chunks 8}))
 
+(def open-result
+  {:protocol capability/result-protocol
+   :operation "staging-open"
+   :staging-id "upload.a"
+   :opened true
+   :offset 0})
+
+(def append-result
+  {:protocol capability/result-protocol
+   :operation "staging-append-request"
+   :staging-id "upload.a"
+   :consumed true
+   :offset 9
+   :length 5})
+
 (def verify-result
   {:protocol capability/result-protocol
    :operation "staging-verify-commit"
@@ -167,6 +182,73 @@
        call
        (assoc verify-result :staging-id "upload.b"))])
    [true false false])
+
+  (test/check
+   "accepted generic results preserve state only after exact validation"
+   (let [state {:marker "unchanged"}
+         call (capability/call-from-effect append-effect)
+         accepted (capability/accept-result state call append-result)
+         malformed
+         (capability/accept-result
+          state call (assoc append-result :path "/tmp/unsafe"))
+         mismatched
+         (capability/accept-result
+          state call (assoc append-result :offset 8))]
+     [(get accepted :ok)
+      (get accepted :state)
+      (get accepted :value)
+      (get malformed :ok)
+      (error-code malformed)
+      (get mismatched :ok)
+      (error-code mismatched)])
+   [true
+    {:marker "unchanged"}
+    append-result
+    false
+    "tahto.capability/result-invalid"
+    false
+    "tahto.capability/result-mismatch"])
+
+  (test/check
+   "an injected HAL capability executes the same closed call contract"
+   (let [state {:marker "unchanged"}
+         result
+         (capability/execute-with
+          state
+          append-effect
+          (fn [service operation request]
+            (if
+             (and (= "hara.blob" service)
+                  (= "staging-append-request" operation)
+                  (= 17 (get request :body-handle))
+                  (= 5 (get request :length)))
+             append-result
+             nil)))]
+     [(get result :ok)
+      (get result :state)
+      (get result :value)])
+   [true {:marker "unchanged"} append-result])
+
+  (test/check
+   "injected providers cannot bypass request and result matching"
+   (let [invalid-effect
+         (capability/execute-with
+          {}
+          manifest-effect
+          (fn [service operation request] open-result))
+         wrong-result
+         (capability/execute-with
+          {}
+          append-effect
+          (fn [service operation request] open-result))]
+     [(get invalid-effect :ok)
+      (error-code invalid-effect)
+      (get wrong-result :ok)
+      (error-code wrong-result)])
+   [false
+    "tahto.capability/effect-unsupported"
+    false
+    "tahto.capability/result-mismatch"])
 
   (test/check
    "verified generic commits translate back into Tahto result records in HAL"
