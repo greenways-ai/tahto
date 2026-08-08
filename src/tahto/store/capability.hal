@@ -1,6 +1,7 @@
 (ns tahto.store.capability
   (:require [std.foundation :refer :all]
-            [std.foundation.host :as native]
+            [std.foundation.coroutine :as coroutine]
+            [std.foundation.host :as foundation-host]
             [tahto.store.host :as host]
             [tahto.store.model :as model]))
 
@@ -181,14 +182,6 @@
       (host-call request)
       nil)))
 
-(defn execute-call
-  [call]
-  (if (host-call? call)
-    (native/call (get call :service)
-                 (get call :operation)
-                 (call-request call))
-    nil))
-
 (defn prepare
   [state effect]
   (cond
@@ -304,6 +297,61 @@
         (= (get request :length) (get result :length)))
 
        :else false))))
+
+(defn accept-result
+  [state call result]
+  (cond
+    (not (host-call? call))
+    (model/fail state "tahto.capability/call-invalid")
+
+    (not (result? result))
+    (model/fail state
+                "tahto.capability/result-invalid"
+                {:operation (get call :operation)})
+
+    (not (result-matches-call? call result))
+    (model/fail state
+                "tahto.capability/result-mismatch"
+                {:operation (get call :operation)})
+
+    :else
+    (model/ok state result)))
+
+(defn execute-call-with
+  [state call invoke]
+  (if
+   (host-call? call)
+   (accept-result
+    state
+    call
+    (invoke
+     (get call :service)
+     (get call :operation)
+     (call-request call)))
+   (model/fail state "tahto.capability/call-invalid")))
+
+(defn execute-with
+  [state effect invoke]
+  (let [prepared (prepare state effect)]
+    (if
+     (get prepared :ok)
+     (execute-call-with state (get prepared :value) invoke)
+     prepared)))
+
+(defn ^:async execute
+  [state effect]
+  (let [prepared (prepare state effect)]
+    (if
+     (get prepared :ok)
+     (let [call (get prepared :value)
+           result
+           (coroutine/await
+            (foundation-host/call
+             (get call :service)
+             (get call :operation)
+             (call-request call)))]
+       (accept-result state call result))
+     prepared)))
 
 (defn verified-install-result
   [effect result]
