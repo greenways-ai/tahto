@@ -73,6 +73,9 @@
    :state-digest state-digest
    :completed-at "2026-08-08T00:01:00Z"})
 
+(def payload
+  (provider/receipt-payload plan commit-verification))
+
 (def snapshot
   {:protocol provider/snapshot-protocol
    :revision 1
@@ -89,6 +92,36 @@
    :state-digest state-digest
    :completed-at "2026-08-08T00:01:00Z"})
 
+(def load-result
+  {:protocol provider/result-protocol
+   :operation "load"
+   :revision 1
+   :value state
+   :value-digest state-digest})
+
+(def initialize-result
+  {:protocol provider/result-protocol
+   :operation "initialize"
+   :revision 1
+   :value state
+   :value-digest state-digest})
+
+(def commit-result
+  {:protocol provider/result-protocol
+   :operation "compare-and-swap"
+   :status "applied"
+   :revision 1
+   :receipt-key plan-digest
+   :receipt payload})
+
+(def receipt-result
+  {:protocol provider/result-protocol
+   :operation "receipt"
+   :status "replayed"
+   :revision 1
+   :receipt-key plan-digest
+   :receipt payload})
+
 (defn error-code
   [result]
   (get-in result [:error :code]))
@@ -103,14 +136,14 @@
    [true true false])
 
   (test/check
-   "loaded snapshots bind state bytes evidence to the state revision"
+   "Tahto snapshots bind state evidence to the state revision"
    [(provider/snapshot? snapshot)
     (provider/snapshot? (assoc snapshot :revision 0))
     (provider/snapshot? (assoc snapshot :database-path "/tmp/unsafe"))]
    [true false nil])
 
   (test/check
-   "canonical state verification is exact revision-bound evidence"
+   "canonical state verification remains Tahto-owned evidence"
    [(provider/state-verification? state-verification state)
     (provider/state-verification?
      (assoc state-verification :revision 0)
@@ -121,27 +154,24 @@
    [true false nil])
 
   (test/check
-   "load uses one fixed installed host service and ABI"
+   "load targets the generic durable store without exposing an ABI"
    (let [result (provider/prepare-load state)
          call (get result :value)]
      [(get result :ok)
-      (get call :host-service)
-      (get call :host-method)
-      (get call :native-abi)
+      (get call :service)
+      (get call :operation)
+      (count (get call :arguments))
+      (has? call :native-abi)
       (provider/host-call? call)])
-   [true
-    "tahto.metadata"
-    "load"
-    "tahto-metadata-store/1"
-    true])
+   [true "hara.store" "load" 1 false true])
 
   (test/check
-   "receipt lookup accepts only a canonical plan identity"
+   "receipt lookup treats the plan digest as an opaque generic key"
    (let [accepted (provider/prepare-receipt state plan-digest)
          rejected (provider/prepare-receipt state "not-a-digest")]
      [(get accepted :ok)
-      (get-in accepted [:value :host-method])
-      (get-in accepted [:value :request :plan-digest])
+      (get-in accepted [:value :operation])
+      (get-in accepted [:value :arguments 0 :receipt-key])
       (get rejected :ok)
       (error-code rejected)])
    [true
@@ -151,17 +181,19 @@
     "tahto.provider/plan-digest-invalid"])
 
   (test/check
-   "initialization emits a closed provider request after canonical encoding"
+   "initialization sends an opaque value and digest to the generic store"
    (let [result
          (provider/prepare-initialize state state-verification)
          call (get result :value)
-         request (get call :request)]
+         request (provider/call-request call)]
      [(get result :ok)
       (provider/host-call? call)
       (provider/provider-request? request)
-      (get request :state)
-      (get request :state-digest)])
-   [true true true state state-digest])
+      (get request :value)
+      (get request :value-digest)
+      (has? request :state)
+      (has? request :state-digest)])
+   [true true true state state-digest false false])
 
   (test/check
    "initialization cannot use proof for different state evidence"
@@ -193,7 +225,7 @@
    [true false false false])
 
   (test/check
-   "commit verification binds the plan and state without widening authority"
+   "commit verification binds the plan without widening host authority"
    [(provider/commit-verification? commit-verification)
     (provider/commit-verification-matches?
      commit-verification plan state)
@@ -206,39 +238,57 @@
    [true true false nil])
 
   (test/check
-   "compare-and-swap preparation binds the exact TAHTO-7 plan and state"
+   "Tahto receipt evidence remains an opaque value to the store"
+   [(provider/receipt-payload? payload)
+    (get payload :protocol)
+    (get payload :plan-digest)
+    (provider/receipt-payload?
+     (assoc payload :status "applied"))]
+   [true
+    "tahto.metadata-receipt-payload/1"
+    plan-digest
+    nil])
+
+  (test/check
+   "compare-and-swap exposes generic mechanics and opaque Tahto values"
    (let [result
          (provider/prepare-compare-and-swap
           success-result commit-verification)
          call (get result :value)
-         request (get call :request)]
+         request (provider/call-request call)]
      [(get result :ok)
       (provider/host-call? call)
-      (get call :host-method)
+      (get call :service)
+      (get call :operation)
       (get request :expected-revision)
       (get request :revision)
-      (get request :state)
-      (get request :plan-digest)])
+      (get request :value)
+      (get request :value-digest)
+      (get request :receipt-key)
+      (get-in request [:receipt :protocol])])
    [true
     true
+    "hara.store"
     "compare-and-swap"
     0
     1
     state
-    plan-digest])
+    state-digest
+    plan-digest
+    "tahto.metadata-receipt-payload/1"])
 
   (test/check
-   "a completed idempotent error result can use the same durable boundary"
+   "a completed idempotent error uses the same generic durable boundary"
    (let [result
          (provider/prepare-compare-and-swap
           rejected-result commit-verification)]
      [(get result :ok)
-      (get-in result [:value :host-method])
-      (get-in result [:value :request :result-digest])])
+      (get-in result [:value :operation])
+      (get-in result [:value :arguments 0 :receipt :result-digest])])
    [true "compare-and-swap" result-digest])
 
   (test/check
-   "mismatched commit evidence fails before a provider call is exposed"
+   "mismatched commit evidence fails before a host call is exposed"
    (let [result
          (provider/prepare-compare-and-swap
           success-result
@@ -247,7 +297,7 @@
    [false "tahto.provider/commit-verification-invalid"])
 
   (test/check
-   "malformed transaction results never reach the metadata provider"
+   "malformed transaction results never reach the generic store"
    (let [result
          (provider/prepare-compare-and-swap
           {:ok true
@@ -259,68 +309,179 @@
    [false "tahto.provider/transaction-plan-invalid"])
 
   (test/check
-   "provider requests reject paths credentials unknown operations and fields"
+   "store requests reject paths credentials drivers and extra fields"
    (let [request
-         (get-in
-          (provider/prepare-compare-and-swap
-           success-result commit-verification)
-          [:value :request])]
+         (provider/call-request
+          (get
+           (provider/prepare-compare-and-swap
+            success-result commit-verification)
+           :value))]
      [(provider/provider-request? request)
       (provider/provider-request?
        (assoc request :database-path "/tmp/request-selected"))
       (provider/provider-request?
+       (assoc request :driver "sqlite"))
+      (provider/provider-request?
        {:protocol provider/request-protocol
         :operation "execute"
         :credential "secret"})])
-   [true nil false])
+   [true nil nil false])
 
   (test/check
-   "receipts are closed and match exact verified commit evidence"
-   [(provider/receipt? receipt)
-    (provider/receipt-matches? receipt commit-verification)
-    (provider/receipt-matches?
-     (assoc receipt :state-digest request-digest)
-     commit-verification)
-    (provider/receipt?
-     (assoc receipt :provider-command "run"))]
-   [true true false nil])
+   "host call plans cannot carry a native ABI or selected provider"
+   (let [call
+         (get (provider/prepare-load state) :value)]
+     [(provider/host-call? call)
+      (provider/host-call?
+       (assoc call :native-abi "request-selected"))
+      (provider/host-call?
+       (assoc call :provider "sqlite"))])
+   [true nil nil])
 
   (test/check
-   "provider response profiles are operation-specific"
+   "generic store responses are operation-specific"
    [(provider/provider-response? "load" nil)
-    (provider/provider-response? "load" snapshot)
-    (provider/provider-response? "initialize" snapshot)
-    (provider/provider-response? "compare-and-swap" receipt)
-    (provider/provider-response? "receipt" receipt)
-    (provider/provider-response? "initialize" receipt)]
-   [true true true true true false])
+    (provider/provider-response? "load" load-result)
+    (provider/provider-response? "initialize" initialize-result)
+    (provider/provider-response? "compare-and-swap" commit-result)
+    (provider/provider-response? "receipt" receipt-result)
+    (provider/provider-response? "initialize" commit-result)
+    (provider/provider-response?
+     "receipt"
+     (assoc receipt-result :status "applied"))]
+   [true true true true true false nil])
 
   (test/check
-   "initialization accepts only the exact encoded state snapshot"
-   [(provider/initialize-result? state state-verification snapshot)
+   "accepted store results preserve state only after closed validation"
+   (let [call (get (provider/prepare-load state) :value)
+         accepted (provider/accept-result state call load-result)
+         absent (provider/accept-result state call nil)
+         mismatched
+         (provider/accept-result state call initialize-result)
+         malformed
+         (provider/accept-result
+          state call (assoc load-result :database-path "/tmp/unsafe"))]
+     [(get accepted :ok)
+      (get accepted :state)
+      (get accepted :value)
+      (get absent :ok)
+      (get absent :value)
+      (get mismatched :ok)
+      (error-code mismatched)
+      (get malformed :ok)
+      (error-code malformed)])
+   [true
+    state
+    load-result
+    true
+    nil
+    false
+    "tahto.provider/result-invalid"
+    false
+    "tahto.provider/result-invalid"])
+
+  (test/check
+   "an injected generic store executes the prepared Host/call contract"
+   (let [result
+         (provider/execute-prepared-with
+          (provider/prepare-load state)
+          (fn [service operation request]
+            (if
+             (and (= "hara.store" service)
+                  (= "load" operation)
+                  (= provider/request-protocol
+                     (get request :protocol)))
+             load-result
+             nil)))]
+     [(get result :ok)
+      (get result :state)
+      (get result :value)])
+   [true state load-result])
+
+  (test/check
+   "injected stores cannot widen absence or operation semantics"
+   (let [load-absent
+         (provider/execute-prepared-with
+          (provider/prepare-load state)
+          (fn [service operation request] nil))
+         initialize-absent
+         (provider/execute-prepared-with
+          (provider/prepare-initialize state state-verification)
+          (fn [service operation request] nil))
+         wrong-operation
+         (provider/execute-prepared-with
+          (provider/prepare-compare-and-swap
+           success-result commit-verification)
+          (fn [service operation request] receipt-result))
+         malformed-prepared
+         (provider/execute-prepared-with
+          {:state state}
+          (fn [service operation request] load-result))]
+     [(get load-absent :ok)
+      (get load-absent :value)
+      (get initialize-absent :ok)
+      (error-code initialize-absent)
+      (get wrong-operation :ok)
+      (error-code wrong-operation)
+      (get malformed-prepared :ok)
+      (error-code malformed-prepared)])
+   [true
+    nil
+    false
+    "tahto.provider/result-invalid"
+    false
+    "tahto.provider/result-invalid"
+    false
+    "tahto.provider/prepared-invalid"])
+
+  (test/check
+   "generic snapshots translate into the closed Tahto snapshot profile"
+   (let [translated
+         (provider/snapshot-from-store-result load-result)]
+     [(provider/snapshot? translated)
+      (get translated :protocol)
+      (get translated :state)
+      (get translated :state-digest)])
+   [true provider/snapshot-protocol state state-digest])
+
+  (test/check
+   "generic receipt results receive Tahto replay meaning only in HAL"
+   (let [applied
+         (provider/receipt-from-store-result commit-result)
+         replayed
+         (provider/receipt-from-store-result receipt-result)]
+     [(provider/receipt? applied)
+      (get applied :status)
+      (provider/receipt? replayed)
+      (get replayed :status)
+      (provider/receipt-matches? replayed commit-verification)])
+   [true "applied" true "replayed" true])
+
+  (test/check
+   "initialization accepts only the exact generic stored value"
+   [(provider/initialize-result?
+     state state-verification initialize-result)
     (provider/initialize-result?
      state
      state-verification
-     (assoc snapshot :state-digest request-digest))]
+     (assoc initialize-result :value-digest request-digest))]
    [true false])
 
   (test/check
-   "a committed receipt closes the exact prepared transaction"
+   "a generic CAS result closes the exact prepared Tahto transaction"
    [(provider/commit-result?
-     success-result commit-verification receipt)
+     success-result commit-verification commit-result)
     (provider/commit-result?
-     success-result
-     commit-verification
-     (assoc receipt :status "replayed"))
+     success-result commit-verification
+     (assoc commit-result :status "replayed"))
     (provider/commit-result?
-     success-result
-     commit-verification
-     (assoc receipt :plan-digest request-digest))]
+     success-result commit-verification
+     (assoc commit-result :receipt-key request-digest))]
    [true true false])
 
   (test/check
-   "loaded-state returns only a validated snapshot state"
-   [(provider/loaded-state snapshot)
+   "loaded-state returns only a translated and validated snapshot value"
+   [(provider/loaded-state load-result)
     (provider/loaded-state
-     (assoc snapshot :state-digest "invalid"))]
+     (assoc load-result :value-digest "invalid"))]
    [state nil])])

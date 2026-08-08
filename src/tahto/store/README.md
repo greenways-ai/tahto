@@ -1,17 +1,17 @@
 # Tahto state kernels
 
-This directory contains the Hara-owned TAHTO-3 through TAHTO-8 state and
-provider-boundary logic.
+This directory contains the Hara-owned TAHTO state, transaction and
+capability-interpreter logic.
 
 ```text
 model.hal       canonical identity, limits and immutable state
 host.hal        closed Tahto domain effects and result validation
-capability.hal  pure-HAL mapping to application-neutral host capabilities
+capability.hal  pure-HAL mapping to generic blob/source capabilities
 graph.hal       verified manifests, shared closure, roots and dry-run GC
 vault.hal       uploads, installation, namespace references, quotas and ranges
 history.hal     immutable commits, CAS heads, backups, restore and receipts
 transaction.hal atomic verified request-to-metadata commit plans
-provider.hal    metadata snapshots, commit receipts and durable-call planning
+provider.hal    pure-HAL mapping to a generic durable value store
 ```
 
 Record shape and signed verification contracts live in:
@@ -30,32 +30,52 @@ identity and authorization
 quotas and offsets
 object and history graphs
 transaction and recovery plans
+snapshot and receipt meaning
 closed effect and result validation
 ```
 
 They never accept a destination path, upstream URL, raw request body, private
-key, bearer credential, native library or executable command. Large bodies
-remain behind non-zero work-scoped resource handles.
+key, bearer credential, driver, native ABI, library or executable command.
+Large bodies remain behind work-scoped resource handles.
 
-`tahto.store.capability` maps the existing closed Tahto effects to a proposed
-generic `hara.blob` host capability. The mapping, request validation, result
-matching and translation back into Tahto result records are pure HAL. Hoplite or
-another host may implement byte movement, hashing and atomic installation, but
-that native layer contains no Tahto upload, quota, graph or authorization rules.
+## Generic blob and response capabilities
+
+`tahto.store.capability` maps existing Tahto effects to `hara.blob` calls with
+the exact portable shape:
+
+```clojure
+{:service "hara.blob"
+ :operation "..."
+ :arguments [request]}
+```
+
+A logical `:staging-key` is never a path or native handle. Request-body and
+response resources cross the boundary as `:source-handle` values that the host
+must resolve with their owning work scope. Generic range requests use offset
+plus length; Tahto continues to own authorization and half-open range planning.
+
+Mapping, request validation, result matching and translation back into Tahto
+results remain pure HAL. Hoplite or another host may implement byte movement,
+hashing, atomic installation and backpressured response streaming without
+containing Tahto upload, quota, graph or authorization rules.
 
 See [`protocol/host-capabilities.md`](../../../protocol/host-capabilities.md).
 
-## Durable metadata migration
+## Generic durable metadata capability
 
-TAHTO-7 reducer results contain a tentative next state and a bounded atomic
-metadata transaction plan. TAHTO-8 validates canonical state and plan evidence
-before exposing one closed durable-store request.
+TAHTO transaction reducers produce a tentative next state and a bounded atomic
+metadata plan. `tahto.store.provider` validates Tahto state and receipt evidence,
+then calls `hara.store` with opaque canonical values and exact revisions.
 
-The current `tahto.metadata` identity and the SQLite implementation under
-`native/` are migration sources. Tahto issue #17 moves those generic durability
-mechanics behind an application-neutral host capability such as `hara.store`.
-After compatibility and conformance are complete, Tahto-specific native code is
-removed from this repository while the HAL provider validation remains.
+The generic store may initialize, load, compare-and-swap and retrieve an opaque
+receipt value. It does not parse Tahto state or receipt fields. Its mechanical
+`applied` or `replayed` result receives Tahto meaning only after HAL translates
+and validates the stored payload.
+
+The Rust metadata implementation under `native/` is a temporary migration
+source for Hoplite issue #45, not Tahto's target implementation. It is removed
+once generic in-memory and SQLite drivers pass equivalent restart and fault
+conformance.
 
 Tahto preserves divergent valid commit roots. Applications, not the fabric,
 decide whether and how those roots are reconciled.

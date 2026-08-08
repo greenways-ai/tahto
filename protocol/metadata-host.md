@@ -1,97 +1,177 @@
-# Tahto metadata host contract, version 1
+# Tahto metadata over the generic durable-store capability
 
-TAHTO-8 defines the Hara-side contract that turns a reviewed TAHTO-7 transaction result into one fixed call to an installed durable metadata provider.
+## Decision
 
-The contract is deliberately split from the native `tahto-metadata-store/1` ABI:
-
-```text
-Hara state and transaction semantics
-  tahto.store.provider
-            │ fixed service and closed request
-            ▼
-Hoplite native host integration
-            │ canonical HTA1 bytes
-            ▼
-tahto-metadata-store/1
-            │
-            ▼
-installed SQLite or other durable provider
-```
-
-## Authority
-
-Greenways OS owns provider installation, user consent, application grants, credentials and private keys. Tahto owns metadata state, request replay semantics and revision laws. Hoplite owns the fixed host registry and canonical HTA transport. The installed provider owns durable storage mechanics.
-
-A request cannot choose a provider package, database path, upstream, credential, callback or native command. The only host service identity is:
+Tahto metadata state, transaction plans, receipt meaning and recovery policy are
+implemented in HAL. The production host supplies only application-neutral
+durable value storage and atomic revision compare-and-swap.
 
 ```text
-tahto.metadata
+Tahto HAL
+  snapshot meaning · transaction validation · receipt interpretation · recovery
+        |
+        | one exact generic Host/call
+        v
+hara.store
+  opaque canonical values · revision CAS · atomic receipt storage
+        |
+        v
+installed SQLite, PostgreSQL or in-memory driver
 ```
 
-The only native ABI identity is:
+There is no `tahto.metadata` native service in the target architecture and no
+Tahto native ABI selected by application code.
+
+## Host call boundary
+
+Tahto prepares calls with exactly three fields:
+
+```clojure
+{:service "hara.store"
+ :operation "compare-and-swap"
+ :arguments [request]}
+```
+
+A call plan mirrors:
+
+```clojure
+(std.foundation.host/call "hara.store" "compare-and-swap" request)
+```
+
+The installed host associates `hara.store` with a trusted versioned provider
+descriptor. HAL cannot select an ABI, driver, database path, credential,
+provider package or native library.
+
+## Generic request profile
 
 ```text
-tahto-metadata-store/1
+request protocol: hara.store-request/1
+result protocol: hara.store-result/1
+operations:
+  load
+  initialize
+  compare-and-swap
+  receipt
 ```
 
-## Operations
+The generic driver understands only storage mechanics:
 
-The closed operation vocabulary is:
+- a signed-64-bit-compatible revision;
+- an expected revision for compare-and-swap;
+- an opaque canonical `:value` and its digest;
+- an opaque receipt key and receipt value;
+- atomic installation and lookup.
 
-```text
-load
-initialize
-compare-and-swap
-receipt
+It does not understand Tahto object graphs, request contexts, transaction
+semantics, authorization, replay policy or receipt fields.
+
+## Initialization
+
+After HAL validates canonical state-encoding evidence, it prepares:
+
+```clojure
+{:protocol "hara.store-request/1"
+ :operation "initialize"
+ :revision 1
+ :value tahto-state
+ :value-digest "sha256:..."}
 ```
 
-`load` returns either no installed snapshot or one validated snapshot. `initialize` installs an exact reviewed snapshot only when the provider is empty. `compare-and-swap` commits one TAHTO-7 state revision and its receipt. `receipt` looks up an exact plan identity for crash and retry recovery.
+The driver verifies the canonical value bytes and installs them only when the
+configured store is empty. A generic result returns the same opaque value,
+revision and digest. HAL translates that result into
+`tahto.metadata-snapshot/1` and performs the final Tahto checks.
 
-## Canonical state evidence
+## Compare-and-swap
 
-Hara never claims to serialize or hash arbitrary state values. Before initialization, an installed canonical encoder returns a closed verification proof containing:
+HAL first validates the complete TAHTO transaction plan and its canonical
+encoding proof. It then prepares a generic request:
 
-```text
-verified = true
-metadata revision
-state digest
-encoding timestamp
+```clojure
+{:protocol "hara.store-request/1"
+ :operation "compare-and-swap"
+ :expected-revision 0
+ :revision 1
+ :value tahto-state
+ :value-digest "sha256:..."
+ :receipt-key "sha256:plan..."
+ :receipt {:protocol "tahto.metadata-receipt-payload/1"
+           :revision 1
+           :plan-digest "sha256:plan..."
+           :request-digest "sha256:request..."
+           :result-digest "sha256:result..."
+           :state-digest "sha256:state..."
+           :completed-at "..."}}
 ```
 
-The proof is accepted only when its revision equals the state value's `:metadata-revision`, treating a missing legacy revision as zero.
+The receipt payload is opaque to the store. It deliberately has no
+`:status`. The generic result says only whether the atomic operation was
+`applied` or `replayed`; HAL combines that mechanical status with the validated
+payload to create `tahto.metadata-commit-receipt/1`.
 
-For a commit, the installed encoder binds:
+This prevents the storage driver from owning Tahto replay meaning while still
+allowing exact retry recovery.
 
-```text
-expected revision
-next revision
-plan digest
-request digest
-result digest
-state digest
-completion timestamp
-```
+## Load and receipt recovery
 
-TAHTO-8 checks that evidence against the exact TAHTO-7 transaction plan before exposing a host call.
+`load` returns either no value or one generic snapshot result. HAL translates
+and validates it before exposing Tahto state.
 
-## Result validation
+`receipt` takes one opaque canonical receipt key. A found result must use
+`replayed` status and contain the exact stored payload. HAL reconstructs the
+Tahto receipt and checks it against the original commit verification evidence.
 
-Provider snapshots and receipts use closed Hara records. Unknown fields fail closed. A commit receipt must match the exact plan, request, result and state digests plus revision and completion timestamp supplied by the canonical verification proof.
+## Canonical evidence
 
-Both successful domain results and completed idempotent error results use the same durable boundary. A rejected domain transition may therefore be remembered without preserving any partial mutation returned by the rejected transition.
+Hara does not claim that arbitrary state is canonical merely because it is a
+map. Before initialization or commit, the reviewed encoding boundary supplies
+closed evidence containing the revision, canonical digest and timestamps.
+
+Tahto HAL validates that evidence against its state and transaction plan before
+any generic store call is exposed. The generic driver independently recomputes
+the digest over the actual canonical value span it stores.
+
+## Ownership
+
+Tahto HAL owns:
+
+- state and metadata revision meaning;
+- exact transaction-plan validation;
+- request and result evidence;
+- application receipt payloads;
+- applied-versus-replayed interpretation;
+- recovery decisions.
+
+The generic store owns:
+
+- trusted storage configuration;
+- canonical value persistence;
+- initialize-if-absent;
+- exact revision compare-and-swap;
+- atomic value and receipt commit;
+- receipt lookup;
+- stale-writer rejection;
+- driver-level durability and cancellation.
 
 ## Security laws
 
-- the host service and native ABI are fixed by installed code;
-- provider operations are closed and operation-specific;
-- public values are revalidated before a call is exposed;
-- every commit advances exactly one signed-64-bit-compatible revision;
-- request and result digests must equal the completed TAHTO-7 request context;
-- no raw object body, private key, bearer credential, database path, URL or native command enters the request;
-- load, initialization and receipt results are closed records;
-- a provider receipt cannot be rebound to another canonical plan; and
-- the Hara contract does not represent the native provider as wired into Hoplite.
+- application values cannot select a native ABI, driver or storage location;
+- the generic store treats application values and receipts as opaque canonical
+  HTA spans;
+- every commit advances exactly one bounded revision;
+- state digests bind the exact value persisted by the driver;
+- receipt keys are canonical opaque identities, not paths;
+- a receipt payload cannot be rebound to another plan or revision;
+- generic mechanical status becomes Tahto replay meaning only in HAL;
+- no raw object body, private key, credential, URL or native command enters the
+  request; and
+- successful and completed idempotent-error transitions use the same durable
+  boundary.
 
-## Not included
+## Migration
 
-TAHTO-8 does not implement the Hoplite host registry, canonical HTA encoder/decoder, provider lifecycle, HTTP routes, object transfer, signing, freshness verification, replay compaction, pairing UX or the complete two-device Gate B fixture.
+The existing `native/` metadata ABI and SQLite provider are retained temporarily
+as migration sources. Hoplite issue #45 extracts their generic CAS and
+transaction mechanics behind `hara.store`. Once the generic in-memory and
+SQLite drivers pass equivalent restart and fault conformance, Tahto removes the
+native tree and its transitional CI job.

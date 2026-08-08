@@ -50,27 +50,35 @@
 
 (def open-result
   {:protocol capability/result-protocol
-   :operation "staging-open"
-   :staging-id "upload.a"
+   :operation "staging/open"
+   :staging-key "upload.a"
    :opened true
    :offset 0})
 
 (def append-result
   {:protocol capability/result-protocol
-   :operation "staging-append-request"
-   :staging-id "upload.a"
+   :operation "staging/append-from-source"
+   :staging-key "upload.a"
    :consumed true
    :offset 9
    :length 5})
 
 (def verify-result
   {:protocol capability/result-protocol
-   :operation "staging-verify-commit"
-   :staging-id "upload.a"
+   :operation "staging/verify-commit"
+   :staging-key "upload.a"
    :verified true
    :committed true
    :digest digest
    :size 12})
+
+(def source-result
+  {:protocol capability/result-protocol
+   :operation "object/open-source"
+   :source-handle 31
+   :digest digest
+   :offset 2
+   :length 7})
 
 (defn error-code
   [result]
@@ -78,51 +86,79 @@
 
 (test/print-results
  [(test/check
-   "Tahto upload effects map to an application-neutral blob service"
+   "Tahto effects map to one application-neutral Host/call shape"
    (let [open-call (capability/call-from-effect open-effect)
          append-call (capability/call-from-effect append-effect)
          abort-call (capability/call-from-effect abort-effect)
          verify-call (capability/call-from-effect verify-effect)
          range-call (capability/call-from-effect range-effect)]
-     [(get open-call :host-service)
-      (get open-call :native-abi)
-      (get open-call :host-method)
-      (get append-call :host-method)
-      (get abort-call :host-method)
-      (get verify-call :host-method)
-      (get range-call :host-method)
+     [(get open-call :service)
+      (get open-call :operation)
+      (get append-call :operation)
+      (get abort-call :operation)
+      (get verify-call :operation)
+      (get range-call :operation)
+      (count (get open-call :arguments))
+      (has? open-call :native-abi)
       (every? capability/host-call?
               [open-call append-call abort-call verify-call range-call])])
    ["hara.blob"
-    "hara-blob-store/1"
-    "staging-open"
-    "staging-append-request"
-    "staging-abort"
-    "staging-verify-commit"
-    "object-open-range"
+    "staging/open"
+    "staging/append-from-source"
+    "staging/abort"
+    "staging/verify-commit"
+    "object/open-source"
+    1
+    false
     true])
 
   (test/check
-   "the HAL adapter preserves closed upload fields without exposing bytes"
+   "the HAL adapter separates logical staging keys from work-scoped sources"
    (let [open-request
-         (get-in (capability/call-from-effect open-effect) [:request])
+         (capability/call-request
+          (capability/call-from-effect open-effect))
          append-request
-         (get-in (capability/call-from-effect append-effect) [:request])]
-     [(get open-request :staging-id)
-      (get open-request :digest)
-      (get open-request :size)
-      (get append-request :staging-id)
+         (capability/call-request
+          (capability/call-from-effect append-effect))]
+     [(get open-request :staging-key)
+      (get open-request :expected-digest)
+      (get open-request :expected-size)
+      (get append-request :staging-key)
       (get append-request :offset)
       (get append-request :length)
-      (get append-request :body-handle)
+      (get append-request :source-handle)
+      (has? append-request :body-handle)
       (has? append-request :bytes)
       (has? append-request :path)])
-   ["upload.a" digest 12 "upload.a" 4 5 17 false false])
+   ["upload.a" digest 12 "upload.a" 4 5 17 false false false])
 
   (test/check
-   "generic capability requests reject paths raw bodies and extra authority"
+   "range plans become offset-length source requests"
    (let [request
-         (get-in (capability/call-from-effect append-effect) [:request])]
+         (capability/call-request
+          (capability/call-from-effect range-effect))]
+     [(get request :digest)
+      (get request :offset)
+      (get request :length)
+      (has? request :start)
+      (has? request :end)])
+   [digest 2 7 false false])
+
+  (test/check
+   "application call plans cannot select a native ABI or driver"
+   (let [call (capability/call-from-effect append-effect)]
+     [(capability/host-call? call)
+      (capability/host-call?
+       (assoc call :native-abi "request-selected"))
+      (capability/host-call?
+       (assoc call :driver "sqlite"))])
+   [true false false])
+
+  (test/check
+   "generic requests reject paths raw bodies and extra authority"
+   (let [request
+         (capability/call-request
+          (capability/call-from-effect append-effect))]
      [(capability/request? request)
       (capability/request? (assoc request :path "/tmp/unsafe"))
       (capability/request? (assoc request :bytes [1 2 3]))
@@ -159,7 +195,7 @@
      [(get result :ok)
       (get result :state)
       (capability/host-call? (get result :value))
-      (get-in result [:value :host-service])])
+      (get-in result [:value :service])])
    [true {:marker "unchanged"} true "hara.blob"])
 
   (test/check
@@ -180,7 +216,7 @@
        (assoc verify-result :size 13))
       (capability/result-matches-call?
        call
-       (assoc verify-result :staging-id "upload.b"))])
+       (assoc verify-result :staging-key "upload.b"))])
    [true false false])
 
   (test/check
@@ -219,8 +255,8 @@
           (fn [service operation request]
             (if
              (and (= "hara.blob" service)
-                  (= "staging-append-request" operation)
-                  (= 17 (get request :body-handle))
+                  (= "staging/append-from-source" operation)
+                  (= 17 (get request :source-handle))
                   (= 5 (get request :length)))
              append-result
              nil)))]
@@ -251,7 +287,21 @@
     "tahto.capability/result-mismatch"])
 
   (test/check
-   "verified generic commits translate back into Tahto result records in HAL"
+   "staging open may resume only inside the declared object size"
+   (let [call (capability/call-from-effect open-effect)
+         result {:protocol capability/result-protocol
+                 :operation "staging/open"
+                 :staging-key "upload.a"
+                 :opened true
+                 :offset 5}]
+     [(capability/result-matches-call? call result)
+      (capability/result-matches-call?
+       call
+       (assoc result :offset 13))])
+   [true false])
+
+  (test/check
+   "verified generic commits translate back into Tahto results in HAL"
    (let [translated
          (capability/verified-install-result verify-effect verify-result)]
      [(get translated :protocol)
@@ -274,12 +324,25 @@
     true])
 
   (test/check
-   "mismatched generic commits are never accepted as Tahto installation proof"
+   "generic immutable sources translate to bounded Tahto range results"
+   (let [translated
+         (capability/opened-source-result range-effect source-result)]
+     [(get translated :operation)
+      (get translated :start)
+      (get translated :end)
+      (get translated :length)
+      (get translated :source-handle)
+      (host/opened-range? translated digest 2 9)])
+   ["object/read-range" 2 9 7 31 true])
+
+  (test/check
+   "mismatched generic results never cross the Tahto result boundary"
    [(capability/verified-install-result
      verify-effect
      (assoc verify-result :digest
             "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
-    (capability/verified-install-result
-     open-effect
-     verify-result)]
-   [nil nil])])
+    (capability/opened-source-result
+     range-effect
+     (assoc source-result :length 8))
+    (capability/verified-install-result open-effect verify-result)]
+   [nil nil nil])])

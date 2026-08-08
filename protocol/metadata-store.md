@@ -1,66 +1,78 @@
-# Tahto metadata-store provider contract, version 1
+# Transitional metadata-store migration source
 
-The native `tahto-metadata-store/1` ABI is the closed provider boundary between TAHTO-7's deterministic Hara transaction plan and a concrete durable compare-and-swap store.
+## Status
 
-## Ownership
+The Rust code under `native/` preserves the reviewed behavior of the first
+metadata durability experiment. It is no longer the target Tahto architecture.
+Tahto is a HAL system; the code is retained only until its application-neutral
+storage mechanics are extracted into Hoplite issue #45.
 
-Tahto owns the state and transaction semantics. A host-installed provider owns durable storage and atomic compare-and-swap execution. Greenways OS retains installation, consent, grants, credentials and private keys.
-
-The provider does not execute Hara, parse application payloads, verify request signatures, choose divergent-head winners or install code. It receives canonical HTA state bytes plus bounded transaction evidence produced by reviewed host code.
-
-## Snapshot
-
-A snapshot contains:
+The superseded identity is:
 
 ```text
-revision
-canonical HTA1 state bytes
-canonical state digest
+tahto-metadata-store/1
 ```
 
-The revision must fit in a signed 64-bit storage column. State bytes are bounded and must be a canonical HTA1 frame. The native ABI validates the evidence shape; a concrete provider must recompute the SHA-256 digest before accepting bytes.
+New Tahto HAL code must not refer to this identity or to `tahto.metadata`.
 
-## Commit plan
+## Mechanics worth preserving
 
-A commit plan contains:
+The migration source demonstrates generic behavior that belongs in a
+`hara.store` driver:
+
+- bounded signed-64-bit-compatible revisions;
+- initialize only when absent;
+- exact expected-revision compare-and-swap;
+- canonical HTA value persistence;
+- digest recomputation over the actual stored bytes;
+- atomic value and receipt commit;
+- opaque receipt-key lookup and replay;
+- crash safety across transaction boundaries;
+- stale-writer and mismatched-evidence rejection.
+
+These mechanics do not require Tahto concepts.
+
+## Mechanics that must not move below HAL
+
+The generic driver must not interpret:
+
+- Tahto state shape or object graphs;
+- request and result semantics;
+- application authorization;
+- transaction-plan meaning;
+- receipt fields or replay policy;
+- recovery and merge decisions.
+
+The revised `tahto.store.provider` places the complete Tahto receipt evidence in
+an opaque value. The generic store persists it without parsing it and returns
+only mechanical `applied` or `replayed` status. HAL constructs and validates the
+final Tahto receipt.
+
+## Generic target
 
 ```text
-expected revision
-next revision
-plan digest
-request digest
-result digest
-canonical HTA1 state bytes
-state digest
-completion timestamp
+service: hara.store
+operations:
+  load
+  initialize
+  compare-and-swap
+  receipt
 ```
 
-The next revision must equal the expected revision plus one. Digests use lowercase `sha256:` notation. The plan digest identifies the exact provider operation and is the key for storage-level retry detection.
+A versioned native provider ABI may exist inside Hoplite, but trusted host
+installation binds it to `hara.store`. ABI identities, database paths, drivers,
+credentials and provider packages never enter Hara application values.
 
-## Provider operations
+## Migration sequence
 
-```text
-load
-initialize
-compare-and-swap
-receipt lookup
-```
+1. reproduce the current in-memory and SQLite behavior under a generic store
+   contract in Hoplite;
+2. run the same load, initialization, CAS, receipt, restart and fault fixtures
+   against both implementations;
+3. point Tahto's pure-HAL client only at `hara.store`;
+4. remove the compatibility identity and Tahto `native/` tree; and
+5. make Tahto CI reject any new native implementation directory or
+   Tahto-specific provider identity.
 
-`initialize` may create the first snapshot only when the store is empty. `compare-and-swap` atomically verifies the expected revision, installs the new snapshot and records a commit receipt. Repeating the exact plan returns the stored receipt as a replay. Reusing a plan digest with different evidence fails closed.
-
-## Durability law
-
-A provider commit must atomically persist:
-
-```text
-new canonical state bytes and digest
-new metadata revision
-plan/request/result evidence
-completion timestamp
-```
-
-No caller may observe the new revision without its state bytes or its receipt. A crash before commit exposes the old snapshot; a crash after commit exposes the complete new snapshot and receipt.
-
-## Not provided by the ABI
-
-The ABI does not select SQLite or PostgreSQL, create database files, run migrations, compute request signatures, transfer object bodies, compact replay state, or close Gate B. Concrete providers and end-to-end restart conformance are separate release slices.
+Git history remains the archive for the superseded ABI after removal; the Tahto
+repository does not need to carry a dormant native product indefinitely.

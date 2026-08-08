@@ -54,24 +54,13 @@ jobs:
           test -f protocol/metadata-store.md
           test -f protocol/metadata-host.md
           test -f protocol/host-capabilities.md
-          test -f native/.gitignore
-          test -f native/Cargo.toml
-          test -f native/Cargo.lock
-          test -f native/README.md
-          test -f native/abi/metadata-store/Cargo.toml
-          test -f native/abi/metadata-store/README.md
-          test -f native/abi/metadata-store/src/lib.rs
-          test -f native/abi/metadata-store/tests/contract.rs
-          test -f native/provider/metadata-sqlite/Cargo.toml
-          test -f native/provider/metadata-sqlite/README.md
-          test -f native/provider/metadata-sqlite/CONFORMANCE.md
-          test -f native/provider/metadata-sqlite/src/lib.rs
-          test -f native/provider/metadata-sqlite/src/tests.rs
 
           grep -F '(def host-service "hara.blob")' src/tahto/store/capability.hal
-          grep -F '(def native-abi "hara-blob-store/1")' src/tahto/store/capability.hal
-          ! grep -F '(def host-service "tahto.' src/tahto/store/capability.hal
-          ! grep -F '(def native-abi "tahto-' src/tahto/store/capability.hal
+          grep -F '(def host-service "hara.store")' src/tahto/store/provider.hal
+          ! grep -R -F '(def native-abi' src/tahto
+          ! grep -R -F ':native-abi' src/tahto
+          ! grep -R -F '(def host-service "tahto.' src/tahto
+          ! grep -R -F '"tahto-metadata-store/1"' src/tahto
 
   hara-state:
     runs-on: ubuntu-latest
@@ -82,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify the reviewed Hara revision pin
         run: test "$(tr -d '\n' < packaging/hara-revision)" = "$HARA_REVISION"
-      - name: Check out Hara after the namespace and metadata cuts
+      - name: Check out the reviewed Hara runtime
         uses: actions/checkout@v4
         with:
           repository: hara-lang/hara
@@ -98,7 +87,8 @@ jobs:
       - name: Run the Hara state conformance suites
         run: .hara/core/rust/target/release/hara --project "$GITHUB_WORKSPACE" test
 
-  native-contract:
+  native-migration-source:
+    name: Transitional native metadata migration source
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,7 +97,7 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt
-      - name: Check native contract and provider formatting
+      - name: Check the transitional metadata source formatting
         run: cargo fmt --manifest-path native/Cargo.toml --all -- --check
-      - name: Test the metadata-store ABI and SQLite provider
+      - name: Preserve migration-source behavior until Hoplite #45 replaces it
         run: cargo test --locked --quiet --manifest-path native/Cargo.toml --workspace
