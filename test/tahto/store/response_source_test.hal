@@ -70,25 +70,43 @@
 (test/print-results
  [(test/check
    "a validated Tahto range result becomes one closed portable descriptor"
-   (let [descriptor
-         (source/descriptor-from-result
-          range-effect
-          (source-result 31 2 7))]
-     [(portable/response-source? descriptor)
-      descriptor
-      (into #{} (keys descriptor))
-      (has? descriptor :digest)
-      (has? descriptor :start)
-      (has? descriptor :end)
-      (has? descriptor :provider)
-      (has? descriptor :work)])
+   (let [provider-result (source-result 31 2 7)
+         opened
+         (capability/opened-source-result range-effect provider-result)
+         candidate
+         {:protocol portable/protocol
+          :source-handle (get opened :source-handle)
+          :offset (get opened :start)
+          :length (get opened :length)}
+         descriptor
+         (source/descriptor-from-result range-effect provider-result)]
+     [(source/range-effect? range-effect)
+      opened
+      (host/opened-range? opened digest 2 9)
+      candidate
+      (portable/exact-fields? candidate)
+      (portable/response-source? candidate)
+      descriptor])
    [true
+    {:protocol "tahto.store.host-result/1"
+     :operation "object/read-range"
+     :opened true
+     :digest digest
+     :start 2
+     :end 9
+     :length 7
+     :source-handle 31}
+    true
     {:protocol "hara.response-source/1"
      :source-handle 31
      :offset 2
      :length 7}
-    #{:protocol :source-handle :offset :length}
-    false false false false false])
+    true
+    true
+    {:protocol "hara.response-source/1"
+     :source-handle 31
+     :offset 2
+     :length 7}])
 
   (test/check
    "authorized range execution returns the descriptor without moving bytes"
