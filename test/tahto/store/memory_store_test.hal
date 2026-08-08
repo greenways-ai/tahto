@@ -1,0 +1,403 @@
+(ns tahto.store.memory-store-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.memory-store :as memory-store]
+            [tahto.store.provider :as provider]
+            [tahto.store.transaction :as transaction]))
+
+(def initial-state-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def next-state-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def alternate-state-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def request-digest
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def result-digest
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def plan-digest
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def alternate-request-digest
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def alternate-result-digest
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def alternate-plan-digest
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+
+(def initial-state
+  {:metadata-revision 0
+   :objects {}})
+
+(def next-state
+  {:metadata-revision 1
+   :objects {"object.a" true}})
+
+(def alternate-state
+  {:metadata-revision 1
+   :objects {"object.b" true}})
+
+(def initial-verification
+  {:protocol provider/state-verification-protocol
+   :verified true
+   :revision 0
+   :state-digest initial-state-digest
+   :encoded-at "2026-08-08T01:00:00Z"})
+
+(def request-context
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation "service.register"
+   :application "app.example"
+   :namespace "profile.primary"
+   :collection "archive"
+   :request-digest request-digest
+   :idempotency-key "request-idempotency-0001"
+   :status "completed"
+   :replayed false
+   :result-digest result-digest})
+
+(def transaction-plan
+  {:protocol transaction/transaction-protocol
+   :expected-revision 0
+   :revision 1
+   :request-digest request-digest
+   :result-digest result-digest
+   :context request-context
+   :result {:stored true}
+   :replayed false})
+
+(def transition-result
+  {:ok true
+   :state next-state
+   :value transaction-plan
+   :effects []})
+
+(def commit-verification
+  {:protocol provider/commit-verification-protocol
+   :verified true
+   :expected-revision 0
+   :revision 1
+   :plan-digest plan-digest
+   :request-digest request-digest
+   :result-digest result-digest
+   :state-digest next-state-digest
+   :completed-at "2026-08-08T01:01:00Z"})
+
+(def alternate-context
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation "service.register"
+   :application "app.example"
+   :namespace "profile.primary"
+   :collection "archive"
+   :request-digest alternate-request-digest
+   :idempotency-key "request-idempotency-0002"
+   :status "completed"
+   :replayed false
+   :result-digest alternate-result-digest})
+
+(def alternate-plan
+  {:protocol transaction/transaction-protocol
+   :expected-revision 0
+   :revision 1
+   :request-digest alternate-request-digest
+   :result-digest alternate-result-digest
+   :context alternate-context
+   :result {:stored true}
+   :replayed false})
+
+(def alternate-transition
+  {:ok true
+   :state alternate-state
+   :value alternate-plan
+   :effects []})
+
+(def alternate-verification
+  {:protocol provider/commit-verification-protocol
+   :verified true
+   :expected-revision 0
+   :revision 1
+   :plan-digest alternate-plan-digest
+   :request-digest alternate-request-digest
+   :result-digest alternate-result-digest
+   :state-digest alternate-state-digest
+   :completed-at "2026-08-08T01:02:00Z"})
+
+(def colliding-verification
+  (assoc alternate-verification :plan-digest plan-digest))
+
+(defn executor
+  [memory]
+  (fn [service operation request]
+    (memory-store/invoke memory service operation request)))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn initialize-memory!
+  [memory]
+  (provider/execute-prepared-with
+   (provider/prepare-initialize initial-state initial-verification)
+   (executor memory)))
+
+(defn commit-memory!
+  [memory]
+  (provider/execute-prepared-with
+   (provider/prepare-compare-and-swap
+    transition-result commit-verification)
+   (executor memory)))
+
+(test/print-results
+ [(test/check
+   "the generic driver accepts opaque values without learning Tahto state"
+   (let [memory (memory-store/create)
+         request {:protocol provider/request-protocol
+                  :operation "initialize"
+                  :revision 7
+                  :value [:opaque {:nested [1 2 3]}]
+                  :value-digest initial-state-digest}
+         result
+         (memory-store/invoke
+          memory provider/host-service "initialize" request)]
+     [(memory-store/generic-request? request)
+      (provider/provider-request? request)
+      (get result :operation)
+      (get result :value)
+      (memory-store/generic-request?
+       (assoc request :driver "sqlite"))
+      (memory-store/invoke
+       memory
+       "tahto.metadata"
+       "initialize"
+       request)])
+   [true
+    false
+    "initialize"
+    [:opaque {:nested [1 2 3]}]
+    false
+    nil])
+
+  (test/check
+   "empty load is a valid absent generic result"
+   (let [memory (memory-store/create)
+         result
+         (provider/execute-prepared-with
+          (provider/prepare-load initial-state)
+          (executor memory))]
+     [(get result :ok)
+      (get result :state)
+      (get result :value)
+      (memory-store/snapshot-entry memory)])
+   [true initial-state nil nil])
+
+  (test/check
+   "initialize is exact, idempotent and loadable through the HAL client"
+   (let [memory (memory-store/create)
+         initialized (initialize-memory! memory)
+         repeated (initialize-memory! memory)
+         loaded
+         (provider/execute-prepared-with
+          (provider/prepare-load initial-state)
+          (executor memory))
+         conflicting-state
+         {:metadata-revision 0
+          :objects {"unexpected" true}}
+         conflicting-verification
+         (assoc initial-verification
+                :state-digest alternate-state-digest)
+         conflicting
+         (provider/execute-prepared-with
+          (provider/prepare-initialize
+           conflicting-state conflicting-verification)
+          (executor memory))]
+     [(get initialized :ok)
+      (provider/initialize-result?
+       initial-state initial-verification (get initialized :value))
+      (get repeated :ok)
+      (get loaded :ok)
+      (provider/loaded-state (get loaded :value))
+      (get conflicting :ok)
+      (error-code conflicting)])
+   [true true true true initial-state false "tahto.provider/result-invalid"])
+
+  (test/check
+   "compare-and-swap atomically stores the next opaque value and receipt"
+   (let [memory (memory-store/create)
+         initialized (initialize-memory! memory)
+         committed (commit-memory! memory)
+         loaded
+         (provider/execute-prepared-with
+          (provider/prepare-load next-state)
+          (executor memory))
+         receipt-loaded
+         (provider/execute-prepared-with
+          (provider/prepare-receipt next-state plan-digest)
+          (executor memory))
+         translated-receipt
+         (provider/receipt-from-store-result
+          (get receipt-loaded :value))]
+     [(get initialized :ok)
+      (get committed :ok)
+      (get-in committed [:value :status])
+      (provider/commit-result?
+       transition-result commit-verification (get committed :value))
+      (provider/loaded-state (get loaded :value))
+      (get-in receipt-loaded [:value :status])
+      (provider/receipt-matches?
+       translated-receipt commit-verification)
+      (get
+       (memory-store/receipt-entry memory plan-digest)
+       :value-digest)])
+   [true
+    true
+    "applied"
+    true
+    next-state
+    "replayed"
+    true
+    next-state-digest])
+
+  (test/check
+   "exact retries replay while stale writers and receipt collisions fail closed"
+   (let [memory (memory-store/create)
+         initialized (initialize-memory! memory)
+         committed (commit-memory! memory)
+         replayed (commit-memory! memory)
+         stale
+         (provider/execute-prepared-with
+          (provider/prepare-compare-and-swap
+           alternate-transition alternate-verification)
+          (executor memory))
+         collision
+         (provider/execute-prepared-with
+          (provider/prepare-compare-and-swap
+           alternate-transition colliding-verification)
+          (executor memory))
+         original-call
+         (get
+          (provider/prepare-compare-and-swap
+           transition-result commit-verification)
+          :value)
+         original-request (provider/call-request original-call)
+         opaque-value-collision
+         (memory-store/invoke
+          memory
+          provider/host-service
+          "compare-and-swap"
+          (assoc original-request
+                 :value {:different "opaque-value"}))]
+     [(get initialized :ok)
+      (get committed :ok)
+      (get replayed :ok)
+      (get-in replayed [:value :status])
+      (get stale :ok)
+      (error-code stale)
+      (get collision :ok)
+      (error-code collision)
+      opaque-value-collision])
+   [true
+    true
+    true
+    "replayed"
+    false
+    "tahto.provider/result-invalid"
+    false
+    "tahto.provider/result-invalid"
+    nil])
+
+  (test/check
+   "a before-commit fault preserves the old value and no receipt"
+   (let [memory (memory-store/create)
+         initialized (initialize-memory! memory)
+         injected
+         (memory-store/fail-next-compare-and-swap!
+          memory "before-commit")
+         failed (commit-memory! memory)
+         loaded
+         (provider/execute-prepared-with
+          (provider/prepare-load initial-state)
+          (executor memory))
+         receipt-loaded
+         (provider/execute-prepared-with
+          (provider/prepare-receipt initial-state plan-digest)
+          (executor memory))]
+     [(get initialized :ok)
+      injected
+      (get failed :ok)
+      (error-code failed)
+      (provider/loaded-state (get loaded :value))
+      (get receipt-loaded :ok)
+      (get receipt-loaded :value)])
+   [true
+    true
+    false
+    "tahto.provider/result-invalid"
+    initial-state
+    true
+    nil])
+
+  (test/check
+   "an after-commit fault exposes complete new state and replays on recovery"
+   (let [memory (memory-store/create)
+         initialized (initialize-memory! memory)
+         injected
+         (memory-store/fail-next-compare-and-swap!
+          memory "after-commit")
+         interrupted (commit-memory! memory)
+         loaded
+         (provider/execute-prepared-with
+          (provider/prepare-load next-state)
+          (executor memory))
+         receipt-loaded
+         (provider/execute-prepared-with
+          (provider/prepare-receipt next-state plan-digest)
+          (executor memory))
+         retried (commit-memory! memory)]
+     [(get initialized :ok)
+      injected
+      (get interrupted :ok)
+      (error-code interrupted)
+      (provider/loaded-state (get loaded :value))
+      (get-in receipt-loaded [:value :status])
+      (get retried :ok)
+      (get-in retried [:value :status])
+      (provider/commit-result?
+       transition-result commit-verification (get retried :value))])
+   [true
+    true
+    false
+    "tahto.provider/result-invalid"
+    next-state
+    "replayed"
+    true
+    "replayed"
+    true])
+
+  (test/check
+   "stale writers do not consume a pending eligible fault"
+   (let [memory (memory-store/create)
+         initialized (initialize-memory! memory)
+         first-commit (commit-memory! memory)
+         injected
+         (memory-store/fail-next-compare-and-swap!
+          memory "before-commit")
+         stale-call
+         (get
+          (provider/prepare-compare-and-swap
+           alternate-transition alternate-verification)
+          :value)
+         stale-request (provider/call-request stale-call)
+         stale-direct
+         (memory-store/invoke
+          memory
+          provider/host-service
+          "compare-and-swap"
+          stale-request)]
+     [(get initialized :ok)
+      (get first-commit :ok)
+      injected
+      stale-direct
+      (get (memory-store/memory-state memory) :fail-next-cas)])
+   [true true true nil "before-commit"])])
