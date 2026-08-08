@@ -22,7 +22,7 @@ Tahto HAL
 Tahto HAL capability interpreter
   exact mapping · generic request validation · generic result validation
         |
-        | std.native.Host/call in production
+        | std.foundation.host/call in production
         v
 generic Hara host capability
   bounded byte movement · hashing · atomic storage · response sources
@@ -182,21 +182,56 @@ check. A generic driver result never bypasses the HAL domain boundary.
 
 ## Execution profiles
 
-The mapping is useful in three environments without changing Tahto code:
+The same HAL interpreter now has two execution surfaces.
 
-1. **Pure HAL tests** — inspect or execute the planned call through an in-memory
-   HAL capability.
-2. **Hara CLI host** — install a compatible generic blob driver.
-3. **Hoplite** — dispatch through the registered provider ABI and bind request
-   and response resources to Nginx work lifetimes.
+### Pure or injected execution
 
-A thin asynchronous HAL wrapper may call:
+Tests and non-Hoplite hosts can supply an ordinary HAL function:
 
 ```clojure
-(std.native.Host/call service operation [request])
+(capability/execute-with
+ state
+ effect
+ (fn [service operation request]
+   (in-memory-capability service operation request)))
 ```
 
-The mapping and validation functions remain pure and deterministic.
+`execute-with` first prepares and validates the exact generic call. It then
+validates the returned result against that call before preserving the supplied
+Tahto state in a successful `model/ok` result. Invalid, malformed or mismatched
+results become closed `tahto.capability/*` failures.
+
+### Production host execution
+
+A Hoplite handler or another coroutine-enabled Hara host calls:
+
+```clojure
+(coroutine/await
+ (capability/execute state effect))
+```
+
+`capability/execute` is itself an async HAL function. It invokes:
+
+```clojure
+(foundation-host/call service operation request)
+```
+
+The generic request is passed as the one host argument. After the promise
+settles, the same pure `accept-result` validator used by injected tests checks
+the result. A provider therefore cannot bypass the HAL request/result identity
+checks merely because it is installed in production.
+
+Host rejection remains a rejected coroutine operation; application code decides
+how that failure affects its transaction or HTTP response. A successful promise
+is still not accepted until the closed result record matches the exact planned
+call.
+
+The interpreter can therefore run unchanged in:
+
+1. **Pure HAL tests** — injected in-memory capability.
+2. **Hara CLI hosts** — installed generic blob driver.
+3. **Hoplite** — registered provider ABI with request and response resources
+   bound to Nginx work lifetimes.
 
 ## Migration of native Tahto code
 
@@ -214,6 +249,7 @@ repository.
 - Generic requests and results reject extra authority-bearing fields.
 - Native handles are never serialized as portable application state.
 - Result translation happens in HAL and requires exact request/result identity.
+- Injected and production execution share the same result validator.
 - Host cancellation precedes work-scope closure.
 - Generic drivers never infer Tahto authorization or merge semantics.
 - Production and in-memory providers are substitutable beneath the same HAL
