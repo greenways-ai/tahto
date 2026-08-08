@@ -30,6 +30,7 @@ jobs:
           test -f src/tahto/store/model.hal
           test -f src/tahto/store/host.hal
           test -f src/tahto/store/capability.hal
+          test -f src/tahto/store/memory_blob.hal
           test -f src/tahto/store/vault.hal
           test -f src/tahto/store/graph.hal
           test -f src/tahto/store/history.hal
@@ -46,6 +47,7 @@ jobs:
           test -f test/tahto/store/transaction_test.hal
           test -f test/tahto/store/provider_test.hal
           test -f test/tahto/store/capability_test.hal
+          test -f test/tahto/store/memory_blob_test.hal
           test -f test/tahto/sync/device_test.hal
           test -f test/tahto/sync/session_test.hal
           test -f test/tahto/service/state_test.hal
@@ -57,6 +59,7 @@ jobs:
 
           grep -F '(def host-service "hara.blob")' src/tahto/store/capability.hal
           grep -F '(def host-service "hara.store")' src/tahto/store/provider.hal
+          grep -F '(ns tahto.store.memory-blob' src/tahto/store/memory_blob.hal
           ! grep -R -F '(def native-abi' src/tahto
           ! grep -R -F ':native-abi' src/tahto
           ! grep -R -F '(def host-service "tahto.' src/tahto
