@@ -1,49 +1,45 @@
 # Tahto state kernels
 
-This directory contains the Hara-owned TAHTO state, transaction and
-capability-interpreter logic.
+This directory contains the Hara-owned Tahto state, transaction, semantic and
+generic-capability orchestration logic.
 
 ```text
-model.hal         canonical identity, limits and immutable state
-host.hal          closed Tahto domain effects and result validation
-capability.hal    pure-HAL mapping to generic blob/source capabilities
-memory_blob.hal   deterministic pure-HAL hara.blob reference provider
-graph.hal         verified manifests, shared closure, roots and dry-run GC
-vault.hal         uploads, installation, namespace references, quotas and ranges
-history.hal       immutable commits, CAS heads, backups, restore and receipts
-transaction.hal   atomic verified request-to-metadata commit plans
-provider.hal      pure-HAL mapping to a generic durable value store
-memory_store.hal  deterministic pure-HAL hara.store reference driver
+model.hal             canonical identities, limits and immutable state
+host.hal              closed Tahto domain effects and result validation
+capability.hal        pure-HAL mapping to generic hara.blob calls
+upload.hal            candidate-state upload orchestration and rollback
+response_source.hal   authorized range projection to hara.response-source/1
+memory_blob.hal       deterministic pure-HAL hara.blob reference provider
+graph.hal             manifests, content graph, closure, roots and dry-run GC
+vault.hal             uploads, installation, references, quotas and ranges
+history.hal           immutable commits, CAS heads, backups, restore, receipts
+transaction.hal       verified request-to-metadata commit plans
+provider.hal          pure-HAL mapping to generic hara.store
+memory_store.hal      deterministic pure-HAL hara.store reference provider
 ```
 
-Record shape and signed verification contracts live in:
+Record and signed-verification contracts live under `tahto.protocol.*`.
 
-```text
-tahto.protocol.records
-tahto.protocol.validate
-```
+## HAL-only domain boundary
 
-## HAL-only application boundary
-
-Tahto domain behavior is implemented in HAL. The kernels own:
+The kernels own:
 
 ```text
 identity and authorization
-quotas and offsets
-object and history graphs
+quotas and range policy
+object and history graph meaning
 transaction and recovery plans
-snapshot and receipt meaning
-closed effect and result validation
+snapshot and receipt interpretation
+closed request and result validation
 ```
 
-They never accept a destination path, upstream URL, raw request body, private
-key, bearer credential, driver, native ABI, library or executable command.
-Large bodies remain behind work-scoped resource handles.
+They never accept a destination path, remote URL, raw request body, private key,
+bearer credential, provider package, driver, native ABI, library or executable
+command.
 
-## Generic blob and response capabilities
+## Generic object capability
 
-`tahto.store.capability` maps existing Tahto effects to `hara.blob` calls with
-the exact portable shape:
+`tahto.store.capability` maps the closed Tahto object effects to:
 
 ```clojure
 {:service "hara.blob"
@@ -51,104 +47,96 @@ the exact portable shape:
  :arguments [request]}
 ```
 
-A logical `:staging-key` is never a path or native handle. Request-body and
-response resources cross the boundary as `:source-handle` values that the host
-must resolve with their owning work scope. Generic range requests use offset
-plus length; Tahto continues to own authorization and half-open range planning.
-
-Mapping, request validation, result matching and translation back into Tahto
-results remain pure HAL. Hoplite or another host may implement byte movement,
-hashing, atomic installation and backpressured response streaming without
-containing Tahto upload, quota, graph or authorization rules.
-
-### Deterministic blob reference profile
-
-`tahto.store.memory-blob` implements the same generic `hara.blob` request and
-result profile entirely in HAL for conformance tests. It models:
+The supported operations are:
 
 ```text
-logical staging and resume offsets
-work-owned input source handles
-exactly-once bounded source consumption
-idempotent abort
-complete-object commit and replay
-bounded immutable output sources
-work-owned exactly-once source close
+staging/open
+staging/append-from-source
+staging/abort
+staging/verify-commit
+object/open-source
 ```
 
-The reference provider stores small fixture descriptors, not request-body byte
-payloads. Each fixture declares its work owner, bounded segment, object digest
-and object size. This lets the HAL suite exercise lifecycle and identity laws
-without turning byte streams into Tahto application values.
+A logical staging key is not a path. A source handle is an ephemeral resource
+which a production host resolves only through exact request context + work +
+handle ownership.
 
-The reference provider deliberately does not pretend to prove a cryptographic
-digest over bytes it never receives. Production digest calculation, short-read
-and excess-read detection, filesystem durability and backpressure remain generic
-host mechanics. The same closed request/result profile is exercised beneath the
-Tahto interpreter in both cases.
+`tahto.store.upload` runs the vault transition as candidate state, invokes one
+matching generic effect and commits only after the exact generic result passes
+HAL validation. All provider preparation, identity and result failures return
+the original state.
 
-See [`protocol/host-capabilities.md`](../../../protocol/host-capabilities.md).
+`tahto.store.response-source` first runs `vault/plan-range`, then validates the
+exact generic source result and projects only:
 
-## Generic durable metadata capability
+```clojure
+{:protocol "hara.response-source/1"
+ :source-handle 31
+ :offset 2
+ :length 7}
+```
 
-TAHTO transaction reducers produce a tentative next state and a bounded atomic
+Object bytes and source ownership never enter Tahto values. The installed
+Hoplite filesystem provider and Nginx transport own actual byte custody,
+digests, restart safety, output backpressure and cleanup.
+
+### Deterministic blob profile
+
+`memory_blob.hal` supplies the same request/result profile for pure HAL laws. It
+models logical staging, exact offsets, work-owned source descriptors,
+idempotent abort, object installation, output-source ownership and exactly-once
+close. It does not pretend to hash bytes it never receives.
+
+## Generic metadata capability
+
+TAHTO transaction reducers produce a tentative next state and one bounded atomic
 metadata plan. `tahto.store.provider` validates Tahto state and receipt evidence,
-then calls `hara.store` with opaque canonical values and exact revisions.
-
-The generic store may initialize, load, compare-and-swap and retrieve an opaque
-receipt value. It does not parse Tahto state or receipt fields. Its mechanical
-`applied` or `replayed` result receives Tahto meaning only after HAL translates
-and validates the stored payload.
-
-### Deterministic store reference profile
-
-`tahto.store.memory-store` implements the generic `hara.store` mechanics in HAL
-without depending on Tahto record shapes. Its own request validator checks only:
+then calls:
 
 ```text
-closed operation-specific keys
-revision bounds and one-step CAS revisions
-opaque value digests and receipt keys
-presence of an opaque receipt value
+service: hara.store
+operations: load · initialize · compare-and-swap · receipt
 ```
 
-It models:
+The store treats the state and receipt as opaque canonical values. Mechanical
+`applied` or `replayed` status becomes Tahto meaning only after HAL translation.
 
-```text
-absent and initialized stores
-idempotent exact initialization
-single-revision compare-and-swap
-atomic snapshot and receipt publication
-exact receipt-key replay
-stale-writer and key-collision rejection
-before-commit interruption
-post-commit lost-result recovery
-```
+### Deterministic store profile
 
-Replay is bound to the exact opaque value, value digest, receipt key and receipt
-value. A caller cannot reuse a prior key to substitute another value, even when
-the receipt payload itself is unchanged.
+`memory_store.hal` models absent/present load, exact initialization,
+single-revision CAS, atomic snapshot/receipt publication, exact replay,
+stale-writer and key-collision rejection, both fault windows and lost-result
+recovery.
 
-The reference driver keeps Hara values directly and preserves the supplied
-value/digest pairing. It does not claim to recompute a canonical HTA digest over
-encoded bytes. Production drivers must encode the opaque value canonically,
-verify the supplied digest over those bytes, and commit the value and receipt in
-one durable transaction. That byte-level guarantee belongs to the generic host
-driver rather than Tahto semantics.
+The production Hoplite SQLite provider preserves the same mechanics while
+recomputing digests over actual canonical HTA spans and retaining state across
+restart.
 
-The Rust metadata implementation under `native/` is a temporary migration
-source for Hoplite issue #45, not Tahto's target implementation. It is removed
-once the generic SQLite driver passes the same restart and fault conformance as
-`memory-store`.
+## Transitional native source
 
-Tahto preserves divergent valid commit roots. Applications, not the fabric,
-decide whether and how those roots are reconciled.
+The Rust metadata implementation under `native/` is frozen migration and parity
+evidence. Generic provider extraction is complete. The tree is removed by #17
+after memory/SQLite parity, production two-device transfer and semantic
+recovery/restore gates pass. New Tahto semantics must never be added there.
 
-Normative contracts:
+## History and semantic direction
+
+Tahto preserves divergent valid commit roots. Applications decide whether and
+how those roots are reconciled.
+
+The first Semantic Fabric profiles (#30–#35) add exact schema references, stable
+semantic identities, typed content-addressed links, bounded stable-ID indexes
+and complete semantic roots. They compose over the existing object graph and
+ordinary commit/head laws rather than replacing them.
+
+Normative and integration documents:
 
 - [`protocol/object-vault.md`](../../../protocol/object-vault.md)
 - [`protocol/host-capabilities.md`](../../../protocol/host-capabilities.md)
+- [`protocol/upload-integration.md`](../../../protocol/upload-integration.md)
+- [`protocol/response-sources.md`](../../../protocol/response-sources.md)
 - [`protocol/history.md`](../../../protocol/history.md)
+- [`protocol/two-device-object-transfer.md`](../../../protocol/two-device-object-transfer.md)
 - [`protocol/transactions.md`](../../../protocol/transactions.md)
 - [`protocol/metadata-store.md`](../../../protocol/metadata-store.md)
 - [`protocol/metadata-host.md`](../../../protocol/metadata-host.md)
