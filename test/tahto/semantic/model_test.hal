@@ -83,6 +83,68 @@
 (def too-long-id
   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
+(defn sorted-identifiers
+  [prefix total]
+  (loop [index 0
+         values []]
+    (if
+     (= index total)
+     (vec (sort values))
+     (recur
+      (inc index)
+      (conj values (str prefix index))))))
+
+(defn generated-schema-refs
+  [total]
+  (vec
+   (map
+    (fn [schema]
+      (assoc schema-entity :schema schema))
+    (sorted-identifiers "schema" total))))
+
+(defn generated-links
+  [total]
+  (vec
+   (map
+    (fn [role]
+      (assoc child-link :role role))
+    (sorted-identifiers "role" total))))
+
+(defn generated-index-entries
+  [total]
+  (vec
+   (map
+    (fn [id]
+      {:id id :root object-root-a})
+    (sorted-identifiers "entity" total))))
+
+(defn generated-root-entries
+  [total]
+  (vec
+   (map
+    (fn [name]
+      {:name name
+       :id name
+       :root object-root-a})
+    (sorted-identifiers "root" total))))
+
+(def maximum-schema-refs
+  (generated-schema-refs semantic/max-schema-refs))
+(def excessive-schema-refs
+  (generated-schema-refs (inc semantic/max-schema-refs)))
+(def maximum-links
+  (generated-links semantic/max-links))
+(def excessive-links
+  (generated-links (inc semantic/max-links)))
+(def maximum-index-entries
+  (generated-index-entries semantic/max-index-entries))
+(def excessive-index-entries
+  (generated-index-entries (inc semantic/max-index-entries)))
+(def maximum-root-entries
+  (generated-root-entries semantic/max-root-entries))
+(def excessive-root-entries
+  (generated-root-entries (inc semantic/max-root-entries)))
+
 (test/print-results
  [(test/check
    "the semantic protocols remain additive to the closed core vocabulary"
@@ -209,6 +271,56 @@
     (semantic/semantic-root? (assoc semantic-root :application "Fixture.World"))
     (semantic/semantic-root? (assoc semantic-root :source-handle 41))]
    [true false false false false false false false])
+
+  (test/check
+   "field-wise ordering preserves prefix and numeric coordinate semantics"
+   (let [schema-a (assoc schema-entity :schema "fixture.a")
+         schema-aa (assoc schema-entity :schema "fixture.aa")
+         schema-v2 (assoc schema-entity :schema-version 2)
+         schema-v10 (assoc schema-entity :schema-version 10)
+         link-a (assoc child-link :role "world.a")
+         link-aa (assoc child-link :role "world.aa")
+         index-a {:id "entity/a" :root object-root-a}
+         index-aa {:id "entity/aa" :root object-root-b}
+         root-a {:name "a" :id "entity/a" :root object-root-a}
+         root-aa {:name "aa" :id "entity/aa" :root object-root-b}]
+     [(semantic/schema-ref-vector? [schema-a schema-aa])
+      (semantic/schema-ref-vector? [schema-aa schema-a])
+      (semantic/schema-ref-vector? [schema-v2 schema-v10])
+      (semantic/schema-ref-vector? [schema-v10 schema-v2])
+      (semantic/semantic-link-vector? [link-a link-aa])
+      (semantic/semantic-link-vector? [link-aa link-a])
+      (semantic/semantic-index?
+       {:protocol semantic/semantic-index-protocol
+        :entries [index-a index-aa]})
+      (semantic/semantic-index?
+       {:protocol semantic/semantic-index-protocol
+        :entries [index-aa index-a]})
+      (semantic/semantic-root-entry-vector? [root-a root-aa])
+      (semantic/semantic-root-entry-vector? [root-aa root-a])])
+   [true false true false true false true false true false])
+
+  (test/check
+   "configured collection bounds accept the exact maximum and reject one more"
+   [(semantic/schema-ref-vector? maximum-schema-refs)
+    (semantic/schema-ref-vector? excessive-schema-refs)
+    (semantic/semantic-link-vector? maximum-links)
+    (semantic/semantic-link-vector? excessive-links)
+    (semantic/semantic-index?
+     {:protocol semantic/semantic-index-protocol
+      :entries maximum-index-entries})
+    (semantic/semantic-index?
+     {:protocol semantic/semantic-index-protocol
+      :entries excessive-index-entries})
+    (semantic/semantic-root-entry-vector? maximum-root-entries)
+    (semantic/semantic-root-entry-vector? excessive-root-entries)
+    (semantic/semantic-object?
+     (assoc semantic-object :links maximum-links))
+    (semantic/semantic-root?
+     (assoc semantic-root :schema-refs maximum-schema-refs))
+    (semantic/semantic-root?
+     (assoc semantic-root :roots maximum-root-entries))]
+   [true false true false true false true false true true true])
 
   (test/check
    "configured value-size boundaries are exact"
