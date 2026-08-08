@@ -1,0 +1,450 @@
+(ns tahto.semantic.model
+  (:require [std.foundation :refer :all]
+            [std.foundation.string :as string]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]))
+
+;; Closed application-neutral semantic envelopes. Application values remain in
+;; immutable canonical objects addressed by :value-root; these records carry no
+;; executable source, provider selection or host authority.
+
+(def schema-ref-protocol
+  "tahto.schema-ref/1")
+
+(def canonical-value-verification-protocol
+  "tahto.canonical-value-verification/1")
+
+(def semantic-link-protocol
+  "tahto.semantic-link/1")
+
+(def semantic-object-protocol
+  "tahto.semantic-object/1")
+
+(def semantic-index-protocol
+  "tahto.semantic-index/1")
+
+(def semantic-root-protocol
+  "tahto.semantic-root/1")
+
+(def canonical-value-profile
+  "hara.hta/1")
+
+(def semantic-protocols
+  #{schema-ref-protocol
+    canonical-value-verification-protocol
+    semantic-link-protocol
+    semantic-object-protocol
+    semantic-index-protocol
+    semantic-root-protocol})
+
+(def max-schema-refs 64)
+(def max-links 256)
+(def max-index-entries 4096)
+(def max-root-entries 64)
+(def max-semantic-value-bytes 1048576)
+(def max-package-coordinate-length 386)
+(def max-package-version-length 128)
+
+(def decimal-digits
+  #{"0" "1" "2" "3" "4" "5" "6" "7" "8" "9"})
+
+(def package-coordinate-characters
+  #{"0" "1" "2" "3" "4" "5" "6" "7" "8" "9"
+    "a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m"
+    "n" "o" "p" "q" "r" "s" "t" "u" "v" "w" "x" "y" "z"
+    "-" "_" "."})
+
+(def semver-identifier-characters
+  #{"0" "1" "2" "3" "4" "5" "6" "7" "8" "9"
+    "a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m"
+    "n" "o" "p" "q" "r" "s" "t" "u" "v" "w" "x" "y" "z"
+    "A" "B" "C" "D" "E" "F" "G" "H" "I" "J" "K" "L" "M"
+    "N" "O" "P" "Q" "R" "S" "T" "U" "V" "W" "X" "Y" "Z"
+    "-"})
+
+(def schema-ref-fields
+  #{:protocol
+    :schema
+    :schema-version
+    :package
+    :package-version
+    :package-root
+    :entry})
+
+(def canonical-value-verification-fields
+  #{:protocol
+    :verified
+    :profile
+    :schema-ref
+    :value-root
+    :value-size})
+
+(def semantic-link-fields
+  #{:protocol
+    :role
+    :target-id
+    :target-root})
+
+(def semantic-object-fields
+  #{:protocol
+    :id
+    :schema-ref
+    :value-root
+    :value-size
+    :links})
+
+(def semantic-index-fields
+  #{:protocol :entries})
+
+(def semantic-index-entry-fields
+  #{:id :root})
+
+(def semantic-root-fields
+  #{:protocol
+    :application
+    :namespace
+    :collection
+    :schema-refs
+    :index-root
+    :roots})
+
+(def semantic-root-entry-fields
+  #{:name :id :root})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn semantic-protocol?
+  [value]
+  (truth-value (has? semantic-protocols value)))
+
+(defn bounded-count?
+  [value minimum maximum]
+  (truth-value
+   (and
+    (integer? value)
+    (<= minimum value)
+    (<= value maximum))))
+
+(defn bounded-positive-integer?
+  [value maximum]
+  (bounded-count? value 1 maximum))
+
+(defn characters-valid?
+  [value allowed]
+  (truth-value
+   (and
+    (string? value)
+    (loop [index 0]
+      (if
+       (= index (count value))
+       true
+       (if
+        (has? allowed (string/slice value index (inc index)))
+        (recur (inc index))
+        false))))))
+
+(defn package-coordinate-component?
+  [value]
+  (truth-value
+   (and
+    (model/non-empty-string? value)
+    (<= (count value) 128)
+    (characters-valid? value package-coordinate-characters))))
+
+(defn package-coordinate?
+  [value]
+  (truth-value
+   (and
+    (string? value)
+    (<= (count value) max-package-coordinate-length)
+    (let [tap-parts (string/split value ":")]
+      (and
+       (= 2 (count tap-parts))
+       (package-coordinate-component? (nth tap-parts 0))
+       (not (= "official" (nth tap-parts 0)))
+       (let [package-parts (string/split (nth tap-parts 1) "/")]
+         (and
+          (= 2 (count package-parts))
+          (package-coordinate-component? (nth package-parts 0))
+          (package-coordinate-component? (nth package-parts 1)))))))))
+
+(defn numeric-semver-identifier?
+  [value]
+  (truth-value
+   (and
+    (model/non-empty-string? value)
+    (characters-valid? value decimal-digits)
+    (or
+     (= 1 (count value))
+     (not (= "0" (string/slice value 0 1)))))))
+
+(defn semver-identifier?
+  [value]
+  (truth-value
+   (and
+    (model/non-empty-string? value)
+    (characters-valid? value semver-identifier-characters))))
+
+(defn prerelease-identifier?
+  [value]
+  (truth-value
+   (and
+    (semver-identifier? value)
+    (or
+     (not (characters-valid? value decimal-digits))
+     (numeric-semver-identifier? value)))))
+
+(defn semver-core?
+  [value]
+  (truth-value
+   (and
+    (string? value)
+    (let [parts (string/split value ".")]
+      (and
+       (= 3 (count parts))
+       (every? numeric-semver-identifier? parts))))))
+
+(defn semver-identifiers?
+  [value predicate]
+  (truth-value
+   (and
+    (model/non-empty-string? value)
+    (let [parts (string/split value ".")]
+      (and
+       (> (count parts) 0)
+       (every? predicate parts))))))
+
+(defn split-first
+  [value separator]
+  (let [index (string/index-of value separator)]
+    (if
+     (< index 0)
+     [value nil]
+     [(string/slice value 0 index)
+      (string/slice value (inc index))])))
+
+(defn package-version?
+  [value]
+  (truth-value
+   (and
+    (string? value)
+    (> (count value) 0)
+    (<= (count value) max-package-version-length)
+    (= (string/index-of value "+")
+       (string/last-index-of value "+"))
+    (let [build-split (split-first value "+")
+          version-and-prerelease (nth build-split 0)
+          build (nth build-split 1)
+          prerelease-split (split-first version-and-prerelease "-")
+          core (nth prerelease-split 0)
+          prerelease (nth prerelease-split 1)]
+      (and
+       (semver-core? core)
+       (or
+        (nil? prerelease)
+        (semver-identifiers? prerelease prerelease-identifier?))
+       (or
+        (nil? build)
+        (semver-identifiers? build semver-identifier?)))))))
+
+(defn coordinate-field-compare
+  [left right]
+  (cond
+    (= left right)
+    0
+
+    (and (integer? left)
+         (integer? right))
+    (if (< left right) -1 1)
+
+    :else
+    (compare left right)))
+
+(defn coordinate-compare
+  [left right]
+  (loop [index 0]
+    (if
+     (= index (count left))
+     0
+     (let [comparison
+           (coordinate-field-compare
+            (nth left index)
+            (nth right index))]
+       (if
+        (= comparison 0)
+        (recur (inc index))
+        comparison)))))
+
+(defn strictly-increasing-by?
+  [values coordinate]
+  (truth-value
+   (and
+    (vector? values)
+    (if
+     (<= (count values) 1)
+     true
+     (loop [index 1]
+       (if
+        (= index (count values))
+        true
+        (if
+         (< (coordinate-compare
+             (coordinate (nth values (dec index)))
+             (coordinate (nth values index)))
+            0)
+         (recur (inc index))
+         false)))))))
+
+(defn schema-ref-coordinate
+  [value]
+  [(get value :schema)
+   (get value :schema-version)
+   (get value :package)
+   (get value :package-version)
+   (get value :package-root)
+   (get value :entry)])
+
+(defn schema-ref?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value schema-ref-fields #{})
+    (= schema-ref-protocol (get value :protocol))
+    (model/identifier? (get value :schema))
+    (model/positive-integer? (get value :schema-version))
+    (package-coordinate? (get value :package))
+    (package-version? (get value :package-version))
+    (model/canonical-digest? (get value :package-root))
+    (model/identifier? (get value :entry)))))
+
+(defn schema-ref-vector?
+  [values]
+  (truth-value
+   (and
+    (vector? values)
+    (bounded-count? (count values) 1 max-schema-refs)
+    (every? schema-ref? values)
+    (strictly-increasing-by? values schema-ref-coordinate))))
+
+(defn canonical-value-verification?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record?
+     value
+     canonical-value-verification-fields
+     #{})
+    (= canonical-value-verification-protocol
+       (get value :protocol))
+    (= true (get value :verified))
+    (= canonical-value-profile (get value :profile))
+    (schema-ref? (get value :schema-ref))
+    (model/canonical-digest? (get value :value-root))
+    (bounded-positive-integer?
+     (get value :value-size)
+     max-semantic-value-bytes))))
+
+(defn semantic-link-coordinate
+  [value]
+  [(get value :role)
+   (get value :target-id)
+   (get value :target-root)])
+
+(defn semantic-link?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value semantic-link-fields #{})
+    (= semantic-link-protocol (get value :protocol))
+    (model/identifier? (get value :role))
+    (model/identifier? (get value :target-id))
+    (model/canonical-digest? (get value :target-root)))))
+
+(defn semantic-link-vector?
+  [values]
+  (truth-value
+   (and
+    (vector? values)
+    (bounded-count? (count values) 0 max-links)
+    (every? semantic-link? values)
+    (strictly-increasing-by? values semantic-link-coordinate))))
+
+(defn semantic-object?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value semantic-object-fields #{})
+    (= semantic-object-protocol (get value :protocol))
+    (model/identifier? (get value :id))
+    (schema-ref? (get value :schema-ref))
+    (model/canonical-digest? (get value :value-root))
+    (bounded-positive-integer?
+     (get value :value-size)
+     max-semantic-value-bytes)
+    (semantic-link-vector? (get value :links)))))
+
+(defn semantic-index-entry?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value semantic-index-entry-fields #{})
+    (model/identifier? (get value :id))
+    (model/canonical-digest? (get value :root)))))
+
+(defn semantic-index-entry-coordinate
+  [value]
+  [(get value :id)])
+
+(defn semantic-index?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value semantic-index-fields #{})
+    (= semantic-index-protocol (get value :protocol))
+    (let [entries (get value :entries)]
+      (and
+       (vector? entries)
+       (bounded-count? (count entries) 1 max-index-entries)
+       (every? semantic-index-entry? entries)
+       (strictly-increasing-by?
+        entries
+        semantic-index-entry-coordinate))))))
+
+(defn semantic-root-entry?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value semantic-root-entry-fields #{})
+    (model/identifier? (get value :name))
+    (model/identifier? (get value :id))
+    (model/canonical-digest? (get value :root)))))
+
+(defn semantic-root-entry-coordinate
+  [value]
+  [(get value :name)])
+
+(defn semantic-root-entry-vector?
+  [values]
+  (truth-value
+   (and
+    (vector? values)
+    (bounded-count? (count values) 1 max-root-entries)
+    (every? semantic-root-entry? values)
+    (strictly-increasing-by?
+     values
+     semantic-root-entry-coordinate))))
+
+(defn semantic-root?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value semantic-root-fields #{})
+    (= semantic-root-protocol (get value :protocol))
+    (model/identifier? (get value :application))
+    (model/identifier? (get value :namespace))
+    (model/identifier? (get value :collection))
+    (schema-ref-vector? (get value :schema-refs))
+    (model/canonical-digest? (get value :index-root))
+    (semantic-root-entry-vector? (get value :roots)))))

@@ -1,0 +1,312 @@
+(ns tahto.semantic.model-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.records :as records]
+            [tahto.semantic.model :as semantic]))
+
+(def package-root-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def package-root-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def value-root
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def object-root-a
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def object-root-b
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def index-root
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+
+(def schema-entity
+  {:protocol semantic/schema-ref-protocol
+   :schema "fixture.entity"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root-a
+   :entry "fixture.entity/spec"})
+
+(def schema-world
+  {:protocol semantic/schema-ref-protocol
+   :schema "fixture.world"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root-b
+   :entry "fixture.world/spec"})
+
+(def verification
+  {:protocol semantic/canonical-value-verification-protocol
+   :verified true
+   :profile semantic/canonical-value-profile
+   :schema-ref schema-entity
+   :value-root value-root
+   :value-size 512})
+
+(def child-link
+  {:protocol semantic/semantic-link-protocol
+   :role "world.child"
+   :target-id "entity/leaf-1"
+   :target-root object-root-a})
+
+(def parent-link
+  {:protocol semantic/semantic-link-protocol
+   :role "world.parent"
+   :target-id "world/main"
+   :target-root object-root-b})
+
+(def semantic-object
+  {:protocol semantic/semantic-object-protocol
+   :id "entity/tree-1"
+   :schema-ref schema-entity
+   :value-root value-root
+   :value-size 512
+   :links [child-link parent-link]})
+
+(def semantic-index
+  {:protocol semantic/semantic-index-protocol
+   :entries
+   [{:id "entity/tree-1" :root object-root-a}
+    {:id "world/main" :root object-root-b}]})
+
+(def semantic-root
+  {:protocol semantic/semantic-root-protocol
+   :application "fixture.world"
+   :namespace "world.a"
+   :collection "scene"
+   :schema-refs [schema-entity schema-world]
+   :index-root index-root
+   :roots
+   [{:name "document" :id "world/main" :root object-root-b}
+    {:name "tree" :id "entity/tree-1" :root object-root-a}]})
+
+(def too-long-id
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(test/print-results
+ [(test/check
+   "the semantic protocols remain additive to the closed core vocabulary"
+   [(every? semantic/semantic-protocol?
+            [semantic/schema-ref-protocol
+             semantic/canonical-value-verification-protocol
+             semantic/semantic-link-protocol
+             semantic/semantic-object-protocol
+             semantic/semantic-index-protocol
+             semantic/semantic-root-protocol])
+    (every? (fn [protocol]
+              (not (records/core-protocol? protocol)))
+            semantic/semantic-protocols)]
+   [true true])
+
+  (test/check
+   "valid closed semantic profiles are accepted"
+   [(semantic/schema-ref? schema-entity)
+    (semantic/canonical-value-verification? verification)
+    (semantic/semantic-link? child-link)
+    (semantic/semantic-object? semantic-object)
+    (semantic/semantic-index? semantic-index)
+    (semantic/semantic-root? semantic-root)]
+   [true true true true true true])
+
+  (test/check
+   "package coordinates use the canonical Hara tap owner and name form"
+   [(semantic/package-coordinate? "hara:fixture/world-specs")
+    (semantic/package-coordinate? "greenways:greenways/world-specs")
+    (semantic/package-coordinate? "fixture/world-specs")
+    (semantic/package-coordinate? "official:fixture/world-specs")
+    (semantic/package-coordinate? "hara:Fixture/world-specs")
+    (semantic/package-coordinate? "hara:fixture/world/specs")
+    (semantic/package-coordinate? "hara::fixture/world-specs")
+    (semantic/package-coordinate? "hara:fixture/")]
+   [true true false false false false false false])
+
+  (test/check
+   "package versions are exact SemVer values rather than mutable ranges"
+   [(semantic/package-version? "0.1.0")
+    (semantic/package-version? "0.1.0-dev")
+    (semantic/package-version? "1.2.3-alpha.1")
+    (semantic/package-version? "1.2.3+build.7")
+    (semantic/package-version? "1.2.3-alpha.1+build.7")
+    (semantic/package-version? "latest")
+    (semantic/package-version? "^1.2.3")
+    (semantic/package-version? "1.2")
+    (semantic/package-version? "01.2.3")
+    (semantic/package-version? "1.02.3")
+    (semantic/package-version? "1.2.03")
+    (semantic/package-version? "1.2.3-")
+    (semantic/package-version? "1.2.3+")
+    (semantic/package-version? "1.2.3-alpha..1")
+    (semantic/package-version? "1.2.3-01")
+    (semantic/package-version? "1.2.3+build..1")
+    (semantic/package-version? "1.2.3+one+two")]
+   [true true true true true
+    false false false false false false false false false false false false])
+
+  (test/check
+   "schema references require exact immutable package evidence"
+   [(semantic/schema-ref? (dissoc schema-entity :package-root))
+    (semantic/schema-ref? (assoc schema-entity :protocol "other/1"))
+    (semantic/schema-ref? (assoc schema-entity :schema-version 0))
+    (semantic/schema-ref? (assoc schema-entity :package "fixture/world-specs"))
+    (semantic/schema-ref? (assoc schema-entity :package-version "latest"))
+    (semantic/schema-ref? (assoc schema-entity :package-root "sha256:bad"))
+    (semantic/schema-ref? (assoc schema-entity :url "https://example.test"))
+    (semantic/schema-ref? (assoc schema-entity :branch "main"))
+    (semantic/schema-ref? (assoc schema-entity :path "/tmp/spec"))
+    (semantic/schema-ref? (assoc schema-entity :provider "github"))
+    (semantic/schema-ref? (assoc schema-entity :entry too-long-id))]
+   [false false false false false false false false false false false])
+
+  (test/check
+   "canonical verification is a bounded closed proof, not host authority"
+   [(semantic/canonical-value-verification? verification)
+    (semantic/canonical-value-verification?
+     (assoc verification :verified false))
+    (semantic/canonical-value-verification?
+     (assoc verification :profile "other/1"))
+    (semantic/canonical-value-verification?
+     (assoc verification :schema-ref {}))
+    (semantic/canonical-value-verification?
+     (assoc verification :value-size 0))
+    (semantic/canonical-value-verification?
+     (assoc verification
+            :value-size
+            (inc semantic/max-semantic-value-bytes)))
+    (semantic/canonical-value-verification?
+     (assoc verification :source-handle 17))]
+   [true false false false false false false])
+
+  (test/check
+   "semantic links are closed, bounded and strictly ordered"
+   [(semantic/semantic-link-vector? [])
+    (semantic/semantic-link-vector? [child-link parent-link])
+    (semantic/semantic-link-vector? [parent-link child-link])
+    (semantic/semantic-link-vector? [child-link child-link])
+    (semantic/semantic-link?
+     (assoc child-link :target-root "sha256:bad"))
+    (semantic/semantic-link?
+     (assoc child-link :source-handle 31))]
+   [true true false false false false])
+
+  (test/check
+   "semantic objects point at values rather than embedding executable content"
+   [(semantic/semantic-object? semantic-object)
+    (semantic/semantic-object? (assoc semantic-object :value {:kind "tree"}))
+    (semantic/semantic-object? (assoc semantic-object :callback inc))
+    (semantic/semantic-object? (assoc semantic-object :source-handle 31))
+    (semantic/semantic-object?
+     (assoc semantic-object :links [parent-link child-link]))
+    (semantic/semantic-object?
+     (assoc semantic-object
+            :value-size
+            (inc semantic/max-semantic-value-bytes)))]
+   [true false false false false false])
+
+  (test/check
+   "semantic indexes require non-empty strictly ordered stable IDs"
+   [(semantic/semantic-index? semantic-index)
+    (semantic/semantic-index?
+     (assoc semantic-index :entries []))
+    (semantic/semantic-index?
+     (assoc semantic-index
+            :entries
+            [{:id "world/main" :root object-root-b}
+             {:id "entity/tree-1" :root object-root-a}]))
+    (semantic/semantic-index?
+     (assoc semantic-index
+            :entries
+            [{:id "entity/tree-1" :root object-root-a}
+             {:id "entity/tree-1" :root object-root-b}]))
+    (semantic/semantic-index?
+     (assoc semantic-index :entries [nil]))
+    (semantic/semantic-index?
+     (assoc-in semantic-index [:entries 0 :path] "/tmp/object"))]
+   [true false false false false false])
+
+  (test/check
+   "semantic roots pin sorted schemas, one index and named entry roots"
+   [(semantic/semantic-root? semantic-root)
+    (semantic/semantic-root?
+     (assoc semantic-root :schema-refs [schema-world schema-entity]))
+    (semantic/semantic-root?
+     (assoc semantic-root :schema-refs [schema-entity schema-entity]))
+    (semantic/semantic-root?
+     (assoc semantic-root
+            :roots
+            [(second (get semantic-root :roots))
+             (first (get semantic-root :roots))]))
+    (semantic/semantic-root?
+     (assoc semantic-root
+            :roots
+            [(first (get semantic-root :roots))
+             (first (get semantic-root :roots))]))
+    (semantic/semantic-root? (assoc semantic-root :index-root "sha256:bad"))
+    (semantic/semantic-root? (assoc semantic-root :application "Fixture.World"))
+    (semantic/semantic-root? (assoc semantic-root :source-handle 41))]
+   [true false false false false false false false])
+
+  (test/check
+   "field-wise ordering preserves prefix and numeric coordinate semantics"
+   (let [schema-a (assoc schema-entity :schema "fixture.a")
+         schema-aa (assoc schema-entity :schema "fixture.aa")
+         schema-v2 (assoc schema-entity :schema-version 2)
+         schema-v10 (assoc schema-entity :schema-version 10)
+         link-a (assoc child-link :role "world.a")
+         link-aa (assoc child-link :role "world.aa")
+         index-a {:id "entity/a" :root object-root-a}
+         index-aa {:id "entity/aa" :root object-root-b}
+         root-a {:name "a" :id "entity/a" :root object-root-a}
+         root-aa {:name "aa" :id "entity/aa" :root object-root-b}]
+     [(semantic/schema-ref-vector? [schema-a schema-aa])
+      (semantic/schema-ref-vector? [schema-aa schema-a])
+      (semantic/schema-ref-vector? [schema-v2 schema-v10])
+      (semantic/schema-ref-vector? [schema-v10 schema-v2])
+      (semantic/semantic-link-vector? [link-a link-aa])
+      (semantic/semantic-link-vector? [link-aa link-a])
+      (semantic/semantic-index?
+       {:protocol semantic/semantic-index-protocol
+        :entries [index-a index-aa]})
+      (semantic/semantic-index?
+       {:protocol semantic/semantic-index-protocol
+        :entries [index-aa index-a]})
+      (semantic/semantic-root-entry-vector? [root-a root-aa])
+      (semantic/semantic-root-entry-vector? [root-aa root-a])])
+   [true false true false true false true false true false])
+
+  (test/check
+   "the shared collection bound accepts each exact maximum and rejects one more"
+   [(semantic/bounded-count?
+     semantic/max-schema-refs 1 semantic/max-schema-refs)
+    (semantic/bounded-count?
+     (inc semantic/max-schema-refs) 1 semantic/max-schema-refs)
+    (semantic/bounded-count?
+     semantic/max-links 0 semantic/max-links)
+    (semantic/bounded-count?
+     (inc semantic/max-links) 0 semantic/max-links)
+    (semantic/bounded-count?
+     semantic/max-index-entries 1 semantic/max-index-entries)
+    (semantic/bounded-count?
+     (inc semantic/max-index-entries) 1 semantic/max-index-entries)
+    (semantic/bounded-count?
+     semantic/max-root-entries 1 semantic/max-root-entries)
+    (semantic/bounded-count?
+     (inc semantic/max-root-entries) 1 semantic/max-root-entries)
+    (semantic/bounded-count? 0 1 semantic/max-schema-refs)
+    (semantic/bounded-count? 0 0 semantic/max-links)]
+   [true false true false true false true false false true])
+
+  (test/check
+   "configured value-size boundaries are exact"
+   [(semantic/canonical-value-verification?
+     (assoc verification
+            :value-size
+            semantic/max-semantic-value-bytes))
+    (semantic/canonical-value-verification?
+     (assoc verification
+            :value-size
+            (inc semantic/max-semantic-value-bytes)))
+    (semantic/semantic-object?
+     (assoc semantic-object
+            :value-size
+            semantic/max-semantic-value-bytes))]
+   [true false true])])
