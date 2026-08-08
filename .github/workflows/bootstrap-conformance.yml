@@ -85,7 +85,7 @@ jobs:
   hara-state:
     runs-on: ubuntu-latest
     env:
-      HARA_REVISION: 5577f2ac5d9ef4ee65264b4fe34588bbaf955398
+      HARA_REVISION: 64b8a3b2c1f97729dfec2039a4c8b02c2bff55b6
       CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
