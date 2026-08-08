@@ -2,40 +2,39 @@
 
 ## Status
 
-This document defines the application boundary used by Tahto's pure-HAL object
-store. It is an integration profile under review, not a Tahto native ABI.
+This is the active application boundary for Tahto's pure-HAL metadata and object
+kernels. It is an integration profile over generic Hara/Hoplite capabilities,
+not a Tahto native ABI.
 
 ## Decision
 
 Tahto domain and orchestration code is authored in HAL. Operating-system
-mechanics remain below the language boundary as generic installed
-capabilities:
+mechanics remain below the language boundary as generic installed capabilities:
 
 ```text
 Tahto HAL
-  state transitions · authorization · quotas · object graph · recovery policy
+  state · authorization · quotas · graph · history · recovery
         |
-        | closed Tahto effect
+        | closed Tahto transition/effect
         v
-Tahto HAL capability interpreter
-  exact mapping · generic request validation · generic result translation
+Tahto HAL capability adapter
+  exact mapping · request validation · result translation
         |
         | std.foundation.host/call
         v
-generic Hara host capability
-  bounded byte movement · hashing · atomic storage · response sources
+generic Hara capability
+  canonical values · bounded bytes · atomic storage · response sources
         |
         v
-installed driver and operating system
+trusted Hoplite provider and operating system
 ```
 
-A native provider descriptor may have its own ABI version, but that descriptor
-is selected by trusted host installation. Its ABI identity is not an argument,
-field or choice available to Tahto.
+A provider descriptor may have a native ABI internally, but trusted host
+installation selects it. ABI identity is never an application argument or field.
 
-## Host call shape
+## Portable host call shape
 
-Every prepared call mirrors the portable Hara host boundary:
+Every prepared call contains exactly:
 
 ```clojure
 {:service "hara.blob"
@@ -45,21 +44,20 @@ Every prepared call mirrors the portable Hara host boundary:
               ...}]}
 ```
 
-This corresponds to:
+This mirrors:
 
 ```clojure
 (std.foundation.host/call service operation request)
 ```
 
-The wrapper packages `request` into the one-element argument vector. A call
-plan cannot contain `:native-abi`, a driver, path, credential, package or native
-library identity.
+A call plan cannot contain a native ABI, driver, path, credential, package,
+callback, command, executable or remote catalogue.
 
 ## Authority boundary
 
-Tahto's object kernel emits only values accepted by
-`tahto.store.host/effect?`. The HAL capability interpreter accepts those values
-and exposes a generic host request only after a second exact-shape validation.
+Tahto's object kernel emits only closed values accepted by
+`tahto.store.host/effect?`. The HAL capability adapter exposes a generic host
+request only after a second exact-shape validation.
 
 Neither layer accepts:
 
@@ -75,19 +73,17 @@ commands or executables
 raw request-body bytes
 ```
 
-Opaque source handles are transport resources. A positive number alone grants
-no authority: production hosts must resolve it with the exact owning work and
-resource scope.
+Native source handles are transport resources. A positive number alone grants
+no authority. Production ingress and egress resolve a handle only through the
+exact opaque request context, owning work and live handle registration.
 
 ## Generic blob profile
 
 ```text
 service: hara.blob
-request protocol: hara.blob-request/1
-result protocol: hara.blob-result/1
+request: hara.blob-request/1
+result:  hara.blob-result/1
 ```
-
-The installed provider ABI is deliberately absent from the HAL profile.
 
 ### Effect mapping
 
@@ -99,26 +95,12 @@ The installed provider ABI is deliberately absent from the HAL profile.
 | `upload/verify-install` | `staging/verify-commit` |
 | `object/read-range` | `object/open-source` |
 
-`manifest/verify` is not mapped by this profile. Manifest parsing remains HAL
-work and needs a separate bounded small-value read profile.
+`manifest/verify` is intentionally not mapped. Manifest interpretation remains
+HAL work and is tracked by #19 over a separate bounded small-value capability.
 
-## Staging identity and source identity
+## Upload requests
 
-A staging key and a native handle are different things.
-
-- `:staging-key` is a bounded logical key used to create or resume server-owned
-  staging state. It is never interpreted as a path.
-- `:source-handle` is a work-scoped opaque source supplied by the host, such as
-  an Nginx request body.
-- physical paths, file descriptors and sink objects remain entirely below the
-  host boundary.
-
-This distinction preserves resumable uploads across requests without treating
-an application upload ID as a file handle or native authority.
-
-## Requests
-
-### `staging/open`
+### Open
 
 ```clojure
 {:protocol "hara.blob-request/1"
@@ -129,10 +111,10 @@ an application upload ID as a file handle or native authority.
  :media-type "application/octet-stream"}
 ```
 
-The host creates or resumes server-owned staging state and returns its verified
-current offset. The offset cannot exceed the declared object size.
+A staging key is bounded logical metadata, never a physical path. The provider
+creates or resumes server-owned staging and reports its verified offset.
 
-### `staging/append-from-source`
+### Append
 
 ```clojure
 {:protocol "hara.blob-request/1"
@@ -143,37 +125,23 @@ current offset. The offset cannot exceed the declared object size.
  :source-handle 17}
 ```
 
-The host resolves the source only under the owning work, consumes exactly
-`:length` bytes, rejects short or excess input, and closes the source exactly
-once. The operation name is transport-neutral: a CLI or test host can supply a
-source that is not an HTTP request body.
+The host resolves the exact request/work source, consumes exactly `length`
+bytes, rejects short or excess input and finishes it exactly once.
 
-### `staging/abort`
+### Abort and install
 
-```clojure
-{:protocol "hara.blob-request/1"
- :operation "staging/abort"
- :staging-key "upload.a"}
-```
+`staging/abort` is mechanically idempotent. `staging/verify-commit` recomputes
+the digest over actual staged bytes and atomically installs immutable content.
+Tahto separately decides whether an application upload may abort or whether the
+verified installation may enter its namespace graph.
 
-Abort is idempotent at the generic storage layer. Tahto still decides when an
-application upload may abort.
+`tahto.store.upload` treats every vault transition as candidate state until the
+one matching generic result passes the same closed validator used by tests and
+production.
 
-### `staging/verify-commit`
+## Immutable response sources
 
-```clojure
-{:protocol "hara.blob-request/1"
- :operation "staging/verify-commit"
- :staging-key "upload.a"
- :expected-digest "sha256:..."
- :expected-size 4096}
-```
-
-The generic driver verifies actual bytes and atomically installs immutable
-content. Tahto separately verifies that the completion matches its upload state
-before accepting the object into its graph.
-
-### `object/open-source`
+Tahto first authorizes and plans a half-open range, then calls:
 
 ```clojure
 {:protocol "hara.blob-request/1"
@@ -183,130 +151,68 @@ before accepting the object into its graph.
  :length 4096}
 ```
 
-Tahto HAL has already authorized the object and planned the half-open range.
-The generic result returns the exact offset, length and a work-scoped immutable
-source handle. Hoplite streams that source with backpressure; object bytes do
-not travel through HTA host-call events.
-
-## Result translation
-
-Generic results use `hara.blob-result/1` and exact operation-specific fields.
-The HAL interpreter validates each result against its originating call.
-
-A successful generic commit becomes the existing Tahto installation result in
-HAL. A successful source open becomes:
+The provider result must match the exact digest, offset and length and contain no
+extra fields. HAL translates it through the existing opened-range result and
+projects only:
 
 ```clojure
-{:protocol "tahto.store.host-result/1"
- :operation "object/read-range"
- :opened true
- :digest "sha256:..."
- :start 0
- :end 4096
- :length 4096
- :source-handle 31}
+{:protocol "hara.response-source/1"
+ :source-handle 31
+ :offset 0
+ :length 4096}
 ```
 
-The handle is response-lifetime transport state and must never be serialized as
-portable Tahto application state.
+The descriptor contains no Tahto coordinate, digest, provider, path, credential,
+HTTP policy or request identity. It is ephemeral response-lifetime evidence and
+must never enter objects, metadata snapshots, commits, heads, receipts, backups
+or semantic roots.
+
+Hoplite validates the descriptor against its request-scoped native source,
+streams under Nginx backpressure and closes the source on every terminal path.
+
+## Generic metadata profile
+
+Metadata follows the same rule through:
+
+```text
+service: hara.store
+request: hara.store-request/1
+result:  hara.store-result/1
+operations: load · initialize · compare-and-swap · receipt
+```
+
+The store persists opaque canonical values and receipts with exact revision CAS.
+Tahto snapshot, transaction, replay and receipt meaning remains in HAL.
+
+Injected and production execution both use the same preparation and exact result
+validators. `nil` is accepted only where the operation profile allows absence.
+
+The Hoplite memory and SQLite providers are now implemented. Tahto's `native/`
+tree is frozen parity evidence and is removed by #17 after production transfer
+and semantic recovery gates complete.
 
 ## Execution profiles
 
-The mapping and result translation functions remain deterministic. The same
-closed validator is used for injected tests and installed production providers.
-A successful host promise is not accepted merely because it completed.
+The same deterministic adapters run in:
 
-### Pure or injected execution
+1. pure HAL tests with injected memory capabilities;
+2. Hara CLI hosts with installed providers; and
+3. Hoplite workers with request/body/source resources bound to Nginx lifetimes.
 
-Tests and non-Hoplite hosts can supply an ordinary HAL function:
-
-```clojure
-(capability/execute-with
- state
- effect
- (fn [service operation request]
-   (in-memory-capability service operation request)))
-```
-
-`execute-with` prepares the exact generic call and invokes the supplied
-capability only after the call has passed the closed request profile. The result
-then passes through `accept-result`, including exact operation, staging key,
-offset, length, size and digest matching, before the original Tahto state is
-returned in `model/ok`.
-
-Malformed and mismatched provider values become closed
-`tahto.capability/result-*` failures. An injected provider cannot bypass the
-same validation that production uses.
-
-### Production host execution
-
-A Hoplite handler or another coroutine-enabled Hara host calls:
-
-```clojure
-(coroutine/await
- (capability/execute state effect))
-```
-
-`capability/execute` is an async HAL function. It invokes:
-
-```clojure
-(foundation-host/call service operation request)
-```
-
-After the promise settles, the result passes through the same pure
-`accept-result` function used by `execute-with`. Host rejection remains a
-rejected coroutine operation; application code decides how that failure affects
-its transaction or HTTP response.
-
-The interpreter therefore runs unchanged in:
-
-1. **Pure HAL tests** — injected in-memory capability.
-2. **Hara CLI hosts** — installed generic blob driver.
-3. **Hoplite** — registered provider ABI with request and response resources
-   bound to Nginx work lifetimes.
-
-No public raw host-call helper is a substitute for result validation.
-
-## Metadata follows the same rule
-
-`tahto.store.provider` targets `hara.store`, not `tahto.metadata`. The generic
-store persists opaque canonical values and receipt payloads with revision CAS.
-Tahto snapshot and receipt meaning remains in HAL.
-
-Metadata has several preparation functions rather than one domain effect, so
-its execution surface accepts the prepared result:
-
-```clojure
-(provider/execute-prepared-with
- (provider/prepare-load state)
- in-memory-store)
-
-(coroutine/await
- (provider/execute-prepared
-  (provider/prepare-compare-and-swap transition verification)))
-```
-
-Both paths validate the exact `hara.store` response before returning it. `nil`
-is accepted only where the operation profile allows absence (`load` and
-`receipt`); it is rejected for `initialize` and `compare-and-swap`. Applied and
-replayed receipt meaning is still constructed in Tahto HAL after the generic
-response is validated.
-
-The existing Rust metadata code under `native/` is a transitional migration
-source for Hoplite issue #45. It is not Tahto's implementation architecture and
-will be removed after the generic driver passes equivalent conformance.
+A resolved promise or successful native status never bypasses HAL result
+validation.
 
 ## Conformance laws
 
-- Tahto application semantics remain in HAL.
+- Tahto application and semantic policy remains in HAL.
 - Every mapped effect produces one exact generic request.
 - Unknown or malformed effects expose no host call.
-- HAL values cannot select a native ABI, provider or driver.
-- Generic requests and results reject extra authority-bearing fields.
-- Native handles are work-scoped and never durable application state.
+- HAL values cannot select a native ABI, provider, driver or path.
+- Requests and results reject extra authority-bearing fields.
+- Source authority is exact request context + work + handle.
+- Native handles are never durable application state.
 - Range requests use offset plus length across the generic boundary.
-- Result translation happens in HAL and requires exact request/result identity.
-- Injected and production execution share the same result validator.
-- Host cancellation precedes work-scope closure.
-- Production and in-memory capabilities are substitutable beneath the same HAL
-  interpreter.
+- Result translation requires exact originating request/result identity.
+- Injected and production execution share validators.
+- Provider cancellation and request cleanup close live sources exactly once.
+- Memory and production providers are substitutable beneath the same HAL laws.
