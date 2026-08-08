@@ -21,7 +21,7 @@
   {:protocol semantic/schema-ref-protocol
    :schema "fixture.entity"
    :schema-version 1
-   :package "fixture/world-specs"
+   :package "hara:fixture/world-specs"
    :package-version "0.1.0"
    :package-root package-root-a
    :entry "fixture.entity/spec"})
@@ -30,7 +30,7 @@
   {:protocol semantic/schema-ref-protocol
    :schema "fixture.world"
    :schema-version 1
-   :package "fixture/world-specs"
+   :package "hara:fixture/world-specs"
    :package-version "0.1.0"
    :package-root package-root-b
    :entry "fixture.world/spec"})
@@ -109,10 +109,45 @@
    [true true true true true true])
 
   (test/check
+   "package coordinates use the canonical Hara tap owner and name form"
+   [(semantic/package-coordinate? "hara:fixture/world-specs")
+    (semantic/package-coordinate? "greenways:greenways/world-specs")
+    (semantic/package-coordinate? "fixture/world-specs")
+    (semantic/package-coordinate? "official:fixture/world-specs")
+    (semantic/package-coordinate? "hara:Fixture/world-specs")
+    (semantic/package-coordinate? "hara:fixture/world/specs")
+    (semantic/package-coordinate? "hara::fixture/world-specs")
+    (semantic/package-coordinate? "hara:fixture/")]
+   [true true false false false false false false])
+
+  (test/check
+   "package versions are exact SemVer values rather than mutable ranges"
+   [(semantic/package-version? "0.1.0")
+    (semantic/package-version? "0.1.0-dev")
+    (semantic/package-version? "1.2.3-alpha.1")
+    (semantic/package-version? "1.2.3+build.7")
+    (semantic/package-version? "1.2.3-alpha.1+build.7")
+    (semantic/package-version? "latest")
+    (semantic/package-version? "^1.2.3")
+    (semantic/package-version? "1.2")
+    (semantic/package-version? "01.2.3")
+    (semantic/package-version? "1.02.3")
+    (semantic/package-version? "1.2.03")
+    (semantic/package-version? "1.2.3-")
+    (semantic/package-version? "1.2.3+")
+    (semantic/package-version? "1.2.3-alpha..1")
+    (semantic/package-version? "1.2.3-01")
+    (semantic/package-version? "1.2.3+build..1")
+    (semantic/package-version? "1.2.3+one+two")]
+   [true true true true true
+    false false false false false false false false false false false false])
+
+  (test/check
    "schema references require exact immutable package evidence"
    [(semantic/schema-ref? (dissoc schema-entity :package-root))
     (semantic/schema-ref? (assoc schema-entity :protocol "other/1"))
     (semantic/schema-ref? (assoc schema-entity :schema-version 0))
+    (semantic/schema-ref? (assoc schema-entity :package "fixture/world-specs"))
     (semantic/schema-ref? (assoc schema-entity :package-version "latest"))
     (semantic/schema-ref? (assoc schema-entity :package-root "sha256:bad"))
     (semantic/schema-ref? (assoc schema-entity :url "https://example.test"))
@@ -120,7 +155,7 @@
     (semantic/schema-ref? (assoc schema-entity :path "/tmp/spec"))
     (semantic/schema-ref? (assoc schema-entity :provider "github"))
     (semantic/schema-ref? (assoc schema-entity :entry too-long-id))]
-   [false false false false false false false false false false])
+   [false false false false false false false false false false false])
 
   (test/check
    "canonical verification is a bounded closed proof, not host authority"

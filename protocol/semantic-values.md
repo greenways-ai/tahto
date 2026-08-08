@@ -60,7 +60,7 @@ field.
 {:protocol "tahto.schema-ref/1"
  :schema "greenways.world.entity"
  :schema-version 1
- :package "greenways/world-specs"
+ :package "hara:greenways/world-specs"
  :package-version "0.1.0"
  :package-root "sha256:..."
  :entry "greenways.world.entity/spec"}
@@ -70,10 +70,15 @@ Fields:
 
 - `schema` — stable application-neutral schema identity;
 - `schema-version` — positive integer schema version;
-- `package` — exact Hara package coordinate;
-- `package-version` — immutable version beginning with a decimal digit;
+- `package` — canonical Hara package coordinate in exact `tap:owner/name` form;
+- `package-version` — exact SemVer release, never a range or mutable alias;
 - `package-root` — canonical SHA-256 root of the installed immutable package;
 - `entry` — reviewed exported Hara validator value.
+
+Hara accepts shorthand package coordinates at project-editing boundaries, but
+normalizes them before resolution. Tahto stores only the normalized coordinate.
+Unqualified coordinates, the `official:` compatibility alias, version ranges and
+mutable names such as `latest` are invalid semantic evidence.
 
 There is no URL, branch, registry origin, path, provider, credential or command.
 The package root is mandatory.
@@ -207,6 +212,8 @@ links per semantic object  256
 index entries              4,096
 named roots                64
 canonical value bytes      1,048,576
+package coordinate         386 ASCII characters
+package version            128 ASCII characters
 ```
 
 The limits are protocol values in `tahto.semantic.model` and have exact boundary
@@ -224,8 +231,8 @@ coverage.
 
 ## Security laws
 
-- exact immutable package roots are mandatory;
-- mutable package aliases such as `latest` are invalid;
+- exact normalized package coordinates and immutable package roots are mandatory;
+- package versions are exact SemVer values, not ranges or mutable aliases;
 - package locations and providers are not representable;
 - application value bytes remain behind immutable roots;
 - response-source and request-body handles are not semantic values;

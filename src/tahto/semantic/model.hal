@@ -42,9 +42,25 @@
 (def max-index-entries 4096)
 (def max-root-entries 64)
 (def max-semantic-value-bytes 1048576)
+(def max-package-coordinate-length 386)
+(def max-package-version-length 128)
 
-(def version-start-characters
+(def decimal-digits
   #{"0" "1" "2" "3" "4" "5" "6" "7" "8" "9"})
+
+(def package-coordinate-characters
+  #{"0" "1" "2" "3" "4" "5" "6" "7" "8" "9"
+    "a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m"
+    "n" "o" "p" "q" "r" "s" "t" "u" "v" "w" "x" "y" "z"
+    "-" "_" "."})
+
+(def semver-identifier-characters
+  #{"0" "1" "2" "3" "4" "5" "6" "7" "8" "9"
+    "a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m"
+    "n" "o" "p" "q" "r" "s" "t" "u" "v" "w" "x" "y" "z"
+    "A" "B" "C" "D" "E" "F" "G" "H" "I" "J" "K" "L" "M"
+    "N" "O" "P" "Q" "R" "S" "T" "U" "V" "W" "X" "Y" "Z"
+    "-"})
 
 (def schema-ref-fields
   #{:protocol
@@ -115,13 +131,123 @@
   [value maximum]
   (bounded-count? value 1 maximum))
 
+(defn characters-valid?
+  [value allowed]
+  (truth-value
+   (and
+    (string? value)
+    (loop [index 0]
+      (if
+       (= index (count value))
+       true
+       (if
+        (has? allowed (string/slice value index (inc index)))
+        (recur (inc index))
+        false))))))
+
+(defn package-coordinate-component?
+  [value]
+  (truth-value
+   (and
+    (model/non-empty-string? value)
+    (<= (count value) 128)
+    (characters-valid? value package-coordinate-characters))))
+
+(defn package-coordinate?
+  [value]
+  (truth-value
+   (and
+    (string? value)
+    (<= (count value) max-package-coordinate-length)
+    (let [tap-parts (string/split value ":")]
+      (and
+       (= 2 (count tap-parts))
+       (package-coordinate-component? (nth tap-parts 0))
+       (not (= "official" (nth tap-parts 0)))
+       (let [package-parts (string/split (nth tap-parts 1) "/")]
+         (and
+          (= 2 (count package-parts))
+          (package-coordinate-component? (nth package-parts 0))
+          (package-coordinate-component? (nth package-parts 1)))))))))
+
+(defn numeric-semver-identifier?
+  [value]
+  (truth-value
+   (and
+    (model/non-empty-string? value)
+    (characters-valid? value decimal-digits)
+    (or
+     (= 1 (count value))
+     (not (= "0" (string/slice value 0 1)))))))
+
+(defn semver-identifier?
+  [value]
+  (truth-value
+   (and
+    (model/non-empty-string? value)
+    (characters-valid? value semver-identifier-characters))))
+
+(defn prerelease-identifier?
+  [value]
+  (truth-value
+   (and
+    (semver-identifier? value)
+    (or
+     (not (characters-valid? value decimal-digits))
+     (numeric-semver-identifier? value)))))
+
+(defn semver-core?
+  [value]
+  (truth-value
+   (and
+    (string? value)
+    (let [parts (string/split value ".")]
+      (and
+       (= 3 (count parts))
+       (every? numeric-semver-identifier? parts))))))
+
+(defn semver-identifiers?
+  [value predicate]
+  (truth-value
+   (and
+    (model/non-empty-string? value)
+    (let [parts (string/split value ".")]
+      (and
+       (> (count parts) 0)
+       (every? predicate parts))))))
+
+(defn split-first
+  [value separator]
+  (let [index (string/index-of value separator)]
+    (if
+     (< index 0)
+     [value nil]
+     [(string/slice value 0 index)
+      (string/slice value (inc index))])))
+
 (defn package-version?
   [value]
   (truth-value
    (and
-    (model/identifier? value)
-    (has? version-start-characters
-          (string/slice value 0 1)))))
+    (string? value)
+    (> (count value) 0)
+    (<= (count value) max-package-version-length)
+    (= (string/index-of value "+")
+       (string/last-index-of value "+"))
+    (let [build-split (split-first value "+")
+          version-and-prerelease (nth build-split 0)
+          build (nth build-split 1)
+          prerelease-split (split-first version-and-prerelease "-")
+          core (nth prerelease-split 0)
+          prerelease (nth prerelease-split 1)]
+      (and
+       (semver-core? core)
+       (or
+        (nil? prerelease)
+        (semver-identifiers? prerelease prerelease-identifier?))
+       (or
+        (nil? build)
+        (semver-identifiers? build semver-identifier?)))))))
 
 (defn coordinate-field-compare
   [left right]
@@ -188,7 +314,7 @@
     (= schema-ref-protocol (get value :protocol))
     (model/identifier? (get value :schema))
     (model/positive-integer? (get value :schema-version))
-    (model/identifier? (get value :package))
+    (package-coordinate? (get value :package))
     (package-version? (get value :package-version))
     (model/canonical-digest? (get value :package-root))
     (model/identifier? (get value :entry)))))
