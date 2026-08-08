@@ -39,6 +39,7 @@ jobs:
           test -f src/tahto/store/history.hal
           test -f src/tahto/store/transaction.hal
           test -f src/tahto/store/provider.hal
+          test -f src/tahto/semantic/model.hal
           test -f src/tahto/sync/device.hal
           test -f src/tahto/sync/session.hal
           test -f src/tahto/service/state.hal
@@ -54,6 +55,7 @@ jobs:
           test -f test/tahto/store/response_source_test.hal
           test -f test/tahto/store/memory_blob_test.hal
           test -f test/tahto/store/memory_store_test.hal
+          test -f test/tahto/semantic/model_test.hal
           test -f test/tahto/sync/device_test.hal
           test -f test/tahto/sync/session_test.hal
           test -f test/tahto/sync/two_device_object_test.hal
@@ -66,6 +68,7 @@ jobs:
           test -f protocol/upload-integration.md
           test -f protocol/response-sources.md
           test -f protocol/two-device-object-transfer.md
+          test -f protocol/semantic-values.md
 
           grep -F '(def host-service "hara.blob")' src/tahto/store/capability.hal
           grep -F '(def host-service "hara.store")' src/tahto/store/provider.hal
@@ -75,6 +78,13 @@ jobs:
           grep -F 'portable/response-source?' src/tahto/store/response_source.hal
           grep -F '(ns tahto.store.memory-blob' src/tahto/store/memory_blob.hal
           grep -F '(ns tahto.store.memory-store' src/tahto/store/memory_store.hal
+          grep -F '(ns tahto.semantic.model' src/tahto/semantic/model.hal
+          grep -F '"tahto.schema-ref/1"' src/tahto/semantic/model.hal
+          grep -F '"tahto.canonical-value-verification/1"' src/tahto/semantic/model.hal
+          grep -F '"tahto.semantic-object/1"' src/tahto/semantic/model.hal
+          grep -F '"tahto.semantic-index/1"' src/tahto/semantic/model.hal
+          grep -F '"tahto.semantic-root/1"' src/tahto/semantic/model.hal
+          grep -F '(ns tahto.semantic.model-test' test/tahto/semantic/model_test.hal
           grep -F '(ns tahto.sync.two-device-object-test' test/tahto/sync/two_device_object_test.hal
           grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
 
@@ -89,6 +99,10 @@ jobs:
           ! grep -R -F ':native-abi' src/tahto
           ! grep -R -F '(def host-service "tahto.' src/tahto
           ! grep -R -F '"tahto-metadata-store/1"' src/tahto
+          ! grep -R -F ':source-handle' src/tahto/semantic
+          ! grep -R -F ':provider' src/tahto/semantic
+          ! grep -R -F ':path' src/tahto/semantic
+          ! grep -R -F ':url' src/tahto/semantic
           ! grep -F 'object-transfer execution and native response-source streaming remain' README.md
 
   hara-state:
