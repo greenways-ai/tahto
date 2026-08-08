@@ -56,6 +56,7 @@ jobs:
           test -f test/tahto/store/memory_store_test.hal
           test -f test/tahto/sync/device_test.hal
           test -f test/tahto/sync/session_test.hal
+          test -f test/tahto/sync/two_device_object_test.hal
           test -f test/tahto/service/state_test.hal
           test -f protocol/services.md
           test -f protocol/transactions.md
@@ -64,6 +65,7 @@ jobs:
           test -f protocol/host-capabilities.md
           test -f protocol/upload-integration.md
           test -f protocol/response-sources.md
+          test -f protocol/two-device-object-transfer.md
 
           grep -F '(def host-service "hara.blob")' src/tahto/store/capability.hal
           grep -F '(def host-service "hara.store")' src/tahto/store/provider.hal
@@ -73,6 +75,7 @@ jobs:
           grep -F 'portable/response-source?' src/tahto/store/response_source.hal
           grep -F '(ns tahto.store.memory-blob' src/tahto/store/memory_blob.hal
           grep -F '(ns tahto.store.memory-store' src/tahto/store/memory_store.hal
+          grep -F '(ns tahto.sync.two-device-object-test' test/tahto/sync/two_device_object_test.hal
           grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
           ! grep -R -F '(def native-abi' src/tahto
           ! grep -R -F ':native-abi' src/tahto
