@@ -77,10 +77,19 @@ jobs:
           grep -F '(ns tahto.store.memory-store' src/tahto/store/memory_store.hal
           grep -F '(ns tahto.sync.two-device-object-test' test/tahto/sync/two_device_object_test.hal
           grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
+
+          grep -F '## Semantic Fabric release train' README.md
+          grep -F 'service: hara.store' protocol/metadata-store.md
+          grep -F '"metadataHost" "generic-installed-hara-store-no-request-selection"' src/tahto/protocol/descriptor.hal
+          grep -F '"objectResponseSource" "request-scoped-transport-ready"' src/tahto/protocol/descriptor.hal
+          grep -F '"portableTwoDeviceLaw" "ready"' src/tahto/protocol/descriptor.hal
+          grep -F '"semanticFabric" "planned"' src/tahto/protocol/descriptor.hal
+
           ! grep -R -F '(def native-abi' src/tahto
           ! grep -R -F ':native-abi' src/tahto
           ! grep -R -F '(def host-service "tahto.' src/tahto
           ! grep -R -F '"tahto-metadata-store/1"' src/tahto
+          ! grep -F 'object-transfer execution and native response-source streaming remain' README.md
 
   hara-state:
     runs-on: ubuntu-latest
@@ -119,5 +128,5 @@ jobs:
           components: rustfmt
       - name: Check the transitional metadata source formatting
         run: cargo fmt --manifest-path native/Cargo.toml --all -- --check
-      - name: Preserve migration-source behavior until Hoplite #45 replaces it
+      - name: Preserve frozen migration behavior until issue #17 removes it
         run: cargo test --locked --quiet --manifest-path native/Cargo.toml --workspace
