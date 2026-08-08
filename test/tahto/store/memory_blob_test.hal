@@ -93,9 +93,10 @@
      [registered
       duplicate
       malformed
-      (get (memory-blob/source memory 17) :work-id)
-      (get (memory-blob/source memory 17) :consumed)])
-   [true false false "work.a" false])
+      (get (memory-blob/input-source-entry memory 17) :work-id)
+      (get (memory-blob/input-source-entry memory 17) :consumed)
+      (get (memory-blob/input-source-entry memory 17) :closed)])
+   [true false false "work.a" false false])
 
   (test/check
    "the pure-HAL provider executes open resume append commit and range source"
@@ -124,7 +125,7 @@
          ranged
          (capability/execute-with domain-state range-effect invoke)
          opened-source
-         (memory-blob/opened-source
+         (memory-blob/output-source-entry
           memory
           (get-in ranged [:value :source-handle]))
          close-first
@@ -146,11 +147,13 @@
       (get-in resumed [:value :offset])
       (get appended-second :ok)
       (get-in appended-second [:value :offset])
-      (get (memory-blob/source memory 17) :consumed)
-      (get (memory-blob/source memory 18) :consumed)
+      (get (memory-blob/input-source-entry memory 17) :consumed)
+      (get (memory-blob/input-source-entry memory 17) :closed)
+      (get (memory-blob/input-source-entry memory 18) :consumed)
+      (get (memory-blob/input-source-entry memory 18) :closed)
       (get committed :ok)
-      (get (memory-blob/object memory digest-a) :size)
-      (memory-blob/staging memory "upload.a")
+      (get (memory-blob/object-entry memory digest-a) :size)
+      (memory-blob/staging-entry memory "upload.a")
       (get installation :installed)
       (get ranged :ok)
       (get opened-source :work-id)
@@ -159,7 +162,7 @@
       close-first
       close-second
       (get
-       (memory-blob/opened-source
+       (memory-blob/output-source-entry
         memory
         (get-in ranged [:value :source-handle]))
        :closed)])
@@ -172,6 +175,8 @@
     4
     true
     9
+    true
+    true
     true
     true
     true
@@ -199,7 +204,7 @@
      [(get opened :ok)
       (get aborted :ok)
       (get-in aborted [:value :aborted])
-      (memory-blob/staging memory "upload.a")
+      (memory-blob/staging-entry memory "upload.a")
       (get replayed :ok)
       (get-in replayed [:value :aborted])])
    [true true true nil true true])
