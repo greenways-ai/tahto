@@ -191,6 +191,11 @@ index        logical ID
 named roots  name
 ```
 
+Comparison is field-wise. String fields use lexical ordering and
+`schema-version` uses numeric ordering. Coordinates are not flattened into a
+delimiter-joined string, so ordinary prefix ordering such as `a` before `aa`
+remains stable.
+
 All nested maps are closed. Unknown fields fail even when the extra value appears
 inert.
 
