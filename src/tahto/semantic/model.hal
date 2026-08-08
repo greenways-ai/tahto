@@ -114,8 +114,9 @@
 
 (defn coordinate-part
   [value]
-  (let [text (str value)]
-    (str (count text) ":" text)))
+  ;; The delimiter is not admitted by Tahto identifiers or canonical digests,
+  ;; so field-wise concatenation preserves deterministic lexical ordering.
+  (str value "|"))
 
 (defn strictly-increasing-by?
   [values coordinate]
