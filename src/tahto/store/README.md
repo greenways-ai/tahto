@@ -4,14 +4,15 @@ This directory contains the Hara-owned TAHTO state, transaction and
 capability-interpreter logic.
 
 ```text
-model.hal       canonical identity, limits and immutable state
-host.hal        closed Tahto domain effects and result validation
-capability.hal  pure-HAL mapping to generic blob/source capabilities
-graph.hal       verified manifests, shared closure, roots and dry-run GC
-vault.hal       uploads, installation, namespace references, quotas and ranges
-history.hal     immutable commits, CAS heads, backups, restore and receipts
-transaction.hal atomic verified request-to-metadata commit plans
-provider.hal    pure-HAL mapping to a generic durable value store
+model.hal        canonical identity, limits and immutable state
+host.hal         closed Tahto domain effects and result validation
+capability.hal   pure-HAL mapping to generic blob/source capabilities
+memory_blob.hal  deterministic pure-HAL hara.blob reference provider
+graph.hal        verified manifests, shared closure, roots and dry-run GC
+vault.hal        uploads, installation, namespace references, quotas and ranges
+history.hal      immutable commits, CAS heads, backups, restore and receipts
+transaction.hal  atomic verified request-to-metadata commit plans
+provider.hal     pure-HAL mapping to a generic durable value store
 ```
 
 Record shape and signed verification contracts live in:
@@ -58,6 +59,32 @@ Mapping, request validation, result matching and translation back into Tahto
 results remain pure HAL. Hoplite or another host may implement byte movement,
 hashing, atomic installation and backpressured response streaming without
 containing Tahto upload, quota, graph or authorization rules.
+
+### Deterministic reference profile
+
+`tahto.store.memory-blob` implements the same generic `hara.blob` request and
+result profile entirely in HAL for conformance tests. It models:
+
+```text
+logical staging and resume offsets
+work-owned input source handles
+exactly-once bounded source consumption
+idempotent abort
+complete-object commit and replay
+bounded immutable output sources
+work-owned exactly-once source close
+```
+
+The reference provider stores small fixture descriptors, not request-body byte
+payloads. Each fixture declares its work owner, bounded segment, object digest
+and object size. This lets the HAL suite exercise lifecycle and identity laws
+without turning byte streams into Tahto application values.
+
+The reference provider deliberately does not pretend to prove a cryptographic
+digest over bytes it never receives. Production digest calculation, short-read
+and excess-read detection, filesystem durability and backpressure remain generic
+host mechanics. The same closed request/result profile is exercised beneath the
+Tahto interpreter in both cases.
 
 See [`protocol/host-capabilities.md`](../../../protocol/host-capabilities.md).
 

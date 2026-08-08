@@ -1,0 +1,388 @@
+(ns tahto.store.memory-blob-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.store.capability :as capability]
+            [tahto.store.host :as host]
+            [tahto.store.memory-blob :as memory-blob]))
+
+(def digest-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def digest-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+(def domain-state
+  {:marker "unchanged"})
+
+(def open-effect
+  (host/effect
+   "upload/open"
+   {:upload-id "upload.a"
+    :digest digest-a
+    :size 9
+    :media-type "application/octet-stream"}))
+
+(def append-first-effect
+  (host/effect
+   "upload/append"
+   {:upload-id "upload.a"
+    :offset 0
+    :length 4
+    :body-handle 17}))
+
+(def append-second-effect
+  (host/effect
+   "upload/append"
+   {:upload-id "upload.a"
+    :offset 4
+    :length 5
+    :body-handle 18}))
+
+(def abort-effect
+  (host/effect
+   "upload/abort"
+   {:upload-id "upload.a"}))
+
+(def verify-effect
+  (host/effect
+   "upload/verify-install"
+   {:upload-id "upload.a"
+    :digest digest-a
+    :size 9}))
+
+(def range-effect
+  (host/effect
+   "object/read-range"
+   {:digest digest-a
+    :start 2
+    :end 7}))
+
+(defn fixture
+  [work-id offset length digest size]
+  {:work-id work-id
+   :offset offset
+   :length length
+   :object-digest digest
+   :object-size size})
+
+(defn executor
+  [memory work-id]
+  (fn [service operation request]
+    (memory-blob/invoke memory work-id service operation request)))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "source fixtures are work-scoped exact records and handles are single-use"
+   (let [memory (memory-blob/create)
+         registered
+         (memory-blob/register-source!
+          memory 17 (fixture "work.a" 0 4 digest-a 9))
+         duplicate
+         (memory-blob/register-source!
+          memory 17 (fixture "work.a" 0 4 digest-a 9))
+         malformed
+         (memory-blob/register-source!
+          memory
+          18
+          (assoc (fixture "work.a" 4 5 digest-a 9)
+                 :path "/tmp/unsafe"))]
+     [registered
+      duplicate
+      malformed
+      (get (memory-blob/input-source-entry memory 17) :work-id)
+      (get (memory-blob/input-source-entry memory 17) :consumed)
+      (get (memory-blob/input-source-entry memory 17) :closed)])
+   [true false false "work.a" false false])
+
+  (test/check
+   "the pure-HAL provider executes open resume append commit and range source"
+   (let [memory (memory-blob/create)
+         registered-first
+         (memory-blob/register-source!
+          memory 17 (fixture "work.a" 0 4 digest-a 9))
+         registered-second
+         (memory-blob/register-source!
+          memory 18 (fixture "work.a" 4 5 digest-a 9))
+         invoke (executor memory "work.a")
+         opened
+         (capability/execute-with domain-state open-effect invoke)
+         appended-first
+         (capability/execute-with domain-state append-first-effect invoke)
+         resumed
+         (capability/execute-with domain-state open-effect invoke)
+         appended-second
+         (capability/execute-with domain-state append-second-effect invoke)
+         committed
+         (capability/execute-with domain-state verify-effect invoke)
+         installation
+         (capability/verified-install-result
+          verify-effect
+          (get committed :value))
+         ranged
+         (capability/execute-with domain-state range-effect invoke)
+         opened-source
+         (memory-blob/output-source-entry
+          memory
+          (get-in ranged [:value :source-handle]))
+         close-first
+         (memory-blob/close-opened-source!
+          memory
+          "work.a"
+          (get-in ranged [:value :source-handle]))
+         close-second
+         (memory-blob/close-opened-source!
+          memory
+          "work.a"
+          (get-in ranged [:value :source-handle]))]
+     [registered-first
+      registered-second
+      (get opened :ok)
+      (get-in opened [:value :offset])
+      (get appended-first :ok)
+      (get-in appended-first [:value :offset])
+      (get-in resumed [:value :offset])
+      (get appended-second :ok)
+      (get-in appended-second [:value :offset])
+      (get (memory-blob/input-source-entry memory 17) :consumed)
+      (get (memory-blob/input-source-entry memory 17) :closed)
+      (get (memory-blob/input-source-entry memory 18) :consumed)
+      (get (memory-blob/input-source-entry memory 18) :closed)
+      (get committed :ok)
+      (get (memory-blob/object-entry memory digest-a) :size)
+      (memory-blob/staging-entry memory "upload.a")
+      (get installation :installed)
+      (get ranged :ok)
+      (get opened-source :work-id)
+      (get opened-source :offset)
+      (get opened-source :length)
+      close-first
+      close-second
+      (get
+       (memory-blob/output-source-entry
+        memory
+        (get-in ranged [:value :source-handle]))
+       :closed)])
+   [true
+    true
+    true
+    0
+    true
+    4
+    4
+    true
+    9
+    true
+    true
+    true
+    true
+    true
+    9
+    nil
+    true
+    true
+    "work.a"
+    2
+    5
+    true
+    false
+    true])
+
+  (test/check
+   "staging abort is idempotent and removes resumable state"
+   (let [memory (memory-blob/create)
+         invoke (executor memory "work.a")
+         opened
+         (capability/execute-with domain-state open-effect invoke)
+         aborted
+         (capability/execute-with domain-state abort-effect invoke)
+         replayed
+         (capability/execute-with domain-state abort-effect invoke)]
+     [(get opened :ok)
+      (get aborted :ok)
+      (get-in aborted [:value :aborted])
+      (memory-blob/staging-entry memory "upload.a")
+      (get replayed :ok)
+      (get-in replayed [:value :aborted])])
+   [true true true nil true true])
+
+  (test/check
+   "wrong-work stale-offset and digest-mismatch sources never produce results"
+   (let [wrong-work-memory (memory-blob/create)
+         wrong-work-registered
+         (memory-blob/register-source!
+          wrong-work-memory
+          17
+          (fixture "work.a" 0 4 digest-a 9))
+         wrong-work-opened
+         (capability/execute-with
+          domain-state
+          open-effect
+          (executor wrong-work-memory "work.a"))
+         wrong-work
+         (capability/execute-with
+          domain-state
+          append-first-effect
+          (executor wrong-work-memory "work.b"))
+
+         stale-memory (memory-blob/create)
+         stale-registered
+         (memory-blob/register-source!
+          stale-memory 17 (fixture "work.a" 0 4 digest-a 9))
+         stale-opened
+         (capability/execute-with
+          domain-state open-effect (executor stale-memory "work.a"))
+         stale-effect
+         (host/effect
+          "upload/append"
+          {:upload-id "upload.a"
+           :offset 1
+           :length 4
+           :body-handle 17})
+         stale
+         (capability/execute-with
+          domain-state stale-effect (executor stale-memory "work.a"))
+
+         digest-memory (memory-blob/create)
+         digest-registered
+         (memory-blob/register-source!
+          digest-memory 17 (fixture "work.a" 0 4 digest-b 9))
+         digest-opened
+         (capability/execute-with
+          domain-state open-effect (executor digest-memory "work.a"))
+         mismatched-digest
+         (capability/execute-with
+          domain-state
+          append-first-effect
+          (executor digest-memory "work.a"))]
+     [wrong-work-registered
+      (get wrong-work-opened :ok)
+      (get wrong-work :ok)
+      (error-code wrong-work)
+      stale-registered
+      (get stale-opened :ok)
+      (get stale :ok)
+      (error-code stale)
+      digest-registered
+      (get digest-opened :ok)
+      (get mismatched-digest :ok)
+      (error-code mismatched-digest)])
+   [true
+    true
+    false
+    "tahto.capability/result-invalid"
+    true
+    true
+    false
+    "tahto.capability/result-invalid"
+    true
+    true
+    false
+    "tahto.capability/result-invalid"])
+
+  (test/check
+   "incomplete staging and out-of-bounds ranges fail below the Tahto boundary"
+   (let [memory (memory-blob/create)
+         registered
+         (memory-blob/register-source!
+          memory 17 (fixture "work.a" 0 4 digest-a 9))
+         invoke (executor memory "work.a")
+         opened
+         (capability/execute-with domain-state open-effect invoke)
+         appended
+         (capability/execute-with domain-state append-first-effect invoke)
+         incomplete
+         (capability/execute-with domain-state verify-effect invoke)
+
+         complete-memory (memory-blob/create)
+         complete-registered
+         (memory-blob/register-source!
+          complete-memory 19 (fixture "work.a" 0 9 digest-a 9))
+         complete-invoke (executor complete-memory "work.a")
+         complete-opened
+         (capability/execute-with domain-state open-effect complete-invoke)
+         complete-append-effect
+         (host/effect
+          "upload/append"
+          {:upload-id "upload.a"
+           :offset 0
+           :length 9
+           :body-handle 19})
+         complete-appended
+         (capability/execute-with
+          domain-state complete-append-effect complete-invoke)
+         complete-committed
+         (capability/execute-with
+          domain-state verify-effect complete-invoke)
+         oversized-range-effect
+         (host/effect
+          "object/read-range"
+          {:digest digest-a
+           :start 8
+           :end 10})
+         oversized
+         (capability/execute-with
+          domain-state oversized-range-effect complete-invoke)]
+     [registered
+      (get opened :ok)
+      (get appended :ok)
+      (get incomplete :ok)
+      (error-code incomplete)
+      complete-registered
+      (get complete-opened :ok)
+      (get complete-appended :ok)
+      (get complete-committed :ok)
+      (get oversized :ok)
+      (error-code oversized)])
+   [true
+    true
+    true
+    false
+    "tahto.capability/result-invalid"
+    true
+    true
+    true
+    true
+    false
+    "tahto.capability/result-invalid"])
+
+  (test/check
+   "opened response sources can only be closed by their owning work"
+   (let [memory (memory-blob/create)
+         registered
+         (memory-blob/register-source!
+          memory 19 (fixture "work.a" 0 9 digest-a 9))
+         invoke (executor memory "work.a")
+         opened
+         (capability/execute-with domain-state open-effect invoke)
+         append-effect
+         (host/effect
+          "upload/append"
+          {:upload-id "upload.a"
+           :offset 0
+           :length 9
+           :body-handle 19})
+         appended
+         (capability/execute-with domain-state append-effect invoke)
+         committed
+         (capability/execute-with domain-state verify-effect invoke)
+         ranged
+         (capability/execute-with domain-state range-effect invoke)
+         source-handle (get-in ranged [:value :source-handle])
+         wrong-close
+         (memory-blob/close-opened-source!
+          memory "work.b" source-handle)
+         right-close
+         (memory-blob/close-opened-source!
+          memory "work.a" source-handle)]
+     [registered
+      (get opened :ok)
+      (get appended :ok)
+      (get committed :ok)
+      (get ranged :ok)
+      wrong-close
+      right-close])
+   [true true true true true false true])])

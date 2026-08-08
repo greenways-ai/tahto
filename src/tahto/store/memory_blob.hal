@@ -1,0 +1,353 @@
+(ns tahto.store.memory-blob
+  (:require [std.foundation :refer :all]
+            [tahto.store.capability :as capability]
+            [tahto.store.host :as host]
+            [tahto.store.model :as model]))
+
+;; This is a deterministic reference implementation of the generic `hara.blob`
+;; profile. It is intentionally not a Tahto object-store implementation: Tahto
+;; effects are translated and validated by `tahto.store.capability` before this
+;; provider sees them.
+;;
+;; The provider keeps small fixture descriptors in HAL so tests can exercise
+;; work ownership, bounded copies, resume offsets, exactly-once consumption and
+;; immutable source lifetimes without putting request bytes into Tahto values.
+
+(def initial-output-handle 1000)
+
+(def source-fixture-fields
+  #{:work-id :offset :length :object-digest :object-size})
+
+(defn source-fixture?
+  [value]
+  (and
+   (host/exact-keys? value source-fixture-fields)
+   (model/identifier? (get value :work-id))
+   (model/non-negative-integer? (get value :offset))
+   (model/positive-integer? (get value :length))
+   (model/canonical-digest? (get value :object-digest))
+   (model/positive-integer? (get value :object-size))
+   (<= (+ (get value :offset) (get value :length))
+       (get value :object-size))))
+
+(defn create
+  []
+  (atom {:staging {}
+         :objects {}
+         :sources {}
+         :opened-sources {}
+         :next-source-handle initial-output-handle}))
+
+(defn memory-state
+  [memory]
+  @memory)
+
+(defn staging-entry
+  [memory staging-key]
+  (get (get @memory :staging) staging-key))
+
+(defn object-entry
+  [memory digest]
+  (get (get @memory :objects) digest))
+
+(defn input-source-entry
+  [memory source-handle]
+  (get (get @memory :sources) source-handle))
+
+(defn output-source-entry
+  [memory source-handle]
+  (get (get @memory :opened-sources) source-handle))
+
+(defn register-source!
+  [memory source-handle fixture]
+  (let [sources (get @memory :sources)]
+    (if
+     (and
+      (model/positive-integer? source-handle)
+      (source-fixture? fixture)
+      (nil? (get sources source-handle)))
+     (do
+       (swap!
+        memory
+        (fn [current]
+          (assoc
+           current
+           :sources
+           (assoc
+            (get current :sources)
+            source-handle
+            (assoc
+             (assoc fixture :consumed false)
+             :closed false)))))
+       true)
+     false)))
+
+(defn close-opened-source!
+  [memory work-id source-handle]
+  (let [current @memory
+        opened (get (get current :opened-sources) source-handle)]
+    (if
+     (and
+      (map? opened)
+      (= work-id (get opened :work-id))
+      (= false (get opened :closed)))
+     (do
+       (swap!
+        memory
+        (fn [store]
+          (assoc
+           store
+           :opened-sources
+           (assoc
+            (get store :opened-sources)
+            source-handle
+            (assoc opened :closed true)))))
+       true)
+     false)))
+
+(defn staging-compatible?
+  [current request]
+  (and
+   (= (get current :expected-digest)
+      (get request :expected-digest))
+   (= (get current :expected-size)
+      (get request :expected-size))
+   (= (get current :media-type)
+      (get request :media-type))))
+
+(defn staging-open
+  [memory request]
+  (let [staging-key (get request :staging-key)
+        current (staging-entry memory staging-key)]
+    (cond
+      (nil? current)
+      (let [opened {:staging-key staging-key
+                    :expected-digest (get request :expected-digest)
+                    :expected-size (get request :expected-size)
+                    :media-type (get request :media-type)
+                    :offset 0
+                    :source-handles []}]
+        (swap!
+         memory
+         (fn [store]
+           (assoc store
+                  :staging
+                  (assoc (get store :staging)
+                         staging-key
+                         opened))))
+        {:protocol capability/result-protocol
+         :operation "staging/open"
+         :staging-key staging-key
+         :opened true
+         :offset 0})
+
+      (staging-compatible? current request)
+      {:protocol capability/result-protocol
+       :operation "staging/open"
+       :staging-key staging-key
+       :opened true
+       :offset (get current :offset)}
+
+      :else nil)))
+
+(defn append-valid?
+  [work-id current source-fixture request]
+  (and
+   (map? current)
+   (map? source-fixture)
+   (= false (get source-fixture :consumed))
+   (= false (get source-fixture :closed))
+   (= work-id (get source-fixture :work-id))
+   (= (get request :offset) (get current :offset))
+   (= (get request :offset) (get source-fixture :offset))
+   (= (get request :length) (get source-fixture :length))
+   (= (get current :expected-digest)
+      (get source-fixture :object-digest))
+   (= (get current :expected-size)
+      (get source-fixture :object-size))
+   (<= (+ (get request :offset) (get request :length))
+       (get current :expected-size))))
+
+(defn staging-append-from-source
+  [memory work-id request]
+  (let [staging-key (get request :staging-key)
+        source-handle (get request :source-handle)
+        current (staging-entry memory staging-key)
+        source-fixture (input-source-entry memory source-handle)]
+    (if
+     (append-valid? work-id current source-fixture request)
+     (let [next-offset
+           (+ (get request :offset) (get request :length))
+           next-staging
+           (assoc
+            (assoc current :offset next-offset)
+            :source-handles
+            (conj (get current :source-handles) source-handle))
+           next-source
+           (assoc
+            (assoc source-fixture :consumed true)
+            :closed true)]
+       (swap!
+        memory
+        (fn [store]
+          (assoc
+           (assoc
+            store
+            :staging
+            (assoc (get store :staging)
+                   staging-key
+                   next-staging))
+           :sources
+           (assoc (get store :sources)
+                  source-handle
+                  next-source))))
+       {:protocol capability/result-protocol
+        :operation "staging/append-from-source"
+        :staging-key staging-key
+        :consumed true
+        :offset next-offset
+        :length (get request :length)})
+     nil)))
+
+(defn staging-abort
+  [memory request]
+  (let [staging-key (get request :staging-key)]
+    (swap!
+     memory
+     (fn [store]
+       (assoc store
+              :staging
+              (dissoc (get store :staging) staging-key))))
+    {:protocol capability/result-protocol
+     :operation "staging/abort"
+     :staging-key staging-key
+     :aborted true}))
+
+(defn committed-object-compatible?
+  [current request]
+  (and
+   (map? current)
+   (= (get current :digest) (get request :expected-digest))
+   (= (get current :size) (get request :expected-size))))
+
+(defn staging-complete?
+  [current request]
+  (and
+   (map? current)
+   (= (get current :expected-digest)
+      (get request :expected-digest))
+   (= (get current :expected-size)
+      (get request :expected-size))
+   (= (get current :offset)
+      (get request :expected-size))))
+
+(defn commit-result
+  [request]
+  {:protocol capability/result-protocol
+   :operation "staging/verify-commit"
+   :staging-key (get request :staging-key)
+   :verified true
+   :committed true
+   :digest (get request :expected-digest)
+   :size (get request :expected-size)})
+
+(defn staging-verify-commit
+  [memory request]
+  (let [staging-key (get request :staging-key)
+        digest (get request :expected-digest)
+        current (staging-entry memory staging-key)
+        installed (object-entry memory digest)]
+    (cond
+      (staging-complete? current request)
+      (let [object-value {:digest digest
+                          :size (get request :expected-size)
+                          :media-type (get current :media-type)}]
+        (if
+         (or (nil? installed)
+             (committed-object-compatible? installed request))
+         (do
+           (swap!
+            memory
+            (fn [store]
+              (assoc
+               (assoc store
+                      :staging
+                      (dissoc (get store :staging) staging-key))
+               :objects
+               (assoc (get store :objects)
+                      digest
+                      object-value))))
+           (commit-result request))
+         nil))
+
+      (committed-object-compatible? installed request)
+      (commit-result request)
+
+      :else nil)))
+
+(defn range-valid?
+  [current request]
+  (and
+   (map? current)
+   (= (get current :digest) (get request :digest))
+   (<= (+ (get request :offset) (get request :length))
+       (get current :size))))
+
+(defn object-open-source
+  [memory work-id request]
+  (let [current (object-entry memory (get request :digest))]
+    (if
+     (range-valid? current request)
+     (let [store @memory
+           source-handle (get store :next-source-handle)
+           opened {:work-id work-id
+                   :digest (get request :digest)
+                   :offset (get request :offset)
+                   :length (get request :length)
+                   :closed false}]
+       (swap!
+        memory
+        (fn [next-store]
+          (assoc
+           (assoc
+            next-store
+            :opened-sources
+            (assoc (get next-store :opened-sources)
+                   source-handle
+                   opened))
+           :next-source-handle
+           (inc source-handle))))
+       {:protocol capability/result-protocol
+        :operation "object/open-source"
+        :source-handle source-handle
+        :digest (get request :digest)
+        :offset (get request :offset)
+        :length (get request :length)})
+     nil)))
+
+(defn invoke
+  [memory work-id service operation request]
+  (if
+   (and
+    (= capability/host-service service)
+    (model/identifier? work-id)
+    (= operation (get request :operation))
+    (capability/request? request))
+   (cond
+     (= operation "staging/open")
+     (staging-open memory request)
+
+     (= operation "staging/append-from-source")
+     (staging-append-from-source memory work-id request)
+
+     (= operation "staging/abort")
+     (staging-abort memory request)
+
+     (= operation "staging/verify-commit")
+     (staging-verify-commit memory request)
+
+     (= operation "object/open-source")
+     (object-open-source memory work-id request)
+
+     :else nil)
+   nil))
