@@ -20,19 +20,21 @@
     "consent" "greenways-os"
     "privateKeys" "greenways-os"
     "custody" "tahto"
-    "meaning" "application"}
+    "meaning" "application-and-specification-packages"}
    "boundaries"
    {"conflicts" "preserve-divergent-heads"
     "remoteExecutableCatalogue" false
     "hostedSpaceRequired" false
-    "largeObjectBodies" "native-host-handles"
+    "largeObjectBodies" "request-work-scoped-host-sources"
     "signedRecords" "verified-provider-proofs"
     "devicePairing" "identity-only-no-admin-grant"
     "requestReplay" "durable-nonce-and-idempotency-evidence"
     "metadataTransactions" "deterministic-plan-provider-cas"
-    "metadataHost" "fixed-installed-service-no-request-selection"
+    "metadataHost" "generic-installed-hara-store-no-request-selection"
+    "objectHost" "generic-installed-hara-blob-no-request-selection"
     "serviceDescriptors" "inert-digest-pinned-metadata"
-    "workerExecution" "application-owned-installed-provider"}
+    "workerExecution" "application-owned-installed-provider"
+    "semanticSchemas" "exact-installed-package-roots"}
    "routes"
    {"discovery" "/.well-known/tahto"
     "health" "/tahto/v1/health"
@@ -40,21 +42,25 @@
    "components"
    {"controlPlane" "ready"
     "objects" "hara-kernel-ready:TAHTO-3"
-    "objectDataPlaneContract" "ready:HOPLITE-1"
-    "objectDataPlaneRuntime" "not-wired"
+    "objectCapabilityClient" "ready:hara.blob-request/1"
+    "objectProviders" "hoplite-memory-and-filesystem-ready"
+    "uploadOrchestration" "hara-kernel-ready"
+    "responseSourceProjection" "hara-kernel-ready"
+    "responseSourceTransport" "hoplite-request-scoped-nginx-ready"
     "commitsHeadsBackups" "hara-kernel-ready:TAHTO-4"
     "deviceIdentityReplay" "hara-kernel-ready:TAHTO-5"
     "deviceSyncPlanning" "hara-kernel-ready:TAHTO-5"
+    "portableTwoDeviceLaw" "hara-conformance-ready"
+    "productionTwoDeviceFixture" "pending"
     "servicesAndJobs" "hara-kernel-ready:TAHTO-6"
     "atomicMetadataPlan" "hara-kernel-ready:TAHTO-7"
-    "metadataProviderContract" "ready:tahto-metadata-store/1"
-    "sqliteMetadataProvider" "native-provider-ready"
-    "metadataHostContract" "hara-kernel-ready:TAHTO-8"
-    "metadataHostRuntime" "not-wired"
-    "serviceExecutor" "not-wired"
+    "metadataCapabilityClient" "ready:hara.store-request/1"
+    "sqliteMetadataProvider" "hoplite-generic-provider-ready"
+    "metadataNodeService" "not-exposed"
+    "semanticFabric" "planned:T-SF-01"
     "signatureProvider" "not-wired"
     "resultVerificationProvider" "not-wired"
-    "durableMetadataProvider" "native-provider-ready:not-host-wired"}
+    "serviceExecutor" "not-wired"}
    "compatibility"
    {"greenwaysBeacon" "one-release-route-alias"}})
 
@@ -63,14 +69,14 @@
   {"protocol" health-protocol
    "status" "ready"
    "runtime" "hoplite"
-   "scope" "control-plane-state-kernels-and-provider-contracts"})
+   "scope" "control-plane-and-generic-capability-kernels"})
 
 (defn status
   []
   {"protocol" status-protocol
    "node"
    {"status" "ready"
-    "phase" "metadata-host-contract"
+    "phase" "generic-capability-baseline"
     "mode" "local"}
    "fabric"
    {"objectVault" "hara-kernel-ready"
@@ -83,11 +89,15 @@
     "serviceRegistry" "hara-kernel-ready"
     "jobLedger" "hara-kernel-ready"
     "atomicMetadataPlan" "hara-kernel-ready"
-    "metadataProviderContract" "ready"
-    "sqliteMetadataProvider" "native-provider-ready"
-    "metadataHostContract" "hara-kernel-ready"
-    "objectDataPlane" "not-wired"
-    "metadataPersistence" "not-wired"
+    "metadataCapability" "hara.store-client-ready"
+    "metadataProvider" "hoplite-sqlite-ready"
+    "metadataNodeService" "not-exposed"
+    "objectCapability" "hara.blob-client-ready"
+    "objectUpload" "filesystem-provider-ready"
+    "objectResponseSource" "request-scoped-transport-ready"
+    "portableTwoDeviceLaw" "ready"
+    "productionTwoDeviceFixture" "pending"
+    "semanticFabric" "planned"
     "signatureProvider" "not-wired"
     "resultVerificationProvider" "not-wired"
     "workerExecution" "not-wired"}

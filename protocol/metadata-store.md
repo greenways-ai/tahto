@@ -2,53 +2,11 @@
 
 ## Status
 
-The Rust code under `native/` preserves the reviewed behavior of the first
-metadata durability experiment. It is no longer the target Tahto architecture.
-Tahto is a HAL system; the code is retained only until its application-neutral
-storage mechanics are extracted into Hoplite issue #45.
+The Rust code under `native/` preserves the first reviewed metadata durability
+experiment. It is no longer the Tahto runtime or the provider selected by the
+current HAL client.
 
-The superseded identity is:
-
-```text
-tahto-metadata-store/1
-```
-
-New Tahto HAL code must not refer to this identity or to `tahto.metadata`.
-
-## Mechanics worth preserving
-
-The migration source demonstrates generic behavior that belongs in a
-`hara.store` driver:
-
-- bounded signed-64-bit-compatible revisions;
-- initialize only when absent;
-- exact expected-revision compare-and-swap;
-- canonical HTA value persistence;
-- digest recomputation over the actual stored bytes;
-- atomic value and receipt commit;
-- opaque receipt-key lookup and replay;
-- crash safety across transaction boundaries;
-- stale-writer and mismatched-evidence rejection.
-
-These mechanics do not require Tahto concepts.
-
-## Mechanics that must not move below HAL
-
-The generic driver must not interpret:
-
-- Tahto state shape or object graphs;
-- request and result semantics;
-- application authorization;
-- transaction-plan meaning;
-- receipt fields or replay policy;
-- recovery and merge decisions.
-
-The revised `tahto.store.provider` places the complete Tahto receipt evidence in
-an opaque value. The generic store persists it without parsing it and returns
-only mechanical `applied` or `replayed` status. HAL constructs and validates the
-final Tahto receipt.
-
-## Generic target
+The generic replacement has landed in Hoplite:
 
 ```text
 service: hara.store
@@ -59,20 +17,71 @@ operations:
   receipt
 ```
 
-A versioned native provider ABI may exist inside Hoplite, but trusted host
-installation binds it to `hara.store`. ABI identities, database paths, drivers,
-credentials and provider packages never enter Hara application values.
+Tahto is a HAL system. `tahto.store.provider` prepares and validates that generic
+profile, while trusted Hoplite installation selects the SQLite or in-memory
+driver.
 
-## Migration sequence
+The superseded migration identity is:
 
-1. reproduce the current in-memory and SQLite behavior under a generic store
-   contract in Hoplite;
-2. run the same load, initialization, CAS, receipt, restart and fault fixtures
-   against both implementations;
-3. point Tahto's pure-HAL client only at `hara.store`;
-4. remove the compatibility identity and Tahto `native/` tree; and
-5. make Tahto CI reject any new native implementation directory or
-   Tahto-specific provider identity.
+```text
+tahto-metadata-store/1
+```
 
-Git history remains the archive for the superseded ABI after removal; the Tahto
-repository does not need to carry a dormant native product indefinitely.
+New Tahto HAL code must not refer to this identity or to `tahto.metadata`.
+
+## Generic mechanics already extracted
+
+The current `hara.store` providers preserve:
+
+- bounded signed-64-bit-compatible revisions;
+- initialize only when absent;
+- exact expected-revision compare-and-swap;
+- canonical HTA value persistence;
+- digest recomputation over actual stored bytes;
+- atomic value and opaque receipt commit;
+- receipt-key lookup and exact replay;
+- crash safety across transaction boundaries;
+- stale-writer and mismatched-evidence rejection;
+- restart recovery and lost-result retry.
+
+These mechanics are application-neutral and live outside Tahto core.
+
+## Semantics that remain in HAL
+
+A generic driver must not interpret:
+
+- Tahto state, object or semantic graph shape;
+- request and result meaning;
+- application authorization;
+- transaction-plan meaning;
+- receipt fields or replay policy;
+- recovery and merge decisions.
+
+Tahto places complete receipt evidence in an opaque canonical value. The store
+persists it without parsing it and reports only mechanical `applied` or
+`replayed`. HAL constructs and validates the final Tahto receipt.
+
+## Why `native/` still exists
+
+The migration source remains temporarily because it is executable evidence for
+parity and failure behavior. It is frozen: no new Tahto domain rule may be added
+beneath this directory.
+
+Removal is tracked by #17 and requires:
+
+1. the same Tahto HAL client passing against memory and Hoplite SQLite stores;
+2. load, initialization, CAS, receipt, concurrent writer, restart and both fault
+   windows;
+3. the production signed two-device object fixture from #36;
+4. semantic object, history, divergence, backup and restore conformance from
+   #30–#35; and
+5. an explicit migration path only if a real deployed native database exists.
+
+After that gate, Git history remains the archive and Tahto CI rejects any new
+native implementation directory or Tahto-specific provider identity.
+
+## Security boundary
+
+A native provider ABI may exist inside generic host infrastructure, but trusted
+installation binds it to `hara.store`. ABI identities, paths, drivers,
+credentials and provider packages never enter application values.
