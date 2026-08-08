@@ -1,7 +1,7 @@
 (ns tahto.store.response-source
   (:require [std.foundation :refer :all]
             [std.foundation.coroutine :as coroutine]
-            [std.foundation.response-source :as response-source]
+            [std.foundation.response-source :as portable]
             [tahto.store.capability :as capability]
             [tahto.store.host :as host]
             [tahto.store.model :as model]
@@ -40,12 +40,12 @@
        (get request :start)
        (get request :end)))
      (let [descriptor
-           {:protocol response-source/protocol
+           {:protocol portable/protocol
             :source-handle (get opened :source-handle)
             :offset (get opened :start)
             :length (get opened :length)}]
        (if
-        (response-source/response-source? descriptor)
+        (portable/response-source? descriptor)
         descriptor
         nil))
      nil)))

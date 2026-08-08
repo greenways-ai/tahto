@@ -69,7 +69,8 @@ jobs:
           grep -F '(def host-service "hara.store")' src/tahto/store/provider.hal
           grep -F '(ns tahto.store.upload' src/tahto/store/upload.hal
           grep -F '(ns tahto.store.response-source' src/tahto/store/response_source.hal
-          grep -F 'response-source/response-source?' src/tahto/store/response_source.hal
+          grep -F '[std.foundation.response-source :as portable]' src/tahto/store/response_source.hal
+          grep -F 'portable/response-source?' src/tahto/store/response_source.hal
           grep -F '(ns tahto.store.memory-blob' src/tahto/store/memory_blob.hal
           grep -F '(ns tahto.store.memory-store' src/tahto/store/memory_store.hal
           grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
@@ -81,7 +82,7 @@ jobs:
   hara-state:
     runs-on: ubuntu-latest
     env:
-      HARA_REVISION: b97f85180c57c320c1b8f011a1a91ddba4be2c46
+      HARA_REVISION: 5577f2ac5d9ef4ee65264b4fe34588bbaf955398
       CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
