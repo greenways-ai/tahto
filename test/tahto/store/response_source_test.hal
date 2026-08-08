@@ -138,12 +138,13 @@
              nil)))
          value (get opened :value)]
      [(get opened :ok)
+      (error-code opened)
       (= state (get opened :state))
       value
-      (map? value)
-      (if (map? value) (has? value :bytes) nil)
-      (if (map? value) (has? value :path) nil)])
+      (and (map? value) (has? value :bytes))
+      (and (map? value) (has? value :path))])
    [true
+    nil
     true
     {:protocol "hara.response-source/1"
      :source-handle 41

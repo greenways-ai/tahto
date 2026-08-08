@@ -56,6 +56,7 @@ jobs:
           test -f test/tahto/store/memory_store_test.hal
           test -f test/tahto/sync/device_test.hal
           test -f test/tahto/sync/session_test.hal
+          test -f test/tahto/sync/two_device_object_test.hal
           test -f test/tahto/service/state_test.hal
           test -f protocol/services.md
           test -f protocol/transactions.md
@@ -64,6 +65,7 @@ jobs:
           test -f protocol/host-capabilities.md
           test -f protocol/upload-integration.md
           test -f protocol/response-sources.md
+          test -f protocol/two-device-object-transfer.md
 
           grep -F '(def host-service "hara.blob")' src/tahto/store/capability.hal
           grep -F '(def host-service "hara.store")' src/tahto/store/provider.hal
@@ -73,6 +75,7 @@ jobs:
           grep -F 'portable/response-source?' src/tahto/store/response_source.hal
           grep -F '(ns tahto.store.memory-blob' src/tahto/store/memory_blob.hal
           grep -F '(ns tahto.store.memory-store' src/tahto/store/memory_store.hal
+          grep -F '(ns tahto.sync.two-device-object-test' test/tahto/sync/two_device_object_test.hal
           grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
           ! grep -R -F '(def native-abi' src/tahto
           ! grep -R -F ':native-abi' src/tahto
@@ -102,7 +105,20 @@ jobs:
       - name: Build the reviewed Hara CLI
         run: cargo build --locked --release --manifest-path .hara/core/rust/Cargo.toml --bin hara
       - name: Run the Hara state conformance suites
-        run: .hara/core/rust/target/release/hara --project "$GITHUB_WORKSPACE" test
+        shell: bash
+        run: |
+          set +e
+          output="$(.hara/core/rust/target/release/hara --project "$GITHUB_WORKSPACE" test 2>&1)"
+          status=$?
+          printf '%s\n' "$output"
+          if [ "$status" -ne 0 ]; then
+            tail_output="$(printf '%s\n' "$output" | tail -n 40)"
+            escaped="${tail_output//'%'/'%25'}"
+            escaped="${escaped//$'\r'/'%0D'}"
+            escaped="${escaped//$'\n'/'%0A'}"
+            echo "::error title=Hara state conformance::$escaped"
+            exit "$status"
+          fi
 
   native-migration-source:
     name: Transitional native metadata migration source
