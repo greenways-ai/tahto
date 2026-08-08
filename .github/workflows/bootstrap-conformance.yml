@@ -128,7 +128,20 @@ jobs:
       - name: Build the reviewed Hara CLI
         run: cargo build --locked --release --manifest-path .hara/core/rust/Cargo.toml --bin hara
       - name: Run the Hara state conformance suites
-        run: .hara/core/rust/target/release/hara --project "$GITHUB_WORKSPACE" test
+        shell: bash
+        run: |
+          set +e
+          output="$(.hara/core/rust/target/release/hara --project "$GITHUB_WORKSPACE" test 2>&1)"
+          status=$?
+          printf '%s\n' "$output"
+          if [ "$status" -ne 0 ]; then
+            tail_output="$(printf '%s\n' "$output" | tail -n 60)"
+            escaped="${tail_output//'%'/'%25'}"
+            escaped="${escaped//$'\r'/'%0D'}"
+            escaped="${escaped//$'\n'/'%0A'}"
+            echo "::error title=Semantic profile conformance::$escaped"
+            exit "$status"
+          fi
 
   native-migration-source:
     name: Transitional native metadata migration source
