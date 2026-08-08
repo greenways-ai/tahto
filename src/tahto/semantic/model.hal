@@ -118,11 +118,33 @@
     (has? version-start-characters
           (string/slice value 0 1)))))
 
-(defn coordinate-part
-  [value]
-  ;; The delimiter is not admitted by Tahto identifiers or canonical digests,
-  ;; so field-wise concatenation preserves deterministic lexical ordering.
-  (str value "|"))
+(defn coordinate-field-compare
+  [left right]
+  (cond
+    (= left right)
+    0
+
+    (and (integer? left)
+         (integer? right))
+    (if (< left right) -1 1)
+
+    :else
+    (compare left right)))
+
+(defn coordinate-compare
+  [left right]
+  (loop [index 0]
+    (if
+     (= index (count left))
+     0
+     (let [comparison
+           (coordinate-field-compare
+            (nth left index)
+            (nth right index))]
+       (if
+        (= comparison 0)
+        (recur (inc index))
+        comparison)))))
 
 (defn strictly-increasing-by?
   [values coordinate]
@@ -137,7 +159,7 @@
         (= index (count values))
         true
         (if
-         (< (compare
+         (< (coordinate-compare
              (coordinate (nth values (dec index)))
              (coordinate (nth values index)))
             0)
@@ -146,13 +168,12 @@
 
 (defn schema-ref-coordinate
   [value]
-  (str
-   (coordinate-part (get value :schema))
-   (coordinate-part (get value :schema-version))
-   (coordinate-part (get value :package))
-   (coordinate-part (get value :package-version))
-   (coordinate-part (get value :package-root))
-   (coordinate-part (get value :entry))))
+  [(get value :schema)
+   (get value :schema-version)
+   (get value :package)
+   (get value :package-version)
+   (get value :package-root)
+   (get value :entry)])
 
 (defn schema-ref?
   [value]
@@ -197,10 +218,9 @@
 
 (defn semantic-link-coordinate
   [value]
-  (str
-   (coordinate-part (get value :role))
-   (coordinate-part (get value :target-id))
-   (coordinate-part (get value :target-root))))
+  [(get value :role)
+   (get value :target-id)
+   (get value :target-root)])
 
 (defn semantic-link?
   [value]
@@ -245,7 +265,7 @@
 
 (defn semantic-index-entry-coordinate
   [value]
-  (get value :id))
+  [(get value :id)])
 
 (defn semantic-index?
   [value]
@@ -274,7 +294,7 @@
 
 (defn semantic-root-entry-coordinate
   [value]
-  (get value :name))
+  [(get value :name)])
 
 (defn semantic-root-entry-vector?
   [values]
