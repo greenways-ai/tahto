@@ -1,0 +1,82 @@
+(ns tahto.fixture.app
+  (:require [std.json :as json]
+            [tahto.fixture.two-device :as fixture]))
+
+;; Closed HTTP-shaped values and handlers for the release fixture.  This
+;; namespace remains ordinary Hara so the portable state suite can load it
+;; without a Hoplite package.  A later host-binding slice composes these
+;; handlers into a Hoplite application after the reviewed Hoplite revision is
+;; present.
+
+(def fixture-status-protocol
+  "tahto.two-device-fixture-status/1")
+
+(def public-headers
+  {"content-type" "application/json; charset=utf-8"
+   "cache-control" "no-store"
+   "access-control-allow-origin" "*"
+   "access-control-allow-methods" "GET, OPTIONS"
+   "access-control-allow-headers" "authorization, content-type"
+   "x-content-type-options" "nosniff"})
+
+(defn json-response
+  [status value]
+  {:status status
+   :headers public-headers
+   :body (json/write value)})
+
+(defn descriptor-value
+  []
+  (fixture/descriptor))
+
+(defn descriptor-wire-value
+  []
+  {"protocol" fixture/fixture-protocol
+   "node" fixture/node
+   "application" fixture/application
+   "namespace" fixture/fixture-namespace
+   "collection" fixture/collection
+   "devices"
+   [{"id" fixture/device-a
+     "public-key" fixture/public-key-a
+     "work" fixture/work-a}
+    {"id" fixture/device-b
+     "public-key" fixture/public-key-b
+     "work" fixture/work-b}]
+   "payload"
+   {"digest" fixture/production-payload-digest
+    "size" fixture/production-payload-size
+    "media-type" fixture/production-media-type}
+   "range"
+   {"start" fixture/production-range-start
+    "end" fixture/production-range-end}})
+
+(defn health-value
+  []
+  {:protocol fixture-status-protocol
+   :status "ready"
+   :phase "contract"
+   :fixture-protocol fixture/fixture-protocol
+   :required-services ["hara.blob" "hara.store"]})
+
+(defn health-wire-value
+  []
+  {"protocol" fixture-status-protocol
+   "status" "ready"
+   "phase" "contract"
+   "fixture-protocol" fixture/fixture-protocol
+   "required-services" ["hara.blob" "hara.store"]})
+
+(defn descriptor
+  [_request]
+  (json-response 200 (descriptor-wire-value)))
+
+(defn health
+  [_request]
+  (json-response 200 (health-wire-value)))
+
+(defn preflight
+  [_request]
+  {:status 204
+   :headers public-headers
+   :body ""})
