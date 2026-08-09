@@ -1,0 +1,150 @@
+(ns tahto.fixture.state-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.fixture.state :as fixture-state]
+            [tahto.fixture.two-device :as fixture]
+            [tahto.store.memory-store :as memory-store]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
+
+(def state-digest
+  "sha256:9999999999999999999999999999999999999999999999999999999999999999")
+
+(def verification
+  (fixture-state/state-verification
+   state-digest
+   "2026-08-08T00:00:01Z"))
+
+(defn executor
+  [memory]
+  (fn [service operation request]
+    (memory-store/invoke memory service operation request)))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "the initial fixture state enrols independent A and B identities"
+   (let [state (fixture-state/initial-state)]
+     [(fixture-state/fixture-state? state)
+      (get (model/device-record state fixture/device-a) :status)
+      (get (model/device-record state fixture/device-b) :status)
+      (model/public-key-device state fixture/public-key-a)
+      (model/public-key-device state fixture/public-key-b)
+      (provider/state-revision state)])
+   [true
+    "enrolled"
+    "enrolled"
+    "device.a"
+    "device.b"
+    0])
+
+  (test/check
+   "missing generic state is initialized once and returned as a closed snapshot"
+   (let [memory (memory-store/create)
+         result
+         (fixture-state/load-or-initialize-with
+          verification
+          (executor memory))
+         value (get result :value)
+         snapshot (get value :snapshot)
+         entry (memory-store/snapshot-entry memory)]
+     [(get result :ok)
+      (fixture-state/bootstrap-value? value)
+      (get value :status)
+      (get snapshot :revision)
+      (get snapshot :state-digest)
+      (fixture-state/fixture-state? (get snapshot :state))
+      (get entry :revision)
+      (get entry :value-digest)
+      (has? entry :database-path)
+      (has? entry :provider)])
+   [true
+    true
+    "initialized"
+    0
+    state-digest
+    true
+    0
+    state-digest
+    false
+    false])
+
+  (test/check
+   "a fresh fixture process loads the exact previously initialized state"
+   (let [memory (memory-store/create)
+         first
+         (fixture-state/load-or-initialize-with
+          verification
+          (executor memory))
+         second
+         (fixture-state/load-or-initialize-with
+          verification
+          (executor memory))]
+     [(get first :ok)
+      (get second :ok)
+      (get-in first [:value :status])
+      (get-in second [:value :status])
+      (= (get-in first [:value :snapshot])
+         (get-in second [:value :snapshot]))
+      (= (get first :state)
+         (get second :state))])
+   [true true "initialized" "loaded" true true])
+
+  (test/check
+   "invalid state evidence fails before generic initialization"
+   (let [memory (memory-store/create)
+         result
+         (fixture-state/load-or-initialize-with
+          (assoc verification :state-digest "invalid")
+          (executor memory))]
+     [(get result :ok)
+      (error-code result)
+      (memory-store/snapshot-entry memory)])
+   [false
+    "tahto.provider/state-verification-invalid"
+    nil])
+
+  (test/check
+   "a generic store containing foreign state is rejected without replacement"
+   (let [memory (memory-store/create)
+         foreign-state (model/empty-state)
+         request
+         {:protocol provider/request-protocol
+          :operation "initialize"
+          :revision 0
+          :value foreign-state
+          :value-digest state-digest}
+         installed
+         (memory-store/invoke
+          memory provider/host-service "initialize" request)
+         result
+         (fixture-state/load-or-initialize-with
+          verification
+          (executor memory))]
+     [(provider/provider-response? "initialize" installed)
+      (get result :ok)
+      (error-code result)
+      (= foreign-state
+         (get (memory-store/snapshot-entry memory) :value))])
+   [true
+    false
+    "tahto.fixture/store-state-foreign"
+    true])
+
+  (test/check
+   "bootstrap evidence exposes no provider or transport authority"
+   (let [memory (memory-store/create)
+         result
+         (fixture-state/load-or-initialize-with
+          verification
+          (executor memory))
+         snapshot (get-in result [:value :snapshot])]
+     [(has? result :source-handle)
+      (has? result :request-context)
+      (has? snapshot :database-path)
+      (has? snapshot :credential)
+      (has? (get snapshot :state) :provider)])
+   [false false false false false])])
