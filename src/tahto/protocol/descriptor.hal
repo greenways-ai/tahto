@@ -52,6 +52,7 @@
     "commitsHeadsBackups" "hara-kernel-ready:TAHTO-4"
     "deviceIdentityReplay" "hara-kernel-ready:TAHTO-5"
     "deviceSyncPlanning" "hara-kernel-ready:TAHTO-5"
+    "devicePairing" "hara-kernel-and-greenways-client-ready"
     "portableTwoDeviceLaw" "hara-conformance-ready"
     "productionTwoDeviceFixture" "pending"
     "servicesAndJobs" "hara-kernel-ready:TAHTO-6"
@@ -59,9 +60,22 @@
     "metadataCapabilityClient" "ready:hara.store-request/1"
     "sqliteMetadataProvider" "hoplite-generic-provider-ready"
     "metadataNodeService" "not-exposed"
-    "semanticFabric" "planned:T-SF-01"
+    "semanticFabric" "kernel-ready:service-pending"
+    "semanticProfiles" "hara-kernel-ready"
+    "semanticAdmission" "hara-kernel-ready"
+    "semanticIndexesRoots" "hara-kernel-ready"
+    "semanticHistory" "hara-kernel-ready"
+    "semanticRead" "hara-kernel-ready"
+    "semanticPrepare" "hara-kernel-ready"
+    "semanticSubmit" "hara-kernel-ready"
+    "semanticRoutes" "not-exposed"
+    "semanticAuthenticationRealm" "not-installed"
+    "semanticSelectedValueSource" "not-installed"
+    "canonicalValueContract" "ready:hara.value"
+    "canonicalValueProvider" "not-installed"
+    "specificationValidatorInvocation" "not-installed"
     "signatureProvider" "pairing-p256-ready"
-    "resultVerificationProvider" "not-wired"
+    "resultVerificationProvider" "contract-ready:filesystem-provider-pending"
     "serviceExecutor" "not-wired"}
    "compatibility"
    {"greenwaysBeacon" "one-release-route-alias"}})
@@ -71,14 +85,14 @@
   {"protocol" health-protocol
    "status" "ready"
    "runtime" "hoplite"
-   "scope" "control-plane-and-generic-capability-kernels"})
+   "scope" "control-plane-generic-capabilities-and-semantic-kernels"})
 
 (defn status
   []
   {"protocol" status-protocol
    "node"
    {"status" "ready"
-    "phase" "generic-capability-baseline"
+    "phase" "semantic-kernel-production-integration"
     "mode" "local"}
    "fabric"
    {"objectVault" "hara-kernel-ready"
@@ -86,6 +100,7 @@
     "headStore" "hara-kernel-ready"
     "backupStore" "hara-kernel-ready"
     "deviceIdentity" "hara-kernel-ready"
+    "devicePairing" "ready"
     "requestReplay" "hara-kernel-ready"
     "syncPlanning" "hara-kernel-ready"
     "serviceRegistry" "hara-kernel-ready"
@@ -99,9 +114,22 @@
     "objectResponseSource" "request-scoped-transport-ready"
     "portableTwoDeviceLaw" "ready"
     "productionTwoDeviceFixture" "pending"
-    "semanticFabric" "planned"
+    "semanticFabric" "kernel-ready:service-pending"
+    "semanticProfiles" "ready"
+    "semanticAdmission" "ready"
+    "semanticIndexesRoots" "ready"
+    "semanticHistory" "ready"
+    "semanticRead" "ready"
+    "semanticPrepare" "ready"
+    "semanticSubmit" "ready"
+    "semanticRoutes" "not-exposed"
+    "semanticAuthenticationRealm" "not-installed"
+    "semanticSelectedValueSource" "not-installed"
+    "canonicalValueContract" "ready"
+    "canonicalValueProvider" "not-installed"
+    "specificationValidatorInvocation" "not-installed"
     "signatureProvider" "pairing-p256-ready"
-    "resultVerificationProvider" "not-wired"
+    "resultVerificationProvider" "provider-pending"
     "workerExecution" "not-wired"}
    "hostedSpace"
    {"required" false
