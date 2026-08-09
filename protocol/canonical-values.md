@@ -4,7 +4,7 @@ Tahto uses Hara's application-neutral canonical-value capability to read small i
 
 ```text
 namespace-authorized immutable object
-  -> hara.value / object/verify-hta
+  -> hoplite.value / object/verify-hta
   -> exact digest + byte length + portable value
   -> Tahto schema-bound verification evidence
 ```
@@ -12,13 +12,13 @@ namespace-authorized immutable object
 ## Portable request
 
 ```clojure
-{:protocol "hara.value-request/1"
+{:protocol "hoplite.value-request/1"
  :operation "object/verify-hta"
  :digest "sha256:..."
  :max-bytes 1048576}
 ```
 
-The request contains no provider, driver, path, URL, credential, source handle, callback or command. Trusted installation binds `hara.value` to a provider.
+The request contains no provider, driver, path, URL, credential, source handle, callback or command. Trusted installation binds `hoplite.value` to a provider.
 
 ## Authority split
 
@@ -67,4 +67,4 @@ The adapter fails without state mutation when:
 - the provider reports canonicality, digest, object or provider failure;
 - a schema reference is not exact and immutable.
 
-Large media, chunks and response bodies remain on `hara.blob` and `hara.response-source/1` paths.
+Large media, chunks and response bodies remain on `hoplite.blob` and `hoplite.response-source/1` paths.

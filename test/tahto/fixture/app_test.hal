@@ -40,12 +40,12 @@
      :status "ready"
      :phase "contract"
      :fixture-protocol "tahto.two-device-fixture/1"
-     :required-services ["hara.blob" "hara.store"]}
+     :required-services ["hoplite.blob" "hoplite.store"]}
     {"protocol" "tahto.two-device-fixture-status/1"
      "status" "ready"
      "phase" "contract"
      "fixture-protocol" "tahto.two-device-fixture/1"
-     "required-services" ["hara.blob" "hara.store"]}])
+     "required-services" ["hoplite.blob" "hoplite.store"]}])
 
   (test/check
    "fixture handlers retain closed JSON and preflight responses"

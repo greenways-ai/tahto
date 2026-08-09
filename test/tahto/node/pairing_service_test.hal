@@ -75,7 +75,7 @@
 
 (test/print-results
  [(test/check
-   "issue prepare and complete survive reload and replay through hara.store"
+   "issue prepare and complete survive reload and replay through hoplite.store"
    (let [memory (memory-store/create)
          invoke (executor memory)
          issued

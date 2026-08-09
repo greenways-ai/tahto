@@ -1,6 +1,6 @@
 (ns tahto.store.response-source-test
   (:require [std.foundation :refer :all]
-            [std.foundation.response-source :as portable]
+            [hoplite.response-source :as portable]
             [std.lib.test :as test]
             [tahto.store.capability :as capability]
             [tahto.store.host :as host]
@@ -75,6 +75,7 @@
          (capability/opened-source-result range-effect provider-result)
          candidate
          {:protocol portable/protocol
+          :service capability/host-service
           :source-handle 31
           :offset 2
           :length 7}
@@ -99,13 +100,15 @@
      :length 7
      :source-handle 31}
     true
-    {:protocol "hara.response-source/1"
+    {:protocol "hoplite.response-source/1"
+     :service "hoplite.blob"
      :source-handle 31
      :offset 2
      :length 7}
     true
     true
-    {:protocol "hara.response-source/1"
+    {:protocol "hoplite.response-source/1"
+     :service "hoplite.blob"
      :source-handle 31
      :offset 2
      :length 7}])
@@ -127,7 +130,7 @@
           (fn [service operation request]
             (if
              (and
-              (= "hara.blob" service)
+              (= "hoplite.blob" service)
               (= "object/open-source" operation)
               (= digest (get request :digest))
               (= 2 (get request :offset))
@@ -146,7 +149,8 @@
    [true
     nil
     true
-    {:protocol "hara.response-source/1"
+    {:protocol "hoplite.response-source/1"
+     :service "hoplite.blob"
      :source-handle 41
      :offset 2
      :length 7}

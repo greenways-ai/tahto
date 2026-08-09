@@ -4,7 +4,7 @@
             [tahto.store.host :as host]
             [tahto.store.model :as model]))
 
-;; This is a deterministic reference implementation of the generic `hara.blob`
+;; This is a deterministic reference implementation of the generic `hoplite.blob`
 ;; profile. It is intentionally not a Tahto object-store implementation: Tahto
 ;; effects are translated and validated by `tahto.store.capability` before this
 ;; provider sees them.

@@ -21,12 +21,15 @@ jobs:
         run: |
           python3 -m py_compile conformance/check-bootstrap.py
           python3 -m py_compile conformance/check-protocol.py
-      - name: Guard the Hara-only state-kernel boundary
+      - name: Guard the portable HAL state-kernel boundary
         run: |
           test ! -e src-python
           test ! -e test-python
           test ! -e .github/workflows/materialize-native-metadata-lock.yml
           test ! -e .github/workflows/promote-native-metadata-sqlite.yml
+          test -z "$(find src test -type f ! -name '*.hal' ! -name 'README.md' -print)"
+          ! grep -F ':hoplite/authentication' project.edn
+          ! grep -R -E 'extern crate|use [A-Za-z0-9_]+::|#include' src test
           test -f src/tahto/store/model.hal
           test -f src/tahto/store/host.hal
           test -f src/tahto/store/capability.hal
@@ -93,11 +96,11 @@ jobs:
           test -f protocol/semantic-prepare.md
           test -f protocol/semantic-submit.md
 
-          grep -F '(def host-service "hara.blob")' src/tahto/store/capability.hal
-          grep -F '(def host-service "hara.store")' src/tahto/store/provider.hal
+          grep -F '(def host-service "hoplite.blob")' src/tahto/store/capability.hal
+          grep -F '(def host-service "hoplite.store")' src/tahto/store/provider.hal
           grep -F '(ns tahto.store.upload' src/tahto/store/upload.hal
           grep -F '(ns tahto.store.response-source' src/tahto/store/response_source.hal
-          grep -F '[std.foundation.response-source :as portable]' src/tahto/store/response_source.hal
+          grep -F '[hoplite.response-source :as portable]' src/tahto/store/response_source.hal
           grep -F 'portable/response-source?' src/tahto/store/response_source.hal
           grep -F '(ns tahto.store.memory-blob' src/tahto/store/memory_blob.hal
           grep -F '(ns tahto.store.memory-store' src/tahto/store/memory_store.hal
@@ -116,7 +119,7 @@ jobs:
           grep -F '"semantic.read"' src/tahto/protocol/validate.hal
           grep -F '"semantic.prepare"' src/tahto/protocol/validate.hal
           grep -F '"semantic.submit"' src/tahto/protocol/validate.hal
-          grep -F '[std.foundation.canonical-value :as portable]' src/tahto/semantic/canonical_value.hal
+          grep -F '[hoplite.value :as portable]' src/tahto/semantic/canonical_value.hal
           grep -F 'portable/verification-request' src/tahto/semantic/canonical_value.hal
           grep -F '(def admission-fields' src/tahto/semantic/admission.hal
           grep -F ':semantic-objects' src/tahto/semantic/admission.hal
@@ -148,7 +151,7 @@ jobs:
 
           grep -F '## Readiness matrix' README.md
           grep -F '| Semantic value profiles | ready |' README.md
-          grep -F 'service: hara.store' protocol/metadata-store.md
+          grep -F 'service: hoplite.store' protocol/metadata-store.md
           grep -F '"metadataHost" "generic-installed-hara-store-no-request-selection"' src/tahto/protocol/descriptor.hal
           grep -F '"objectResponseSource" "request-scoped-transport-ready"' src/tahto/protocol/descriptor.hal
           grep -F '"portableTwoDeviceLaw" "ready"' src/tahto/protocol/descriptor.hal
@@ -165,8 +168,11 @@ jobs:
           ! grep -R -F ':path' src/tahto/semantic
           ! grep -R -F ':url' src/tahto/semantic
           ! grep -F 'object-transfer execution and native response-source streaming remain' README.md
+          grep -F '(ns tahto.node.request-auth' src/tahto/node/request_auth.hal
+          grep -F '"verify-signature"' src/tahto/node/request_auth.hal
+          grep -F '(fresh? request now-seconds)' src/tahto/node/request_auth.hal
 
-  hara-state:
+  hoplite-state:
     runs-on: ubuntu-latest
     env:
       HARA_REVISION: 45eebddeca2a61e490337c90821b30b2328749e0
@@ -180,16 +186,38 @@ jobs:
         with:
           repository: hara-lang/hara
           ref: ${{ env.HARA_REVISION }}
-          path: .hara
+          path: .dependencies/technology/hara
+          persist-credentials: false
+      - name: Check out the Hoplite application boundary
+        uses: actions/checkout@v4
+        with:
+          repository: greenways-ai/hoplite
+          ref: main
+          path: .dependencies/technology/hoplite
           persist-credentials: false
       - name: Install the Cargo toolchain required by the locked graph
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.85.0
-      - name: Build the reviewed Hara CLI
-        run: cargo build --locked --release --manifest-path .hara/core/rust/Cargo.toml --bin hara
-      - name: Run the Hara state conformance suites
-        run: .hara/core/rust/target/release/hara --project "$GITHUB_WORKSPACE" test
+      - name: Build the reviewed Hara test runner
+        run: cargo build --locked --release --manifest-path .dependencies/technology/hara/core/rust/Cargo.toml --bin hara
+      - name: Stage the Hoplite-owned portable contracts
+        run: |
+          mkdir -p .conformance-src/hoplite
+          cp .dependencies/technology/hoplite/core/lib/src/hoplite/value.hal .conformance-src/hoplite/value.hal
+          cp .dependencies/technology/hoplite/core/lib/src/hoplite/response_source.hal .conformance-src/hoplite/response_source.hal
+      - name: Run the Hoplite-backed state conformance suites
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("project.edn")
+          source = path.read_text()
+          source = source.replace(':project/source-paths ["src"]', ':project/source-paths ["src" ".conformance-src"]')
+          if source == path.read_text():
+              raise SystemExit("project.edn source paths were not updated")
+          path.write_text(source)
+          PY
+          .dependencies/technology/hara/core/rust/target/release/hara test
 
   native-migration-source:
     name: Transitional native metadata migration source

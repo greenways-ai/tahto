@@ -91,7 +91,7 @@ A completed transition is prepared for durable publication through:
 ```text
 semantic-history/prepare-store-commit
   -> tahto.store.provider/prepare-compare-and-swap
-  -> {service "hara.store", operation "compare-and-swap", arguments [...]}
+  -> {service "hoplite.store", operation "compare-and-swap", arguments [...]}
 ```
 
 The call plan contains no driver, path, provider package or database identity.
@@ -132,4 +132,4 @@ The permanent fixture covers:
 - stale head compare-and-swap;
 - ordinary or cross-collection head commit rejection;
 - TAHTO-7 execution and exact replay;
-- generic `hara.store` compare-and-swap planning without installation authority.
+- generic `hoplite.store` compare-and-swap planning without installation authority.

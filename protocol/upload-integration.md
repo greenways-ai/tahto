@@ -2,7 +2,7 @@
 
 ## Decision
 
-Tahto commits upload state only after the exact generic `hara.blob` result has
+Tahto commits upload state only after the exact generic `hoplite.blob` result has
 passed the same closed HAL validator used by the in-memory capability profile.
 
 The integration remains entirely in HAL:
@@ -13,7 +13,7 @@ vault transition
         |
         | candidate state + one closed upload effect
         v
-hara.blob capability
+hoplite.blob capability
   moves bounded bytes, verifies content and owns native resources
         |
         | exact generic result
@@ -55,7 +55,7 @@ state.
 
 Pure tests and alternate hosts use `begin-with`, `append-with`, `abort-with` and
 `install-with` with an injected capability function. Production handlers use
-the corresponding async functions, which await the installed `hara.blob`
+the corresponding async functions, which await the installed `hoplite.blob`
 service. Both paths share the same candidate-state acceptance functions.
 
 Provider rejection remains a rejected coroutine operation in the production

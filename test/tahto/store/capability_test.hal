@@ -102,7 +102,7 @@
       (has? open-call :native-abi)
       (every? capability/host-call?
               [open-call append-call abort-call verify-call range-call])])
-   ["hara.blob"
+   ["hoplite.blob"
     "staging/open"
     "staging/append-from-source"
     "staging/abort"
@@ -196,7 +196,7 @@
       (get result :state)
       (capability/host-call? (get result :value))
       (get-in result [:value :service])])
-   [true {:marker "unchanged"} true "hara.blob"])
+   [true {:marker "unchanged"} true "hoplite.blob"])
 
   (test/check
    "generic results are exact operation-specific records"
@@ -254,7 +254,7 @@
           append-effect
           (fn [service operation request]
             (if
-             (and (= "hara.blob" service)
+             (and (= "hoplite.blob" service)
                   (= "staging/append-from-source" operation)
                   (= 17 (get request :source-handle))
                   (= 5 (get request :length)))

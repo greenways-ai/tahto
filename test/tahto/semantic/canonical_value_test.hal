@@ -1,6 +1,6 @@
 (ns tahto.semantic.canonical-value-test
   (:require [std.foundation :refer :all]
-            [std.foundation.canonical-value :as portable]
+            [hoplite.value :as portable]
             [std.lib.test :as test]
             [tahto.semantic.canonical-value :as canonical]
             [tahto.semantic.model :as semantic]
@@ -99,11 +99,11 @@
    (portable/verified-result root 96 decoded-value)
    (portable/failed-result
     (get request :digest)
-    "hara.value/provider-failure")))
+    "hoplite.value/provider-failure")))
 
 (test/print-results
  [(test/check
-   "authorized objects prepare one exact generic hara.value call"
+   "authorized objects prepare one exact generic hoplite.value call"
    (let [prepared (canonical/prepare-read (base-state) read-input)
          call (get prepared :value)
          request (canonical/call-request call)]
@@ -114,10 +114,10 @@
       (has? request :path)
       (has? request :source-handle)])
    [true
-    {:service "hara.value"
+    {:service "hoplite.value"
      :operation "object/verify-hta"
      :arguments
-     [{:protocol "hara.value-request/1"
+     [{:protocol "hoplite.value-request/1"
        :operation "object/verify-hta"
        :digest root
        :max-bytes 1024}]}
@@ -227,14 +227,14 @@
           (fn [service operation request]
             (portable/failed-result
              root
-             "hara.value/hta-noncanonical")))]
+             "hoplite.value/hta-noncanonical")))]
      [(get result :ok)
       (error-code result)
       (get-in result [:error :details :code])
       (= state (result-state result))])
    [false
     "tahto.canonical-value/verification-failed"
-    "hara.value/hta-noncanonical"
+    "hoplite.value/hta-noncanonical"
     true])
 
   (test/check

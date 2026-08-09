@@ -9,7 +9,7 @@ current HAL client.
 The generic replacement has landed in Hoplite:
 
 ```text
-service: hara.store
+service: hoplite.store
 operations:
   load
   initialize
@@ -31,7 +31,7 @@ New Tahto HAL code must not refer to this identity or to `tahto.metadata`.
 
 ## Generic mechanics already extracted
 
-The current `hara.store` providers preserve:
+The current `hoplite.store` providers preserve:
 
 - bounded signed-64-bit-compatible revisions;
 - initialize only when absent;
@@ -83,5 +83,5 @@ native implementation directory or Tahto-specific provider identity.
 ## Security boundary
 
 A native provider ABI may exist inside generic host infrastructure, but trusted
-installation binds it to `hara.store`. ABI identities, paths, drivers,
+installation binds it to `hoplite.store`. ABI identities, paths, drivers,
 credentials and provider packages never enter application values.

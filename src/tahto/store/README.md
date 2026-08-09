@@ -6,16 +6,16 @@ generic-capability orchestration logic.
 ```text
 model.hal             canonical identities, limits and immutable state
 host.hal              closed Tahto domain effects and result validation
-capability.hal        pure-HAL mapping to generic hara.blob calls
+capability.hal        pure-HAL mapping to generic hoplite.blob calls
 upload.hal            candidate-state upload orchestration and rollback
-response_source.hal   authorized range projection to hara.response-source/1
-memory_blob.hal       deterministic pure-HAL hara.blob reference provider
+response_source.hal   authorized range projection to hoplite.response-source/1
+memory_blob.hal       deterministic pure-HAL hoplite.blob reference provider
 graph.hal             manifests, content graph, closure, roots and dry-run GC
 vault.hal             uploads, installation, references, quotas and ranges
 history.hal           immutable commits, CAS heads, backups, restore, receipts
 transaction.hal       verified request-to-metadata commit plans
-provider.hal          pure-HAL mapping to generic hara.store
-memory_store.hal      deterministic pure-HAL hara.store reference provider
+provider.hal          pure-HAL mapping to generic hoplite.store
+memory_store.hal      deterministic pure-HAL hoplite.store reference provider
 ```
 
 Record and signed-verification contracts live under `tahto.protocol.*`.
@@ -42,7 +42,7 @@ command.
 `tahto.store.capability` maps the closed Tahto object effects to:
 
 ```clojure
-{:service "hara.blob"
+{:service "hoplite.blob"
  :operation "..."
  :arguments [request]}
 ```
@@ -70,15 +70,16 @@ the original state.
 exact generic source result and projects only:
 
 ```clojure
-{:protocol "hara.response-source/1"
+{:protocol "hoplite.response-source/1"
+ :service "hoplite.blob"
  :source-handle 31
  :offset 2
  :length 7}
 ```
 
-Object bytes and source ownership never enter Tahto values. The installed
-Hoplite filesystem provider and Nginx transport own actual byte custody,
-digests, restart safety, output backpressure and cleanup.
+Object bytes and source ownership never enter Tahto values. An independently
+packaged filesystem provider owns byte custody, digests and restart safety;
+the Hoplite Nginx transport owns bounded streaming, backpressure and cleanup.
 
 ### Deterministic blob profile
 
@@ -94,7 +95,7 @@ metadata plan. `tahto.store.provider` validates Tahto state and receipt evidence
 then calls:
 
 ```text
-service: hara.store
+service: hoplite.store
 operations: load · initialize · compare-and-swap · receipt
 ```
 
@@ -108,7 +109,7 @@ single-revision CAS, atomic snapshot/receipt publication, exact replay,
 stale-writer and key-collision rejection, both fault windows and lost-result
 recovery.
 
-The production Hoplite SQLite provider preserves the same mechanics while
+An independently packaged SQLite provider preserves the same mechanics while
 recomputing digests over actual canonical HTA spans and retaining state across
 restart.
 

@@ -163,7 +163,7 @@
       (count (get call :arguments))
       (has? call :native-abi)
       (provider/host-call? call)])
-   [true "hara.store" "load" 1 false true])
+   [true "hoplite.store" "load" 1 false true])
 
   (test/check
    "receipt lookup treats the plan digest as an opaque generic key"
@@ -268,7 +268,7 @@
       (get-in request [:receipt :protocol])])
    [true
     true
-    "hara.store"
+    "hoplite.store"
     "compare-and-swap"
     0
     1
@@ -387,7 +387,7 @@
           (provider/prepare-load state)
           (fn [service operation request]
             (if
-             (and (= "hara.store" service)
+             (and (= "hoplite.store" service)
                   (= "load" operation)
                   (= provider/request-protocol
                      (get request :protocol)))

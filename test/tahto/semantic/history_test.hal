@@ -409,7 +409,7 @@
     "tahto.semantic/head-commit-profile-invalid"])
 
   (test/check
-   "semantic commits compose through TAHTO-7 and the generic hara.store plan"
+   "semantic commits compose through TAHTO-7 and the generic hoplite.store plan"
    (let [execution
          (semantic-history/execute-commit
           (enrolled-state)
@@ -437,9 +437,9 @@
       (has? request :path)])
    [true 1 commit-genesis-root
     true
-    "hara.store"
+    "hoplite.store"
     "compare-and-swap"
-    "hara.store-request/1"
+    "hoplite.store-request/1"
     0 1 plan-digest false false])
 
   (test/check

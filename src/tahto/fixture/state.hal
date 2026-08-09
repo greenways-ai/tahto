@@ -8,7 +8,7 @@
             [tahto.sync.device :as device]))
 
 ;; The fixture owns the shape and meaning of its initial state. The host owns
-;; only generic durable value mechanics through `hara.store`. No provider,
+;; only generic durable value mechanics through `hoplite.store`. No provider,
 ;; database path, credential, source handle or request context enters this
 ;; namespace or the persisted value.
 

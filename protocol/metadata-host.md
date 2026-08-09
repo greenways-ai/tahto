@@ -12,7 +12,7 @@ Tahto HAL
         |
         | one exact generic Host/call
         v
-hara.store
+hoplite.store
   opaque canonical values · revision CAS · atomic receipt storage
         |
         v
@@ -42,7 +42,7 @@ mechanics; it is not advertised as present today.
 Tahto prepares calls with exactly three fields:
 
 ```clojure
-{:service "hara.store"
+{:service "hoplite.store"
  :operation "compare-and-swap"
  :arguments [request]}
 ```
@@ -50,18 +50,18 @@ Tahto prepares calls with exactly three fields:
 A call plan mirrors:
 
 ```clojure
-(std.foundation.host/call "hara.store" "compare-and-swap" request)
+(std.foundation.host/call "hoplite.store" "compare-and-swap" request)
 ```
 
-Trusted host installation associates `hara.store` with a reviewed provider.
+Trusted host installation associates `hoplite.store` with a reviewed provider.
 HAL cannot select an ABI, driver, database path, credential, provider package or
 native library.
 
 ## Generic request profile
 
 ```text
-request protocol: hara.store-request/1
-result protocol: hara.store-result/1
+request protocol: hoplite.store-request/1
+result protocol: hoplite.store-result/1
 operations:
   load
   initialize
@@ -85,7 +85,7 @@ transaction meaning, authorization, merge policy or receipt fields.
 After HAL validates canonical state-encoding evidence, it prepares:
 
 ```clojure
-{:protocol "hara.store-request/1"
+{:protocol "hoplite.store-request/1"
  :operation "initialize"
  :revision 1
  :value tahto-state
@@ -103,7 +103,7 @@ HAL validates the complete TAHTO transaction plan and canonical encoding proof
 before preparing:
 
 ```clojure
-{:protocol "hara.store-request/1"
+{:protocol "hoplite.store-request/1"
  :operation "compare-and-swap"
  :expected-revision 0
  :revision 1

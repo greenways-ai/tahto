@@ -29,7 +29,7 @@ Tahto HAL
   authorization · state transitions · validation · recovery
         |
         v
-hara.store · hara.blob
+hoplite.store · hoplite.blob
         |
         v
 trusted Hoplite providers · SQLite · filesystem · Nginx
@@ -84,11 +84,11 @@ core record generation or collection mode is required for the first release.
 
 ## Object and metadata capabilities
 
-Metadata uses generic `hara.store` for opaque canonical values, exact revision
-CAS and atomic opaque receipts. Large bytes use generic `hara.blob` for staged
+Metadata uses generic `hoplite.store` for opaque canonical values, exact revision
+CAS and atomic opaque receipts. Large bytes use generic `hoplite.blob` for staged
 upload, digest-verified installation and immutable source opening.
 
-Authorized ranges project only `hara.response-source/1`. Host ownership is exact
+Authorized ranges project only `hoplite.response-source/1`. Host ownership is exact
 request context + work + handle; a copied numeric handle is insufficient
 authority and never enters durable Tahto state.
 

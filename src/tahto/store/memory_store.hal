@@ -4,7 +4,7 @@
             [tahto.store.model :as model]
             [tahto.store.provider :as provider]))
 
-;; Deterministic reference implementation of the generic `hara.store`
+;; Deterministic reference implementation of the generic `hoplite.store`
 ;; mechanics. The driver deliberately treats values and receipts as opaque.
 ;; Tahto state, transaction and receipt validation happens in
 ;; `tahto.store.provider` before and after this boundary.

@@ -1,6 +1,6 @@
 (ns tahto.sync.two-device-object-test
   (:require [std.foundation :refer :all]
-            [std.foundation.response-source :as portable]
+            [hoplite.response-source :as portable]
             [std.lib.test :as test]
             [tahto.protocol.validate :as validate]
             [tahto.store.history :as history]

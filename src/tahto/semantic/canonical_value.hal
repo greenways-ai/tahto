@@ -1,6 +1,6 @@
 (ns tahto.semantic.canonical-value
   (:require [std.foundation :refer :all]
-            [std.foundation.canonical-value :as portable]
+            [hoplite.value :as portable]
             [std.foundation.coroutine :as coroutine]
             [std.foundation.host :as foundation-host]
             [tahto.protocol.validate :as validate]
@@ -8,7 +8,7 @@
             [tahto.store.graph :as graph]
             [tahto.store.model :as model]))
 
-;; This namespace binds one namespace-authorized Tahto object to Hara's generic
+;; This namespace binds one namespace-authorized Tahto object to Hoplite's
 ;; bounded canonical-value capability. The host verifies actual bytes and HTA
 ;; canonicality; Tahto accepts only the exact requested digest and installed
 ;; object size, then creates schema-bound evidence for semantic admission.

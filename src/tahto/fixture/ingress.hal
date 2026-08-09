@@ -5,11 +5,10 @@
             [tahto.store.model :as model]
             [tahto.sync.device :as device]))
 
-;; Hoplite owns signature verification, freshness, key lifecycle and durable
-;; nonce/idempotency admission. Tahto receives one closed application identity
-;; and binds only its canonical request fingerprint into the ordinary device
-;; request ledger. Raw signatures, nonces and idempotency keys never cross this
-;; boundary.
+;; This compatibility fixture accepts the closed identity emitted by the old
+;; ingress. New handlers verify signatures, freshness and semantic coordinates
+;; with tahto.node.request-auth, then perform nonce/idempotency admission in
+;; Tahto HAL. Hoplite supplies only generic crypto, clock and transport calls.
 
 (def ingress-profile
   "hoplite-application-ingress/1")

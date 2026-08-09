@@ -10,9 +10,9 @@
 ;; service supplies application-neutral durable value storage and exact
 ;; revision compare-and-swap only. A native ABI or driver identity never enters
 ;; the HAL call plan.
-(def host-service "hara.store")
-(def request-protocol "hara.store-request/1")
-(def result-protocol "hara.store-result/1")
+(def host-service "hoplite.store")
+(def request-protocol "hoplite.store-request/1")
+(def result-protocol "hoplite.store-result/1")
 
 (def snapshot-protocol "tahto.metadata-snapshot/1")
 (def state-verification-protocol

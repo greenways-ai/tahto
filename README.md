@@ -16,7 +16,7 @@ Greenways OS applications
   closure planning · sync
           │ closed generic capability calls
           ▼
- Ignatius blocks · scoped refs · hara.blob
+ Ignatius blocks · scoped refs · hoplite.blob
           │ trusted host installation
           ▼
  specification packages · SQLite · filesystem · Nginx
@@ -86,9 +86,9 @@ by [#65](https://github.com/greenways-ai/tahto/issues/65),
 | `semantic.submit` pure-HAL kernel | ready |
 | Pairing and canonical signed-request law | ready |
 | Greenways OS pairing client | ready |
-| `hara.value` contract and Tahto adapter | ready |
-| Filesystem `hara.value` provider | pending `greenways-ai/hoplite#80` |
-| Installed `hara.value` registration | pending `greenways-ai/hoplite#82` |
+| `hoplite.value` contract and Tahto adapter | ready |
+| Filesystem `hoplite.value` provider package | pending extraction from Hoplite core |
+| Tahto distribution provider composition | pending |
 | Exact installed specification-validator invocation | pending `#34` follow-up |
 | Semantic routes | pending `#65` |
 | Required semantic authentication realm | pending `#66` |
@@ -148,7 +148,7 @@ is not authority to install, fetch or execute remote code.
 Tahto metadata is persisted through the application-neutral service:
 
 ```text
-service: hara.store
+service: hoplite.store
 operations:
   load
   initialize
@@ -157,7 +157,7 @@ operations:
 ```
 
 `tahto.store.provider` prepares and validates the exact generic requests and
-results. The installed Hoplite SQLite provider sees opaque canonical values,
+results. An independently packaged SQLite provider sees opaque canonical values,
 bounded revisions and opaque receipts. It does not parse Tahto object graphs,
 transaction meaning, authorization or replay policy.
 
@@ -183,7 +183,7 @@ Large object bodies never become ordinary Hara values. Tahto emits closed domain
 effects which `tahto.store.capability` maps to the installed generic service:
 
 ```text
-service: hara.blob
+service: hoplite.blob
 
 upload/open            -> staging/open
 upload/append          -> staging/append-from-source
@@ -196,7 +196,7 @@ object/read-range      -> object/open-source
 generic result passes HAL validation. Provider failure or identity mismatch
 rolls back optimistic offsets, removal and verification state.
 
-The installed Hoplite providers supply restart-safe filesystem custody, actual
+Tahto deployment providers supply restart-safe filesystem custody, actual
 SHA-256 verification, request-scoped ingress sources and immutable egress
 sources. Driver selection, storage roots and limits are trusted worker
 configuration rather than portable request fields.
@@ -213,7 +213,8 @@ See:
 An authorized object range is projected as one closed portable value:
 
 ```clojure
-{:protocol "hara.response-source/1"
+{:protocol "hoplite.response-source/1"
+ :service "hoplite.blob"
  :source-handle 31
  :offset 2
  :length 7}
@@ -224,9 +225,9 @@ The full boundary is:
 ```text
 Tahto namespace authority
   -> vault/plan-range
-  -> hara.blob object/open-source
+  -> hoplite.blob object/open-source
   -> exact result validation
-  -> hara.response-source/1
+  -> hoplite.response-source/1
   -> request-scoped Nginx transport
 ```
 
@@ -306,8 +307,8 @@ specification package accepted the decoded canonical application value.
 The remaining value/specification sequence is:
 
 ```text
-greenways-ai/hoplite#80  filesystem hara.value provider
-greenways-ai/hoplite#82  installed provider registration
+provider extraction      filesystem hoplite.value implementation package
+Tahto distribution       provider registration and deployment composition
 #34 follow-up             exact package-root and validator-entry invocation
 ```
 
@@ -332,7 +333,7 @@ The pure-HAL operation laws are complete:
   explicit device, sequence, timestamp, parent, head and revision evidence;
 - `semantic.submit` replays preparation against current state, binds verified
   signed commit/head records exactly, and publishes through one TAHTO-7
-  transition and one generic `hara.store` CAS.
+  transition and one generic `hoplite.store` CAS.
 
 These kernels do not imply installed routes. The service completion sequence is:
 

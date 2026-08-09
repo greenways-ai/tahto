@@ -57,7 +57,7 @@
    :status "ready"
    :phase "contract"
    :fixture-protocol fixture/fixture-protocol
-   :required-services ["hara.blob" "hara.store"]})
+   :required-services ["hoplite.blob" "hoplite.store"]})
 
 (defn health-wire-value
   []
@@ -65,7 +65,7 @@
    "status" "ready"
    "phase" "contract"
    "fixture-protocol" fixture/fixture-protocol
-   "required-services" ["hara.blob" "hara.store"]})
+   "required-services" ["hoplite.blob" "hoplite.store"]})
 
 (defn descriptor
   [_request]

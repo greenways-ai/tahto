@@ -12,7 +12,7 @@ revalidate current revision and head
   -> accept commit
   -> compare-and-swap head
   -> complete idempotency
-  -> one generic hara.store compare-and-swap
+  -> one generic hoplite.store compare-and-swap
 ```
 
 Commit acceptance and head replacement are atomic. A head failure returns the original state, including the original device sequence, sequence slot, commit table and edge table.
@@ -101,7 +101,7 @@ The coordinator owns:
 
 A completed retry supplies the current metadata revision and a fresh nonce while preserving the same request digest and idempotency key. The coordinator returns the prior result digest without re-entering the submit transition.
 
-`semantic.submit/prepare-store-commit` delegates to `tahto.store.provider/prepare-compare-and-swap`. Durable publication remains one application-neutral `hara.store` request containing opaque state and receipt evidence.
+`semantic.submit/prepare-store-commit` delegates to `tahto.store.provider/prepare-compare-and-swap`. Durable publication remains one application-neutral `hoplite.store` request containing opaque state and receipt evidence.
 
 ## Security laws
 

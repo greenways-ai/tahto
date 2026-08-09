@@ -589,7 +589,7 @@
       (has? request :driver)
       (has? request :path)])
    [true
-    "hara.store"
+    "hoplite.store"
     "compare-and-swap"
     4
     5

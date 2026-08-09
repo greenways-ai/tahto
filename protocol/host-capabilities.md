@@ -37,9 +37,9 @@ installation selects it. ABI identity is never an application argument or field.
 Every prepared call contains exactly:
 
 ```clojure
-{:service "hara.blob"
+{:service "hoplite.blob"
  :operation "staging/append-from-source"
- :arguments [{:protocol "hara.blob-request/1"
+ :arguments [{:protocol "hoplite.blob-request/1"
               :operation "staging/append-from-source"
               ...}]}
 ```
@@ -80,9 +80,9 @@ exact opaque request context, owning work and live handle registration.
 ## Generic blob profile
 
 ```text
-service: hara.blob
-request: hara.blob-request/1
-result:  hara.blob-result/1
+service: hoplite.blob
+request: hoplite.blob-request/1
+result:  hoplite.blob-result/1
 ```
 
 ### Effect mapping
@@ -103,7 +103,7 @@ HAL work and is tracked by #19 over a separate bounded small-value capability.
 ### Open
 
 ```clojure
-{:protocol "hara.blob-request/1"
+{:protocol "hoplite.blob-request/1"
  :operation "staging/open"
  :staging-key "upload.a"
  :expected-digest "sha256:..."
@@ -117,7 +117,7 @@ creates or resumes server-owned staging and reports its verified offset.
 ### Append
 
 ```clojure
-{:protocol "hara.blob-request/1"
+{:protocol "hoplite.blob-request/1"
  :operation "staging/append-from-source"
  :staging-key "upload.a"
  :offset 0
@@ -144,7 +144,7 @@ production.
 Tahto first authorizes and plans a half-open range, then calls:
 
 ```clojure
-{:protocol "hara.blob-request/1"
+{:protocol "hoplite.blob-request/1"
  :operation "object/open-source"
  :digest "sha256:..."
  :offset 0
@@ -156,7 +156,7 @@ extra fields. HAL translates it through the existing opened-range result and
 projects only:
 
 ```clojure
-{:protocol "hara.response-source/1"
+{:protocol "hoplite.response-source/1"
  :source-handle 31
  :offset 0
  :length 4096}
@@ -175,9 +175,9 @@ streams under Nginx backpressure and closes the source on every terminal path.
 Metadata follows the same rule through:
 
 ```text
-service: hara.store
-request: hara.store-request/1
-result:  hara.store-result/1
+service: hoplite.store
+request: hoplite.store-request/1
+result:  hoplite.store-result/1
 operations: load · initialize · compare-and-swap · receipt
 ```
 

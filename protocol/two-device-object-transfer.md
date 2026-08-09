@@ -20,8 +20,8 @@ Tahto pull offer
 device B verified requests
   -> exact acknowledgement
   -> independent authorized range plan
-  -> hara.blob object/open-source under B's work scope
-  -> hara.response-source/1
+  -> hoplite.blob object/open-source under B's work scope
+  -> hoplite.response-source/1
 ```
 
 A source handle belongs to one provider-owned request/work scope. It is never
@@ -31,7 +31,7 @@ Tahto state.
 ## Portable law fixture
 
 `test/tahto/sync/two_device_object_test.hal` proves the application-neutral law
-against the deterministic pure-HAL `hara.blob` reference provider.
+against the deterministic pure-HAL `hoplite.blob` reference provider.
 
 The fixture:
 
@@ -46,7 +46,7 @@ The fixture:
    closure behind the current head;
 8. acknowledges the exact offered digest batch and advances B's cursor;
 9. authorizes B's independent object read and returns one closed
-   `hara.response-source/1` descriptor;
+   `hoplite.response-source/1` descriptor;
 10. proves A's work cannot close B's source while B's exact work can; and
 11. revokes B, rejects a fresh read request and preserves the historical signed
     commit, head and receipt.
@@ -108,7 +108,7 @@ The production release gate still requires:
 
 ```text
 real deterministic binary bytes
-filesystem-backed hara.blob
+filesystem-backed hoplite.blob
 container/worker removal and recreation
 signed A publication
 B sync through an independent execution scope

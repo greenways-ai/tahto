@@ -64,7 +64,7 @@ Tahto owns:
 - divergence preservation;
 - exact bounds and closed result fields.
 
-Applications own the meaning of selected objects and branch differences. Hodos or another client may project the result. `hara.value` remains a separate explicit operation when canonical application bytes must be decoded.
+Applications own the meaning of selected objects and branch differences. Hodos or another client may project the result. `hoplite.value` remains a separate explicit operation when canonical application bytes must be decoded.
 
 ## Security and compatibility laws
 

@@ -18,7 +18,7 @@ Before changing core code, preserve these laws:
 - Tahto domain state, effect interpretation, orchestration, recovery policy and
   result validation remain in `.hal`.
 - Native operating-system and database mechanics use application-neutral
-  `hara.store`, `hara.blob` and related Hara/Hoplite capabilities. Do not add a
+  `hoplite.store`, `hoplite.blob` and related Hara/Hoplite capabilities. Do not add a
   Tahto-specific Rust or C provider.
 - A portable call plan contains only `{service, operation, arguments}`. HAL may
   not select an ABI, provider package, driver, database path, storage root,

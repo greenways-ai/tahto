@@ -6,7 +6,7 @@
 ;; Management and bootstrap mutations enter through an authenticated host
 ;; boundary rather than a signed, already-enrolled device. This coordinator
 ;; gives those narrow transitions the same revision, digest and generic
-;; hara.store CAS laws as application transactions without manufacturing an
+;; hoplite.store CAS laws as application transactions without manufacturing an
 ;; application principal.
 
 (def replay-protocol "tahto.metadata-mutation-replay/1")

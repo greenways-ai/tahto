@@ -2,7 +2,7 @@
 
 Tahto's authoritative implementation is HAL under `src/tahto/`. The generic
 metadata mechanics formerly demonstrated here have been extracted into the
-application-neutral `hara.store` providers in Hoplite.
+application-neutral `hoplite.store` providers in Hoplite.
 
 This directory is retained only as frozen executable migration and parity
 evidence. It is **not** the current Tahto architecture and must not gain new
@@ -23,14 +23,14 @@ Tahto HAL
   state meaning · transaction validation · receipt interpretation · recovery
         |
         v
-hara.store
+hoplite.store
   opaque canonical value · exact revision CAS · opaque atomic receipt
         |
         v
 trusted Hoplite memory or SQLite provider
 ```
 
-The current `tahto.store.provider` calls only `hara.store`. A native ABI version,
+The current `tahto.store.provider` calls only `hoplite.store`. A native ABI version,
 database path, driver, provider package or credential is selected by trusted
 host installation and never appears in HAL application values.
 

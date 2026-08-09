@@ -3,7 +3,7 @@
 ## Status
 
 This document defines the portable output of an authorized Tahto object range.
-It is a HAL integration profile over the generic `hara.blob` capability, not a
+It is a HAL integration profile over the generic `hoplite.blob` capability, not a
 Tahto wire record and not a Hoplite-specific response type.
 
 ## Boundary
@@ -14,9 +14,9 @@ The complete path is:
 Tahto namespace authority and object metadata
   -> vault/plan-range
   -> tahto.store.host-effect/1 object/read-range
-  -> hara.blob object/open-source
+  -> hoplite.blob object/open-source
   -> validated tahto.store.host-result/1 opened range
-  -> hara.response-source/1
+  -> hoplite.response-source/1
 ```
 
 Tahto decides whether an application and namespace may read an immutable
@@ -29,7 +29,7 @@ handle.
 projects only:
 
 ```clojure
-{:protocol "hara.response-source/1"
+{:protocol "hoplite.response-source/1"
  :source-handle 31
  :offset 2
  :length 7}
@@ -61,7 +61,7 @@ Coroutine-enabled production hosts use:
  (response-source/open state request))
 ```
 
-Both paths run `vault/plan-range`, the same exact `hara.blob` request and result
+Both paths run `vault/plan-range`, the same exact `hoplite.blob` request and result
 validator, and the same descriptor projection. A successful result is a normal
 Tahto `model/ok` whose value is the portable descriptor; the logical store state
 is unchanged.
@@ -74,7 +74,7 @@ is unchanged.
   and length and may contain no additional fields.
 - The translated Tahto opened-range result must pass the existing closed host
   result validator.
-- The final value must pass Hara's `hara.response-source/1` validator, including
+- The final value must pass Hoplite's `hoplite.response-source/1` validator, including
   positive source handle and length, non-negative offset, safe-integer bounds,
   and a bounded half-open interval.
 - A positive native handle above the portable safe-integer maximum is rejected.

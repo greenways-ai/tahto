@@ -7,7 +7,7 @@
             [tahto.store.vault :as vault]))
 
 ;; This namespace is the atomic HAL orchestration boundary between Tahto's
-;; candidate upload transitions and the generic `hara.blob` capability. Native
+;; candidate upload transitions and the generic `hoplite.blob` capability. Native
 ;; code moves bytes; only an exact generic result commits the candidate state.
 (def upload-effect-operations
   #{"upload/open"

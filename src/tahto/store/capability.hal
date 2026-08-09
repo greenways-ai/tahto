@@ -9,9 +9,9 @@
 ;; application-neutral host capability without naming a native ABI in
 ;; application values. The installed host binds service identity to one trusted
 ;; provider descriptor.
-(def host-service "hara.blob")
-(def request-protocol "hara.blob-request/1")
-(def result-protocol "hara.blob-result/1")
+(def host-service "hoplite.blob")
+(def request-protocol "hoplite.blob-request/1")
+(def result-protocol "hoplite.blob-result/1")
 
 (def supported-effect-operations
   #{"upload/open"
