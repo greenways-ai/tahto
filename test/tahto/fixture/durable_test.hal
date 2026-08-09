@@ -33,7 +33,7 @@
 
 (def quota-bytes 2147483648)
 
-(defn identity
+(defn fixture-identity
   [replay-status]
   {:profile ingress/ingress-profile
    :subject "profile.primary"
@@ -110,7 +110,7 @@
          prepared
          (durable/prepare-mutation
           initial
-          (identity "applied")
+          (fixture-identity "applied")
           accepted-at
           set-quota-transition
           quota-bytes
@@ -157,7 +157,7 @@
          result
          (durable/execute-mutation-with
           initial
-          (identity "applied")
+          (fixture-identity "applied")
           accepted-at
           set-quota-transition
           quota-bytes
@@ -196,7 +196,7 @@
          applied
          (durable/execute-mutation-with
           initial
-          (identity "applied")
+          (fixture-identity "applied")
           accepted-at
           set-quota-transition
           quota-bytes
@@ -211,7 +211,7 @@
          replay
          (durable/prepare-replay
           state
-          (identity "replayed")
+          (fixture-identity "replayed")
           accepted-at
           plan-digest)
          call (get replay :value)
@@ -241,7 +241,7 @@
          prepared
          (durable/prepare-mutation
           initial
-          (identity "applied")
+          (fixture-identity "applied")
           accepted-at
           set-quota-transition
           quota-bytes
@@ -257,7 +257,7 @@
          replayed
          (durable/execute-replay-with
           (get committed :state)
-          (identity "replayed")
+          (fixture-identity "replayed")
           accepted-at
           plan-digest
           (fn [service operation request]
@@ -293,7 +293,7 @@
          result
          (durable/prepare-mutation
           initial
-          (identity "applied")
+          (fixture-identity "applied")
           accepted-at
           set-quota-transition
           quota-bytes
@@ -315,7 +315,7 @@
          result
          (durable/prepare-replay
           initial
-          (identity "replayed")
+          (fixture-identity "replayed")
           accepted-at
           plan-digest)]
      [(get result :ok)
