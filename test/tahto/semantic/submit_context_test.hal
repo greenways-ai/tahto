@@ -1,0 +1,60 @@
+(ns tahto.semantic.submit-context-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.submit :as submit]
+            [tahto.store.model :as model]))
+
+(def request-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def context
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation submit/operation
+   :application "fixture.world"
+   :namespace "world.a"
+   :collection "scene"
+   :request-digest request-digest
+   :idempotency-key "semantic-submit-context-0001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(def device
+  {:protocol model/device-protocol
+   :id "device.a"
+   :node "node.home"
+   :public-key "ed25519:device-a-public-key"
+   :status "enrolled"
+   :enrolled-at "2026-08-09T00:00:00Z"})
+
+(def enrolled-state
+  (assoc (model/empty-state)
+         :devices
+         {"device.a" device}))
+
+(def revoked-state
+  (assoc-in
+   enrolled-state
+   [:devices "device.a"]
+   (assoc device
+          :status "revoked"
+          :revoked-at "2026-08-09T00:10:00Z")))
+
+(test/print-results
+ [(test/check
+   "semantic submit requires a current enrolled device at the context boundary"
+   [(submit/authorized-context? enrolled-state context)
+    (submit/authorized-context? revoked-state context)
+    (submit/authorized-context? (model/empty-state) context)
+    (submit/authorized-context?
+     enrolled-state
+     (assoc context :operation "semantic.prepare"))
+    (submit/authorized-context?
+     enrolled-state
+     (assoc context
+            :status "completed"
+            :result-digest request-digest))
+    (submit/authorized-context? enrolled-state nil)]
+   [true false false false false false])])
