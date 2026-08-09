@@ -28,35 +28,42 @@
 (def verified-value-fields
   #{:value :verification})
 
+(defn truth-value
+  [value]
+  (if value true false))
+
 (defn object-installed?
   [state root]
   (not (nil? (model/stored-object state root))))
 
 (defn object-authorized?
   [state application namespace root]
-  (graph/namespace-reachable? state application namespace root))
+  (truth-value
+   (graph/namespace-reachable? state application namespace root)))
 
 (defn read-input?
   [value]
-  (and
-   (validate/exact-record? value read-input-fields #{})
-   (model/identifier? (get value :application))
-   (model/identifier? (get value :namespace))
-   (model/canonical-digest? (get value :root))
-   (portable/bounded-byte-count? (get value :max-bytes))
-   (<= (get value :max-bytes)
-       semantic/max-semantic-value-bytes)))
+  (truth-value
+   (and
+    (validate/exact-record? value read-input-fields #{})
+    (model/identifier? (get value :application))
+    (model/identifier? (get value :namespace))
+    (model/canonical-digest? (get value :root))
+    (portable/bounded-byte-count? (get value :max-bytes))
+    (<= (get value :max-bytes)
+        semantic/max-semantic-value-bytes))))
 
 (defn verify-input?
   [value]
-  (and
-   (validate/exact-record? value verify-input-fields #{})
-   (read-input?
-    {:application (get value :application)
-     :namespace (get value :namespace)
-     :root (get value :root)
-     :max-bytes (get value :max-bytes)})
-   (semantic/schema-ref? (get value :schema-ref))))
+  (truth-value
+   (and
+    (validate/exact-record? value verify-input-fields #{})
+    (read-input?
+     {:application (get value :application)
+      :namespace (get value :namespace)
+      :root (get value :root)
+      :max-bytes (get value :max-bytes)})
+    (semantic/schema-ref? (get value :schema-ref)))))
 
 (defn call-request
   [call]
@@ -72,13 +79,14 @@
   [value]
   (let [arguments (get value :arguments)
         request (call-request value)]
-    (and
-     (validate/exact-record? value host-call-fields #{})
-     (= portable/service (get value :service))
-     (= portable/operation (get value :operation))
-     (vector? arguments)
-     (= 1 (count arguments))
-     (portable/request? request))))
+    (truth-value
+     (and
+      (validate/exact-record? value host-call-fields #{})
+      (= portable/service (get value :service))
+      (= portable/operation (get value :operation))
+      (vector? arguments)
+      (= 1 (count arguments))
+      (portable/request? request)))))
 
 (defn prepare-read
   [state input]
@@ -115,14 +123,15 @@
 
 (defn read-result?
   [value]
-  (and
-   (validate/exact-record? value read-result-fields #{})
-   (model/canonical-digest? (get value :root))
-   (semantic/bounded-positive-integer?
-    (get value :value-size)
-    semantic/max-semantic-value-bytes)
-   (= portable/profile (get value :profile))
-   (portable/portable-value? (get value :value))))
+  (truth-value
+   (and
+    (validate/exact-record? value read-result-fields #{})
+    (model/canonical-digest? (get value :root))
+    (semantic/bounded-positive-integer?
+     (get value :value-size)
+     semantic/max-semantic-value-bytes)
+    (= portable/profile (get value :profile))
+    (portable/portable-value? (get value :value)))))
 
 (defn accept-read
   [state input call result]
@@ -229,11 +238,12 @@
 
 (defn verified-value?
   [value]
-  (and
-   (validate/exact-record? value verified-value-fields #{})
-   (portable/portable-value? (get value :value))
-   (semantic/canonical-value-verification?
-    (get value :verification))))
+  (truth-value
+   (and
+    (validate/exact-record? value verified-value-fields #{})
+    (portable/portable-value? (get value :value))
+    (semantic/canonical-value-verification?
+     (get value :verification)))))
 
 (defn accept-verified
   [state schema-ref read-value]
