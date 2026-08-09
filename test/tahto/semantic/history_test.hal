@@ -1,0 +1,467 @@
+(ns tahto.semantic.history-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.history :as semantic-history]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]
+            [tahto.store.transaction :as transaction]
+            [tahto.sync.device :as device]))
+
+(def application "fixture.world")
+(def namespace "world.a")
+(def collection "scene")
+
+(def root-genesis
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+(def root-left
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def root-right
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def root-merge
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+
+(def commit-genesis-root
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def commit-left-root
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def commit-right-root
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def commit-merge-root
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+
+(def head-divergent-digest
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def head-merged-digest
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def request-digest
+  "sha256:4444444444444444444444444444444444444444444444444444444444444444")
+(def result-digest
+  "sha256:5555555555555555555555555555555555555555555555555555555555555555")
+(def plan-digest
+  "sha256:6666666666666666666666666666666666666666666666666666666666666666")
+(def state-digest
+  "sha256:7777777777777777777777777777777777777777777777777777777777777777")
+(def approval-digest
+  "sha256:8888888888888888888888888888888888888888888888888888888888888888")
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn signature
+  [key-id]
+  {:profile "tahto-signature/1"
+   :algorithm "ed25519"
+   :key-id key-id
+   :value "abcdefghijklmnopqrstuvwxyz0123456789"})
+
+(defn root-projection
+  [root]
+  {:root root
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema-refs
+   [{:protocol "tahto.schema-ref/1"
+     :schema "fixture.entity"
+     :schema-version 1
+     :package "hara:fixture/world-specs"
+     :package-version "0.1.0"
+     :package-root root-genesis
+     :entry "fixture.entity/spec"}]
+   :index-root root
+   :roots
+   [{:name "document"
+     :id "world/main"
+     :root root}]})
+
+(defn install
+  [state digest size]
+  (let [objects
+        (assoc (get state :objects)
+               digest
+               (model/object-record digest size))
+        key (model/namespace-key application namespace)
+        references
+        (assoc (get state :references)
+               key
+               (conj
+                (model/value-or (get state :references) key #{})
+                digest))]
+    (assoc
+     (assoc state :objects objects)
+     :references references)))
+
+(defn base-state
+  []
+  (let [digests
+        [root-genesis root-left root-right root-merge
+         commit-genesis-root commit-left-root commit-right-root commit-merge-root]
+        state
+        (reduce
+         (fn [current digest]
+           (install current digest 128))
+         (model/empty-state)
+         digests)
+        roots
+        (reduce
+         (fn [output root]
+           (assoc output root (root-projection root)))
+         {}
+         [root-genesis root-left root-right root-merge])
+        edges
+        (reduce
+         (fn [output root]
+           (assoc output root []))
+         (get state :edges)
+         [root-genesis root-left root-right root-merge])]
+    (assoc (assoc state :semantic-roots roots) :edges edges)))
+
+(defn commit-record
+  [root device-id parents objects sequence]
+  {:protocol model/commit-protocol
+   :root root
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema semantic-history/schema
+   :schema-version semantic-history/schema-version
+   :device device-id
+   :parents parents
+   :objects objects
+   :tombstones []
+   :sequence sequence
+   :timestamp "2026-08-09T00:00:00Z"
+   :signature (signature (str device-id ".key"))})
+
+(defn record-verification
+  [protocol digest record]
+  {:protocol validate/verification-protocol
+   :record-protocol protocol
+   :verified true
+   :canonical-digest digest
+   :key-id (get-in record [:signature :key-id])
+   :record record})
+
+(defn commit-verification
+  [record]
+  (record-verification model/commit-protocol (get record :root) record))
+
+(defn head-record
+  [commits expected timestamp]
+  {:protocol model/head-protocol
+   :application application
+   :namespace namespace
+   :collection collection
+   :kind "main"
+   :name "primary"
+   :commits commits
+   :expected expected
+   :updated-at timestamp
+   :signature (signature "head.key")})
+
+(defn head-verification
+  [digest record]
+  (record-verification model/head-protocol digest record))
+
+(def genesis
+  (commit-record commit-genesis-root "device.a" [] [root-genesis] 1))
+(def left
+  (commit-record commit-left-root "device.a" [commit-genesis-root] [root-left] 2))
+(def right
+  (commit-record commit-right-root "device.b" [commit-genesis-root] [root-right] 1))
+(def merge-commit
+  (commit-record commit-merge-root
+                 "device.c"
+                 [commit-left-root commit-right-root]
+                 [root-merge]
+                 1))
+
+(defn accept-commit
+  [state record]
+  (semantic-history/accept-commit
+   state
+   {:application application :namespace namespace}
+   (commit-verification record)))
+
+(defn accepted-history
+  []
+  (let [genesis-result (accept-commit (base-state) genesis)
+        left-result (accept-commit (result-state genesis-result) left)
+        right-result (accept-commit (result-state left-result) right)
+        merge-result (accept-commit (result-state right-result) merge-commit)]
+    (result-state merge-result)))
+
+(defn enrolled-state
+  []
+  (result-state
+   (device/enrol-device
+    (base-state)
+    {:protocol validate/device-enrolment-protocol
+     :authorized true
+     :node "node.home"
+     :approval-digest approval-digest
+     :device
+     {:protocol model/device-protocol
+      :id "device.a"
+      :node "node.home"
+      :public-key "ed25519:device-a-public-key"
+      :status "enrolled"
+      :enrolled-at "2026-08-09T00:00:00Z"}})))
+
+(defn request-proof
+  [nonce]
+  {:protocol validate/request-verification-protocol
+   :verified true
+   :device "device.a"
+   :public-key "ed25519:device-a-public-key"
+   :operation "commit.accept"
+   :application application
+   :namespace namespace
+   :collection collection
+   :request-digest request-digest
+   :nonce nonce
+   :idempotency-key "semantic-history-idempotency-0001"
+   :timestamp "2026-08-09T00:01:00Z"})
+
+(defn result-proof
+  []
+  {:protocol transaction/result-verification-protocol
+   :verified true
+   :operation "commit.accept"
+   :request-digest request-digest
+   :outcome "ok"
+   :result-digest result-digest
+   :completed-at "2026-08-09T00:02:00Z"})
+
+(defn store-verification
+  []
+  {:protocol provider/commit-verification-protocol
+   :verified true
+   :expected-revision 0
+   :revision 1
+   :plan-digest plan-digest
+   :request-digest request-digest
+   :result-digest result-digest
+   :state-digest state-digest
+   :completed-at "2026-08-09T00:03:00Z"})
+
+(test/print-results
+ [(test/check
+   "semantic genesis and linear successors remain ordinary commits"
+   (let [genesis-result (accept-commit (base-state) genesis)
+         linear-result (accept-commit (result-state genesis-result) left)]
+     [(get genesis-result :ok)
+      (get linear-result :ok)
+      (get-in linear-result [:value :commit :protocol])
+      (get-in linear-result [:value :commit :schema])
+      (get-in linear-result [:value :commit :schema-version])
+      (model/commit-record (result-state linear-result) commit-left-root)])
+   [true true
+    "tahto.commit/1"
+    "tahto.semantic-root"
+    1
+    left])
+
+  (test/check
+   "semantic commits require exactly one admitted coordinate-matching root"
+   (let [state (base-state)
+         wrong-schema (assoc genesis :schema "fixture.other")
+         wrong-version (assoc genesis :schema-version 2)
+         no-roots (assoc genesis :objects [])
+         many-roots (assoc genesis :objects [root-genesis root-left])
+         missing-root (assoc genesis :objects [commit-merge-root])
+         mismatched-state
+         (assoc-in state
+                   [:semantic-roots root-genesis :collection]
+                   "other")]
+     [(error-code (accept-commit state wrong-schema))
+      (error-code (accept-commit state wrong-version))
+      (error-code (accept-commit state no-roots))
+      (error-code (accept-commit state many-roots))
+      (error-code (accept-commit state missing-root))
+      (error-code (accept-commit mismatched-state genesis))])
+   ["tahto.semantic/commit-schema-invalid"
+    "tahto.semantic/commit-schema-version-invalid"
+    "tahto.semantic/commit-root-count-invalid"
+    "tahto.semantic/commit-root-count-invalid"
+    "tahto.semantic/commit-root-not-admitted"
+    "tahto.semantic/commit-root-coordinate-mismatch"])
+
+  (test/check
+   "semantic parents must use the same profile and collection"
+   (let [genesis-result (accept-commit (base-state) genesis)
+         state (result-state genesis-result)
+         ordinary-parent
+         (assoc genesis :schema "fixture.other")
+         ordinary-state
+         (assoc state
+                :commits
+                (assoc (get state :commits)
+                       commit-genesis-root
+                       ordinary-parent))
+         cross-parent
+         (assoc genesis :collection "other")
+         cross-state
+         (assoc state
+                :commits
+                (assoc (get state :commits)
+                       commit-genesis-root
+                       cross-parent))]
+     [(error-code (accept-commit ordinary-state left))
+      (error-code (accept-commit cross-state left))])
+   ["tahto.semantic/commit-parent-profile-invalid"
+    "tahto.semantic/commit-parent-profile-invalid"])
+
+  (test/check
+   "two sibling commits remain divergent until an application merge commit exists"
+   (let [genesis-result (accept-commit (base-state) genesis)
+         left-result (accept-commit (result-state genesis-result) left)
+         right-result (accept-commit (result-state left-result) right)
+         divergent
+         (head-record [commit-left-root commit-right-root]
+                      []
+                      "2026-08-09T00:10:00Z")
+         divergent-result
+         (semantic-history/update-head
+          (result-state right-result)
+          (head-verification head-divergent-digest divergent))
+         merge-result
+         (accept-commit (result-state divergent-result) merge-commit)
+         merged
+         (head-record [commit-merge-root]
+                      [commit-left-root commit-right-root]
+                      "2026-08-09T00:20:00Z")
+         merged-result
+         (semantic-history/update-head
+          (result-state merge-result)
+          (head-verification head-merged-digest merged))]
+     [(get divergent-result :ok)
+      (get-in divergent-result [:value :head :commits])
+      (get merge-result :ok)
+      (get merged-result :ok)
+      (get-in merged-result [:value :head :commits])
+      (get-in merged-result [:value :previous])])
+   [true
+    [commit-left-root commit-right-root]
+    true
+    true
+    [commit-merge-root]
+    [commit-left-root commit-right-root]])
+
+  (test/check
+   "head compare-and-swap cannot silently discard divergence"
+   (let [state (accepted-history)
+         divergent
+         (head-record [commit-left-root commit-right-root]
+                      []
+                      "2026-08-09T00:10:00Z")
+         first
+         (semantic-history/update-head
+          state
+          (head-verification head-divergent-digest divergent))
+         stale
+         (head-record [commit-left-root]
+                      []
+                      "2026-08-09T00:11:00Z")
+         rejected
+         (semantic-history/update-head
+          (result-state first)
+          (head-verification head-merged-digest stale))]
+     [(get rejected :ok)
+      (error-code rejected)
+      (= (result-state first) (result-state rejected))])
+   [false "tahto.history/head-compare-failed" true])
+
+  (test/check
+   "heads reject ordinary or cross-collection commits"
+   (let [state (accepted-history)
+         ordinary
+         (assoc left :schema "fixture.other")
+         ordinary-state
+         (assoc state
+                :commits
+                (assoc (get state :commits) commit-left-root ordinary))
+         cross
+         (assoc right :collection "other")
+         cross-state
+         (assoc state
+                :commits
+                (assoc (get state :commits) commit-right-root cross))
+         head
+         (head-record [commit-left-root commit-right-root]
+                      []
+                      "2026-08-09T00:10:00Z")]
+     [(error-code
+       (semantic-history/update-head
+        ordinary-state
+        (head-verification head-divergent-digest head)))
+      (error-code
+       (semantic-history/update-head
+        cross-state
+        (head-verification head-divergent-digest head)))])
+   ["tahto.semantic/head-commit-profile-invalid"
+    "tahto.semantic/head-commit-profile-invalid"])
+
+  (test/check
+   "semantic commits compose through TAHTO-7 and the generic hara.store plan"
+   (let [execution
+         (semantic-history/execute-commit
+          (enrolled-state)
+          0
+          (request-proof "semantic-history-nonce-0001")
+          (commit-verification genesis)
+          (result-proof))
+         prepared
+         (semantic-history/prepare-store-commit
+          execution
+          (store-verification))
+         call (get prepared :value)
+         request (provider/call-request call)]
+     [(get execution :ok)
+      (transaction/current-revision (result-state execution))
+      (get-in execution [:value :result :commit :root])
+      (get prepared :ok)
+      (get call :service)
+      (get call :operation)
+      (get request :protocol)
+      (get request :expected-revision)
+      (get request :revision)
+      (get request :receipt-key)
+      (has? request :driver)
+      (has? request :path)])
+   [true 1 commit-genesis-root
+    true
+    "hara.store"
+    "compare-and-swap"
+    "hara.store-request/1"
+    0 1 plan-digest false false])
+
+  (test/check
+   "completed semantic transaction replay does not rerun history mutation"
+   (let [first
+         (semantic-history/execute-commit
+          (enrolled-state)
+          0
+          (request-proof "semantic-history-nonce-0001")
+          (commit-verification genesis)
+          (result-proof))
+         replay
+         (semantic-history/execute-commit
+          (result-state first)
+          1
+          (request-proof "semantic-history-nonce-0002")
+          nil
+          nil)]
+     [(get replay :ok)
+      (get-in replay [:value :replayed])
+      (get-in replay [:value :result-digest])
+      (transaction/current-revision (result-state replay))
+      (= genesis
+         (model/commit-record (result-state replay) commit-genesis-root))])
+   [true true result-digest 2 true])])

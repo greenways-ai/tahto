@@ -1,0 +1,187 @@
+(ns tahto.semantic.history
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.root :as semantic-root]
+            [tahto.store.history :as history]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]
+            [tahto.store.transaction :as transaction]))
+
+(def schema
+  "tahto.semantic-root")
+
+(def schema-version
+  1)
+
+(defn record-coordinate
+  [record]
+  [(get record :application)
+   (get record :namespace)
+   (get record :collection)])
+
+(defn semantic-root-coordinate
+  [projection]
+  [(get projection :application)
+   (get projection :namespace)
+   (get projection :collection)])
+
+(defn selected-root
+  [record]
+  (let [objects (get record :objects)]
+    (if
+     (and (vector? objects)
+          (= 1 (count objects)))
+     (nth objects 0)
+     nil)))
+
+(defn semantic-commit-record?
+  [state record]
+  (let [root (selected-root record)
+        projection
+        (if
+         (nil? root)
+         nil
+         (semantic-root/semantic-root-projection state root))]
+    (and
+     (validate/commit? record)
+     (= schema (get record :schema))
+     (= schema-version (get record :schema-version))
+     (not (nil? root))
+     (not (nil? projection))
+     (= (record-coordinate record)
+        (semantic-root-coordinate projection)))))
+
+(defn parent-compatible?
+  [state record parent-root]
+  (let [parent (model/commit-record state parent-root)]
+    (and
+     (not (nil? parent))
+     (semantic-commit-record? state parent)
+     (= (record-coordinate record)
+        (record-coordinate parent)))))
+
+(defn accept-commit
+  [state context verification]
+  (let [record
+        (validate/verified-record verification model/commit-protocol)
+        root (if (nil? record) nil (selected-root record))
+        projection
+        (if
+         (nil? root)
+         nil
+         (semantic-root/semantic-root-projection state root))]
+    (cond
+      (nil? record)
+      (model/fail state "tahto.semantic/commit-verification-invalid")
+
+      (not (validate/commit? record))
+      (model/fail state "tahto.semantic/commit-invalid")
+
+      (not (= schema (get record :schema)))
+      (model/fail state "tahto.semantic/commit-schema-invalid")
+
+      (not (= schema-version (get record :schema-version)))
+      (model/fail state "tahto.semantic/commit-schema-version-invalid")
+
+      (nil? root)
+      (model/fail state "tahto.semantic/commit-root-count-invalid"
+                  {:count (count (get record :objects))})
+
+      (nil? projection)
+      (model/fail state "tahto.semantic/commit-root-not-admitted"
+                  {:root root})
+
+      (not (= (record-coordinate record)
+              (semantic-root-coordinate projection)))
+      (model/fail state "tahto.semantic/commit-root-coordinate-mismatch"
+                  {:commit (record-coordinate record)
+                   :root (semantic-root-coordinate projection)})
+
+      (not (every?
+            (fn [parent]
+              (parent-compatible? state record parent))
+            (get record :parents)))
+      (model/fail state "tahto.semantic/commit-parent-profile-invalid")
+
+      :else
+      (history/accept-commit state context verification))))
+
+(defn semantic-head-record?
+  [state record]
+  (and
+   (validate/head? record)
+   (every?
+    (fn [commit-root]
+      (let [commit (model/commit-record state commit-root)]
+        (and
+         (not (nil? commit))
+         (semantic-commit-record? state commit)
+         (= (record-coordinate record)
+            (record-coordinate commit)))))
+    (get record :commits))))
+
+(defn update-head
+  [state verification]
+  (let [record
+        (validate/verified-record verification model/head-protocol)]
+    (cond
+      (nil? record)
+      (model/fail state "tahto.semantic/head-verification-invalid")
+
+      (not (validate/head? record))
+      (model/fail state "tahto.semantic/head-invalid")
+
+      (not (semantic-head-record? state record))
+      (model/fail state "tahto.semantic/head-commit-profile-invalid")
+
+      :else
+      (history/update-head state verification))))
+
+(defn update-head-with-context
+  [state context verification]
+  (let [record
+        (validate/verified-record verification model/head-protocol)
+        context-coordinate
+        [(get context :application)
+         (get context :namespace)
+         (get context :collection)]]
+    (if
+     (and
+      (not (nil? record))
+      (= context-coordinate (record-coordinate record)))
+     (update-head state verification)
+     (model/fail state "tahto.semantic/head-context-mismatch"))))
+
+(defn commit-transition
+  [state context verification]
+  (accept-commit state context verification))
+
+(defn head-transition
+  [state context verification]
+  (update-head-with-context state context verification))
+
+(defn execute-commit
+  [state expected-revision proof verification result-verification]
+  (transaction/execute
+   state
+   expected-revision
+   proof
+   commit-transition
+   verification
+   result-verification))
+
+(defn execute-head
+  [state expected-revision proof verification result-verification]
+  (transaction/execute
+   state
+   expected-revision
+   proof
+   head-transition
+   verification
+   result-verification))
+
+(defn prepare-store-commit
+  [transaction-result commit-verification]
+  (provider/prepare-compare-and-swap
+   transaction-result
+   commit-verification))
