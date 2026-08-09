@@ -1,0 +1,329 @@
+(ns tahto.semantic.submit
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.history :as semantic-history]
+            [tahto.semantic.prepare :as prepare]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]
+            [tahto.store.transaction :as transaction]))
+
+(def operation
+  "semantic.submit")
+
+(def result-protocol
+  "tahto.semantic-submit-result/1")
+
+(def input-fields
+  #{:prepared :commit-verification :head-verification})
+
+(def result-fields
+  #{:protocol
+    :device
+    :commit-root
+    :head-digest
+    :head-kind
+    :head-name
+    :commits
+    :previous})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn input?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value input-fields #{})
+    (prepare/result? (get value :prepared))
+    (validate/verification?
+     (get value :commit-verification)
+     model/commit-protocol)
+    (validate/verification?
+     (get value :head-verification)
+     model/head-protocol))))
+
+(defn authorized-context?
+  [context]
+  (truth-value
+   (and
+    (validate/device-request-context? context)
+    (= operation (get context :operation))
+    (= "pending" (get context :status))
+    (nil? (get context :result-digest)))))
+
+(defn prepared-request
+  [prepared]
+  (let [commit-intent (get prepared :commit-intent)
+        head-intent (get prepared :head-intent)]
+    {:device (get commit-intent :device)
+     :semantic-root (get-in commit-intent [:objects 0])
+     :sequence (get commit-intent :sequence)
+     :commit-timestamp (get commit-intent :timestamp)
+     :parents (get commit-intent :parents)
+     :head-kind (get head-intent :kind)
+     :head-name (get head-intent :name)
+     :head-updated-at (get head-intent :updated-at)
+     :expected-head (get head-intent :expected)
+     :retain-head (get head-intent :retained)
+     :expected-metadata-revision
+     (get prepared :expected-metadata-revision)}))
+
+(defn prepared-context
+  [context prepared]
+  (assoc
+   (assoc context :operation prepare/operation)
+   :request-digest (get prepared :request-digest)))
+
+(defn revalidate-prepared
+  [state context prepared]
+  (let [checked
+        (prepare/prepare
+         state
+         (prepared-context context prepared)
+         (prepared-request prepared))]
+    (cond
+      (not (get checked :ok))
+      (model/fail
+       state
+       "tahto.semantic/submit-prepare-stale"
+       {:cause (get checked :error)})
+
+      (not (= prepared (get checked :value)))
+      (model/fail
+       state
+       "tahto.semantic/submit-prepare-mismatch")
+
+      :else
+      (model/ok state prepared))))
+
+(defn commit-intent-from-record
+  [record]
+  {:protocol prepare/commit-intent-protocol
+   :record-protocol model/commit-protocol
+   :application (get record :application)
+   :namespace (get record :namespace)
+   :collection (get record :collection)
+   :schema (get record :schema)
+   :schema-version (get record :schema-version)
+   :device (get record :device)
+   :parents (get record :parents)
+   :objects (get record :objects)
+   :tombstones (get record :tombstones)
+   :sequence (get record :sequence)
+   :timestamp (get record :timestamp)})
+
+(defn commit-binding-error
+  [prepared verification]
+  (let [record
+        (validate/verified-record verification model/commit-protocol)
+        intent (get prepared :commit-intent)]
+    (cond
+      (nil? record)
+      {:code "tahto.semantic/submit-commit-verification-invalid"}
+
+      (not (validate/commit? record))
+      {:code "tahto.semantic/submit-commit-invalid"}
+
+      (not (= (get verification :canonical-digest)
+              (get record :root)))
+      {:code "tahto.semantic/submit-commit-digest-mismatch"
+       :details
+       {:verification (get verification :canonical-digest)
+        :record (get record :root)}}
+
+      (not (= intent (commit-intent-from-record record)))
+      {:code "tahto.semantic/submit-commit-intent-mismatch"}
+
+      :else nil)))
+
+(defn expected-head-commits
+  [prepared commit-root]
+  (conj
+   (get-in prepared [:head-intent :retained])
+   commit-root))
+
+(defn head-binding-error
+  [prepared commit-root verification]
+  (let [record
+        (validate/verified-record verification model/head-protocol)
+        intent (get prepared :head-intent)]
+    (cond
+      (nil? record)
+      {:code "tahto.semantic/submit-head-verification-invalid"}
+
+      (not (validate/head? record))
+      {:code "tahto.semantic/submit-head-invalid"}
+
+      (not (has? record :expected))
+      {:code "tahto.semantic/submit-head-expected-missing"}
+
+      (not (= (get intent :application)
+              (get record :application)))
+      {:code "tahto.semantic/submit-head-intent-mismatch"}
+
+      (not (= (get intent :namespace)
+              (get record :namespace)))
+      {:code "tahto.semantic/submit-head-intent-mismatch"}
+
+      (not (= (get intent :collection)
+              (get record :collection)))
+      {:code "tahto.semantic/submit-head-intent-mismatch"}
+
+      (not (= (get intent :kind)
+              (get record :kind)))
+      {:code "tahto.semantic/submit-head-intent-mismatch"}
+
+      (not (= (get intent :name)
+              (get record :name)))
+      {:code "tahto.semantic/submit-head-intent-mismatch"}
+
+      (not (= (get intent :expected)
+              (get record :expected)))
+      {:code "tahto.semantic/submit-head-expectation-mismatch"}
+
+      (not (= (expected-head-commits prepared commit-root)
+              (get record :commits)))
+      {:code "tahto.semantic/submit-head-commits-mismatch"
+       :details
+       {:expected (expected-head-commits prepared commit-root)
+        :received (get record :commits)}}
+
+      (not (= (get intent :updated-at)
+              (get record :updated-at)))
+      {:code "tahto.semantic/submit-head-intent-mismatch"}
+
+      :else nil)))
+
+(defn fail-binding
+  [state error]
+  (model/fail
+   state
+   (get error :code)
+   (model/value-or error :details {})))
+
+(defn result-value
+  [context commit-record head-verification head-result]
+  {:protocol result-protocol
+   :device (get context :device)
+   :commit-root (get commit-record :root)
+   :head-digest (get head-verification :canonical-digest)
+   :head-kind (get-in head-result [:head :kind])
+   :head-name (get-in head-result [:head :name])
+   :commits (get-in head-result [:head :commits])
+   :previous (get head-result :previous)})
+
+(defn result?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value result-fields #{})
+    (= result-protocol (get value :protocol))
+    (model/identifier? (get value :device))
+    (model/canonical-digest? (get value :commit-root))
+    (model/canonical-digest? (get value :head-digest))
+    (has? validate/head-kinds (get value :head-kind))
+    (model/identifier? (get value :head-name))
+    (validate/digest-vector? (get value :commits))
+    (> (count (get value :commits)) 0)
+    (validate/digest-vector? (get value :previous)))))
+
+(defn submit-transition
+  [state context input]
+  (cond
+    (not (authorized-context? context))
+    (model/fail state
+                "tahto.semantic/submit-context-not-authorized")
+
+    (not (input? input))
+    (model/fail state
+                "tahto.semantic/submit-input-invalid")
+
+    (not (= (get context :device)
+            (get-in input [:prepared :device])))
+    (model/fail state
+                "tahto.semantic/submit-device-mismatch")
+
+    :else
+    (let [prepared (get input :prepared)
+          revalidated
+          (revalidate-prepared state context prepared)]
+      (if
+       (not (get revalidated :ok))
+       revalidated
+       (let [commit-verification
+             (get input :commit-verification)
+             head-verification
+             (get input :head-verification)
+             commit-error
+             (commit-binding-error
+              prepared commit-verification)
+             commit-record
+             (validate/verified-record
+              commit-verification
+              model/commit-protocol)]
+         (cond
+           (not (nil? commit-error))
+           (fail-binding state commit-error)
+
+           :else
+           (let [head-error
+                 (head-binding-error
+                  prepared
+                  (get commit-record :root)
+                  head-verification)]
+             (if
+              (not (nil? head-error))
+              (fail-binding state head-error)
+              (let [committed
+                    (semantic-history/accept-commit
+                     state context commit-verification)]
+                (if
+                 (not (get committed :ok))
+                 (model/fail
+                  state
+                  "tahto.semantic/submit-commit-rejected"
+                  {:cause (get committed :error)})
+                 (let [headed
+                       (semantic-history/update-head-with-context
+                        (get committed :state)
+                        context
+                        head-verification)]
+                   (if
+                    (not (get headed :ok))
+                    (model/fail
+                     state
+                     "tahto.semantic/submit-head-rejected"
+                     {:cause (get headed :error)})
+                    (let [value
+                          (result-value
+                           context
+                           commit-record
+                           head-verification
+                           (get headed :value))]
+                      (if
+                       (result? value)
+                       (model/ok
+                        (get headed :state)
+                        value)
+                       (model/fail
+                        state
+                        "tahto.semantic/submit-result-invalid")))))))))))))))
+
+(defn execute
+  [state proof input result-verification]
+  (if
+   (not (input? input))
+   (model/fail state "tahto.semantic/submit-input-invalid")
+   (transaction/execute
+    state
+    (get-in input [:prepared :expected-metadata-revision])
+    proof
+    submit-transition
+    input
+    result-verification)))
+
+(defn prepare-store-commit
+  [transaction-result verification]
+  (provider/prepare-compare-and-swap
+   transaction-result verification))
