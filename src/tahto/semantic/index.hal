@@ -1,0 +1,252 @@
+(ns tahto.semantic.index
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.admission :as admission]
+            [tahto.semantic.model :as semantic]
+            [tahto.store.graph :as graph]
+            [tahto.store.model :as model]))
+
+(def admission-fields
+  #{:application
+    :namespace
+    :collection
+    :root
+    :semantic-index})
+
+(def projection-fields
+  #{:root :entries})
+
+(defn semantic-indexes
+  [state]
+  (model/value-or state :semantic-indexes {}))
+
+(defn semantic-index-projection
+  [state root]
+  (model/value-or (semantic-indexes state) root nil))
+
+(defn projection?
+  [value]
+  (and
+   (validate/exact-record? value projection-fields #{})
+   (model/canonical-digest? (get value :root))
+   (semantic/semantic-index?
+    {:protocol semantic/semantic-index-protocol
+     :entries (get value :entries)})))
+
+(defn projection-value
+  [root semantic-index]
+  {:root root
+   :entries (get semantic-index :entries)})
+
+(defn index-entry
+  [entries id]
+  (reduce
+   (fn [found entry]
+     (if
+      (not (nil? found))
+      found
+      (if (= id (get entry :id)) entry nil)))
+   nil
+   entries))
+
+(defn entry-roots
+  [entries]
+  (vec
+   (distinct
+    (map (fn [entry]
+           (get entry :root))
+         entries))))
+
+(defn first-entry-error
+  [state application namespace root entries]
+  (reduce
+   (fn [error entry]
+     (if
+      (not (nil? error))
+      error
+      (let [entry-root (get entry :root)
+            projection
+            (admission/semantic-object-projection state entry-root)]
+        (cond
+          (= root entry-root)
+          {:code "tahto.semantic/index-root-dual-use"
+           :details {:root root}}
+
+          (nil? projection)
+          {:code "tahto.semantic/index-entry-not-admitted"
+           :details {:id (get entry :id)
+                     :root entry-root}}
+
+          (not (= (get entry :id) (get projection :id)))
+          {:code "tahto.semantic/index-entry-id-mismatch"
+           :details {:id (get entry :id)
+                     :projection-id (get projection :id)
+                     :root entry-root}}
+
+          (not (admission/object-authorized?
+                state application namespace entry-root))
+          {:code "tahto.semantic/index-entry-not-authorized"
+           :details {:id (get entry :id)
+                     :root entry-root}}
+
+          :else nil))))
+   nil
+   entries))
+
+(defn link-resolution-error
+  [entries source-root link]
+  (let [target (index-entry entries (get link :target-id))]
+    (cond
+      (nil? target)
+      {:code "tahto.semantic/index-link-target-missing"
+       :details {:source-root source-root
+                 :target-id (get link :target-id)
+                 :target-root (get link :target-root)}}
+
+      (not (= (get target :root)
+              (get link :target-root)))
+      {:code "tahto.semantic/index-link-root-mismatch"
+       :details {:source-root source-root
+                 :target-id (get link :target-id)
+                 :expected-root (get target :root)
+                 :received-root (get link :target-root)}}
+
+      :else nil)))
+
+(defn first-link-error
+  [state entries]
+  (reduce
+   (fn [error entry]
+     (if
+      (not (nil? error))
+      error
+      (let [root (get entry :root)
+            projection
+            (admission/semantic-object-projection state root)]
+        (reduce
+         (fn [link-error link]
+           (if
+            (not (nil? link-error))
+            link-error
+            (link-resolution-error entries root link)))
+         nil
+         (get projection :links)))))
+   nil
+   entries))
+
+(defn existing-edge
+  [state root]
+  (model/value-or (get state :edges) root nil))
+
+(defn candidate-state
+  [state root children]
+  (assoc state
+         :edges
+         (assoc (get state :edges) root children)))
+
+(defn candidate-closure-error
+  [state root children]
+  (let [report
+        (graph/closure-report-value
+         (candidate-state state root children)
+         [root])]
+    (cond
+      (get report :overflow)
+      {:code "tahto.semantic/index-closure-overflow"
+       :details {:root root
+                 :visited (get report :visited)}}
+
+      (not (get report :complete))
+      {:code "tahto.semantic/index-closure-incomplete"
+       :details {:root root
+                 :missing (get report :missing)}}
+
+      :else nil)))
+
+(defn fail-from
+  [state error]
+  (model/fail state
+              (get error :code)
+              (get error :details)))
+
+(defn admit-projected
+  [state input]
+  (let [application (get input :application)
+        namespace (get input :namespace)
+        collection (get input :collection)
+        root (get input :root)
+        semantic-index (get input :semantic-index)]
+    (cond
+      (not (validate/exact-record? input admission-fields #{}))
+      (model/fail state "tahto.semantic/index-input-invalid")
+
+      (not (model/identifier? application))
+      (model/fail state "tahto.semantic/application-invalid")
+
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.semantic/namespace-invalid")
+
+      (not (model/identifier? collection))
+      (model/fail state "tahto.semantic/collection-invalid")
+
+      (not (model/canonical-digest? root))
+      (model/fail state "tahto.semantic/index-root-invalid"
+                  {:root root})
+
+      (not (semantic/semantic-index? semantic-index))
+      (model/fail state "tahto.semantic/index-invalid")
+
+      (not (admission/object-installed? state root))
+      (model/fail state "tahto.semantic/index-object-missing"
+                  {:root root})
+
+      (not (admission/object-authorized?
+            state application namespace root))
+      (model/fail state "tahto.semantic/index-object-not-authorized"
+                  {:root root})
+
+      :else
+      (let [entries (get semantic-index :entries)
+            entry-error
+            (first-entry-error
+             state application namespace root entries)]
+        (if
+         (not (nil? entry-error))
+         (fail-from state entry-error)
+         (let [link-error (first-link-error state entries)]
+           (if
+            (not (nil? link-error))
+            (fail-from state link-error)
+            (let [projection (projection-value root semantic-index)
+                  children (entry-roots entries)
+                  existing (semantic-index-projection state root)
+                  edge (existing-edge state root)]
+              (cond
+                (not (nil? existing))
+                (if
+                 (and (= existing projection)
+                      (= edge children))
+                 (model/ok state projection)
+                 (model/fail state
+                             "tahto.semantic/index-projection-conflict"
+                             {:root root}))
+
+                (not (nil? edge))
+                (model/fail state
+                            "tahto.semantic/index-edge-conflict"
+                            {:root root})
+
+                :else
+                (let [closure-error
+                      (candidate-closure-error state root children)]
+                  (if
+                   (not (nil? closure-error))
+                   (fail-from state closure-error)
+                   (let [next-state
+                         (assoc
+                          (candidate-state state root children)
+                          :semantic-indexes
+                          (assoc (semantic-indexes state)
+                                 root
+                                 projection))]
+                     (model/ok next-state projection)))))))))))))
