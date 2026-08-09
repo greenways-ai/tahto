@@ -1,0 +1,289 @@
+(ns tahto.fixture.ingress-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.fixture.ingress :as ingress]
+            [tahto.fixture.state :as fixture-state]
+            [tahto.fixture.two-device :as fixture]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]))
+
+(def request-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def request-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+(def content-digest
+  fixture/production-payload-digest)
+
+(def lock-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+
+(def accepted-at
+  "2026-08-09T04:40:00Z")
+
+(defn claims
+  [label]
+  {"application/id" fixture/application
+   "application/version" "1.0.0"
+   "application/publisher" "greenways.example"
+   "application/lock-digest" lock-digest
+   "application/namespace" fixture/fixture-namespace
+   "application/collection" fixture/collection
+   "application/operations" "object.upload,object.read"
+   "device/label" label})
+
+(defn identity
+  [device-id fingerprint replay-status operation]
+  {:profile ingress/ingress-profile
+   :subject
+   (if (= device-id fixture/device-a)
+     "profile.primary"
+     "profile.secondary")
+   :realm "application"
+   :device-id device-id
+   :key-id
+   (if (= device-id fixture/device-a)
+     "key.device-a"
+     "key.device-b")
+   :application fixture/application
+   :application-version "1.0.0"
+   :publisher "greenways.example"
+   :lock-digest lock-digest
+   :namespace fixture/fixture-namespace
+   :collection fixture/collection
+   :operation operation
+   :content-digest content-digest
+   :timestamp 1786250400
+   :replay-status replay-status
+   :request-fingerprint fingerprint
+   :admitted-at 1786250401
+   :claims
+   (claims
+    (if (= device-id fixture/device-a)
+      "Device-A"
+      "Device-B"))})
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "applied Hoplite ingress becomes an ordinary pending Tahto request"
+   (let [state (fixture-state/initial-state)
+         value
+         (identity
+          fixture/device-a
+          request-a
+          "applied"
+          "object.upload")
+         result
+         (ingress/authorize state value accepted-at)
+         next-state (get result :state)
+         context (get result :value)
+         stored
+         (model/idempotency-record
+          next-state fixture/device-a request-a)
+         nonce
+         (model/request-nonce
+          next-state fixture/device-a request-a)]
+     [(ingress/identity? value)
+      (get result :ok)
+      (validate/device-request-context? context)
+      (get context :device)
+      (get context :operation)
+      (get context :request-digest)
+      (get context :idempotency-key)
+      (get context :status)
+      (get context :replayed)
+      (get stored :created-at)
+      (get nonce :request-digest)
+      (get nonce :timestamp)])
+   [true
+    true
+    true
+    "device.a"
+    "object.upload"
+    request-a
+    request-a
+    "pending"
+    false
+    accepted-at
+    request-a
+    accepted-at])
+
+  (test/check
+   "an exact Hoplite replay returns the prior request without mutation"
+   (let [initial (fixture-state/initial-state)
+         applied
+         (ingress/authorize
+          initial
+          (identity
+           fixture/device-a
+           request-a
+           "applied"
+           "object.upload")
+          accepted-at)
+         before (get applied :state)
+         replayed
+         (ingress/authorize
+          before
+          (identity
+           fixture/device-a
+           request-a
+           "replayed"
+           "object.upload")
+          accepted-at)
+         context (get replayed :value)]
+     [(get applied :ok)
+      (get replayed :ok)
+      (= before (get replayed :state))
+      (validate/device-request-context? context)
+      (get context :request-digest)
+      (get context :replayed)])
+   [true true true true request-a true])
+
+  (test/check
+   "a replay can recover when Hoplite admitted before Tahto state was written"
+   (let [initial (fixture-state/initial-state)
+         replayed
+         (ingress/authorize
+          initial
+          (identity
+           fixture/device-a
+           request-a
+           "replayed"
+           "object.upload")
+          accepted-at)
+         next-state (get replayed :state)
+         context (get replayed :value)]
+     [(get replayed :ok)
+      (get context :replayed)
+      (get context :status)
+      (not
+       (nil?
+        (model/idempotency-record
+         next-state fixture/device-a request-a)))
+      (not
+       (nil?
+        (model/request-nonce
+         next-state fixture/device-a request-a)))])
+   [true true "pending" true true])
+
+  (test/check
+   "a fingerprint cannot be replayed for another operation"
+   (let [initial (fixture-state/initial-state)
+         applied
+         (ingress/authorize
+          initial
+          (identity
+           fixture/device-a
+           request-a
+           "applied"
+           "object.upload")
+          accepted-at)
+         result
+         (ingress/authorize
+          (get applied :state)
+          (identity
+           fixture/device-a
+           request-a
+           "replayed"
+           "object.read")
+          accepted-at)]
+     [(get applied :ok)
+      (get result :ok)
+      (error-code result)
+      (= (get applied :state)
+         (get result :state))])
+   [true
+    false
+    "tahto.fixture/replay-conflict"
+    true])
+
+  (test/check
+   "revoked devices remain rejected after Hoplite verification"
+   (let [initial (fixture-state/initial-state)
+         state
+         (assoc-in
+          initial
+          [:devices fixture/device-b]
+          (assoc
+           (model/device-record initial fixture/device-b)
+           :status "revoked"
+           :revoked-at accepted-at))
+         result
+         (ingress/authorize
+          state
+          (identity
+           fixture/device-b
+           request-b
+           "applied"
+           "object.read")
+          accepted-at)]
+     [(fixture-state/fixture-state? state)
+      (get result :ok)
+      (error-code result)
+      (= state (get result :state))])
+   [true
+    false
+    "tahto.device/device-revoked"
+    true])
+
+  (test/check
+   "the bridge rejects widened identity and private wire authority"
+   (let [value
+         (identity
+          fixture/device-a
+          request-a
+          "applied"
+          "object.upload")]
+     [(ingress/identity? value)
+      (ingress/identity?
+       (assoc value :signature "must-not-cross"))
+      (ingress/identity?
+       (assoc value :nonce "must-not-cross"))
+      (ingress/identity?
+       (assoc value
+              :claims
+              (assoc (get value :claims)
+                     "provider/private"
+                     "must-not-cross")))
+      (ingress/identity?
+       (assoc value
+              :request-fingerprint
+              "not-a-digest"))
+      (ingress/identity?
+       (assoc value
+              :application
+              "fixture.other"))])
+   [true false false false false false])
+
+  (test/check
+   "proof projection uses only fixture authority and the canonical fingerprint"
+   (let [value
+         (identity
+          fixture/device-a
+          request-a
+          "applied"
+          "object.upload")
+         proof (ingress/request-proof value accepted-at)]
+     [(validate/device-request-verification? proof)
+      (get proof :device)
+      (get proof :public-key)
+      (get proof :request-digest)
+      (get proof :nonce)
+      (get proof :idempotency-key)
+      (has? proof :signature)
+      (has? proof :provider)
+      (has? proof :database-path)])
+   [true
+    "device.a"
+    "p256:fixture-device-a-public-key"
+    request-a
+    request-a
+    request-a
+    false
+    false
+    false])])
