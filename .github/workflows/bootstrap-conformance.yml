@@ -41,6 +41,8 @@ jobs:
           test -f src/tahto/store/provider.hal
           test -f src/tahto/semantic/model.hal
           test -f src/tahto/semantic/admission.hal
+          test -f src/tahto/semantic/index.hal
+          test -f src/tahto/semantic/root.hal
           test -f src/tahto/sync/device.hal
           test -f src/tahto/sync/session.hal
           test -f src/tahto/service/state.hal
@@ -58,6 +60,9 @@ jobs:
           test -f test/tahto/store/memory_store_test.hal
           test -f test/tahto/semantic/model_test.hal
           test -f test/tahto/semantic/admission_test.hal
+          test -f test/tahto/semantic/fixture.hal
+          test -f test/tahto/semantic/index_test.hal
+          test -f test/tahto/semantic/root_test.hal
           test -f test/tahto/sync/device_test.hal
           test -f test/tahto/sync/session_test.hal
           test -f test/tahto/sync/two_device_object_test.hal
@@ -72,6 +77,7 @@ jobs:
           test -f protocol/two-device-object-transfer.md
           test -f protocol/semantic-values.md
           test -f protocol/semantic-admission.md
+          test -f protocol/semantic-index-roots.md
 
           grep -F '(def host-service "hara.blob")' src/tahto/store/capability.hal
           grep -F '(def host-service "hara.store")' src/tahto/store/provider.hal
@@ -83,8 +89,12 @@ jobs:
           grep -F '(ns tahto.store.memory-store' src/tahto/store/memory_store.hal
           grep -F '(ns tahto.semantic.model' src/tahto/semantic/model.hal
           grep -F '(ns tahto.semantic.admission' src/tahto/semantic/admission.hal
+          grep -F '(ns tahto.semantic.index' src/tahto/semantic/index.hal
+          grep -F '(ns tahto.semantic.root' src/tahto/semantic/root.hal
           grep -F '(def admission-fields' src/tahto/semantic/admission.hal
           grep -F ':semantic-objects' src/tahto/semantic/admission.hal
+          grep -F ':semantic-indexes' src/tahto/semantic/index.hal
+          grep -F ':semantic-roots' src/tahto/semantic/root.hal
           grep -F '"tahto.schema-ref/1"' src/tahto/semantic/model.hal
           grep -F '"tahto.canonical-value-verification/1"' src/tahto/semantic/model.hal
           grep -F '"tahto.semantic-link/1"' src/tahto/semantic/model.hal
@@ -93,6 +103,8 @@ jobs:
           grep -F '"tahto.semantic-root/1"' src/tahto/semantic/model.hal
           grep -F '(ns tahto.semantic.model-test' test/tahto/semantic/model_test.hal
           grep -F '(ns tahto.semantic.admission-test' test/tahto/semantic/admission_test.hal
+          grep -F '(ns tahto.semantic.index-test' test/tahto/semantic/index_test.hal
+          grep -F '(ns tahto.semantic.root-test' test/tahto/semantic/root_test.hal
           grep -F '(ns tahto.sync.two-device-object-test' test/tahto/sync/two_device_object_test.hal
           grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
 
