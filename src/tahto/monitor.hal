@@ -1,0 +1,115 @@
+(ns tahto.monitor
+  (:require [std.foundation :refer :all]
+            [std.foundation.coroutine :as coroutine]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
+
+(def protocol "tahto.monitor-probe/1")
+(def diagnostics-protocol "tahto.diagnostics/1")
+(def diagnostics-operation "monitor.diagnostics")
+
+(defn collection-count
+  [state key]
+  (count (model/value-or state key {})))
+
+(defn state-counts
+  [state]
+  {:devices (collection-count state :devices)
+   :objects (collection-count state :objects)
+   :commits (collection-count state :commits)
+   :heads (collection-count state :heads)
+   :backups (collection-count state :backups)})
+
+(defn inspect-result
+  [result]
+  (cond
+    (not (and (map? result)
+              (boolean? (get result :ok))))
+    {:protocol protocol
+     :state "degraded"
+     :metadata "invalid-result"
+     :error "tahto.monitor/probe-result-invalid"}
+
+    (not (get result :ok))
+    {:protocol protocol
+     :state "degraded"
+     :metadata "unavailable"
+     :error (get-in result [:error :code])}
+
+    :else
+    (let [state (provider/loaded-state (get result :value))]
+      (if
+       (nil? state)
+       {:protocol protocol
+        :state "not-ready"
+        :metadata "uninitialized"
+        :error nil}
+       {:protocol protocol
+        :state "ready"
+        :metadata "ready"
+        :error nil
+        :revision (provider/state-revision state)
+        :counts (state-counts state)}))))
+
+(defn probe-with
+  [invoke]
+  (inspect-result
+   (provider/execute-prepared-with
+    (provider/prepare-load (model/empty-state))
+    invoke)))
+
+(defn ^:async load-state
+  []
+  (coroutine/await
+   (provider/execute-prepared
+    (provider/prepare-load (model/empty-state)))))
+
+(defn ^:async probe
+  []
+  (inspect-result
+   (coroutine/await (load-state))))
+
+(defn diagnostics
+  [inspection checked-at]
+  {:protocol diagnostics-protocol
+   :checkedAt checked-at
+   :state (get inspection :state)
+   :checks
+   {:metadata
+    {:state (get inspection :metadata)
+     :revision (get inspection :revision)
+     :error (get inspection :error)}}
+   :counts (model/value-or inspection :counts {})})
+
+(defn diagnostic-proof?
+  [state proof]
+  (and
+   (map? proof)
+   (= diagnostics-operation (get proof :operation))
+   (= "greenways.os" (get proof :application))
+   (= "tahto.monitor" (get proof :namespace))
+   (= "diagnostics" (get proof :collection))
+   (model/device-enrolled? state (get proof :device))
+   (= (get proof :device)
+      (model/public-key-device state (get proof :public-key)))))
+
+(defn diagnose-result
+  [result proof checked-at]
+  (let [inspection (inspect-result result)
+        state (provider/loaded-state (get result :value))]
+    (cond
+      (not (= "ready" (get inspection :state)))
+      (model/fail {} "tahto.monitor/provider-not-ready")
+
+      (not (diagnostic-proof? state proof))
+      (model/fail {} "tahto.monitor/device-not-authorized")
+
+      :else
+      (model/ok state (diagnostics inspection checked-at)))))
+
+(defn ^:async diagnose
+  [proof checked-at]
+  (diagnose-result
+   (coroutine/await (load-state))
+   proof
+   checked-at))

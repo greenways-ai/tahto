@@ -1,0 +1,104 @@
+(ns tahto.monitor-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.monitor :as monitor]
+            [tahto.protocol.descriptor :as descriptor]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
+
+(def digest
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+
+(defn loaded-result
+  [state]
+  {:protocol provider/result-protocol
+   :operation "load"
+   :revision (provider/state-revision state)
+   :value state
+   :value-digest digest})
+
+(test/print-results
+ [(test/check
+   "an absent metadata snapshot is explicitly not ready"
+   (monitor/probe-with (fn [_ _ _] nil))
+   {:protocol "tahto.monitor-probe/1"
+    :state "not-ready"
+    :metadata "uninitialized"
+    :error nil})
+
+  (test/check
+   "a valid provider load reports its real revision and bounded counts"
+   (let [state (assoc (model/empty-state)
+                      :metadata-revision 7
+                      :devices {"device.a" {:status "enrolled"}}
+                      :objects {"sha256:a" {}})]
+     (monitor/probe-with
+      (fn [_ _ _] (loaded-result state))))
+   {:protocol "tahto.monitor-probe/1"
+    :state "ready"
+    :metadata "ready"
+    :error nil
+    :revision 7
+    :counts {:devices 1 :objects 1 :commits 0 :heads 0 :backups 0}})
+
+  (test/check
+   "provider failures remain bounded diagnostic state"
+   (monitor/inspect-result
+    (model/fail {} "hoplite.store/unavailable" {:secret "not projected"}))
+   {:protocol "tahto.monitor-probe/1"
+    :state "degraded"
+    :metadata "unavailable"
+    :error "hoplite.store/unavailable"})
+
+  (test/check
+   "public health and status project the live metadata probe"
+   (let [inspection {:state "degraded" :metadata "unavailable"}]
+     [(get (descriptor/health-with inspection) "status")
+      (get (descriptor/health-with inspection) "metadata")
+      (get-in (descriptor/status-with inspection)
+              ["fabric" "metadataProvider"])])
+   ["degraded" "unavailable" "unavailable"])
+
+  (test/check
+   "paired diagnostics contain aggregate state and no stored records"
+   (monitor/diagnostics
+    {:state "ready"
+     :metadata "ready"
+     :revision 4
+     :error nil
+     :counts {:devices 2 :objects 5 :commits 1 :heads 1 :backups 0}}
+    "2026-08-09T00:00:00.000Z")
+   {:protocol "tahto.diagnostics/1"
+    :checkedAt "2026-08-09T00:00:00.000Z"
+    :state "ready"
+    :checks {:metadata {:state "ready" :revision 4 :error nil}}
+    :counts {:devices 2 :objects 5 :commits 1 :heads 1 :backups 0}})
+
+  (test/check
+   "diagnostics require the exact enrolled device and closed monitor scope"
+   (let [public-key "p256:device-a"
+         device "device.a"
+         state
+         (assoc
+          (model/empty-state)
+          :devices {device {:status "enrolled" :public-key public-key}}
+          :device-public-keys {(model/public-key-key public-key) device})
+         proof
+         {:device device
+          :public-key public-key
+          :operation "monitor.diagnostics"
+          :application "greenways.os"
+          :namespace "tahto.monitor"
+          :collection "diagnostics"}]
+     [(get (monitor/diagnose-result
+            (model/ok state (loaded-result state))
+            proof
+            "2026-08-09T00:00:00.000Z")
+           :ok)
+      (get-in
+       (monitor/diagnose-result
+        (model/ok state (loaded-result state))
+        (assoc proof :application "attacker.app")
+        "2026-08-09T00:00:00.000Z")
+       [:error :code])])
+   [true "tahto.monitor/device-not-authorized"])])

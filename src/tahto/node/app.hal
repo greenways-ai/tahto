@@ -5,6 +5,7 @@
             [tahto.node.pairing-service :as pairing-service]
             [tahto.node.pairing-wire :as pairing-wire]
             [tahto.node.request-auth :as request-auth]
+            [tahto.monitor :as monitor]
             [tahto.protocol.descriptor :as descriptor]))
 
 (def public-headers
@@ -13,7 +14,7 @@
    "access-control-allow-origin" "*"
    "access-control-allow-methods" "GET, POST, OPTIONS"
    "access-control-allow-headers"
-   "authorization, content-type, x-tahto-pairing"
+   "authorization, content-type, x-tahto-pairing, x-tahto-request"
    "x-content-type-options" "nosniff"})
 
 (defn json-response
@@ -26,17 +27,50 @@
   [_request]
   (json-response 200 (descriptor/descriptor)))
 
-(defn health
+(defn ^:async health
   [_request]
-  (json-response 200 (descriptor/health)))
+  (json-response
+   200
+   (descriptor/health-with
+    (coroutine/await (monitor/probe)))))
 
-(defn status
+(defn ^:async status
   [_request]
-  (json-response 200 (descriptor/status)))
+  (json-response
+   200
+   (descriptor/status-with
+    (coroutine/await (monitor/probe)))))
 
 (defn beacon-compatibility
   [_request]
   (json-response 200 (descriptor/beacon-compatibility)))
+
+(defn monitor-error
+  [status code]
+  (json-response status {"error" {"code" code}}))
+
+(defn ^:async diagnostics
+  [request]
+  (let [encoded (get (get request :headers) "x-tahto-request")]
+    (if
+     (not (string? encoded))
+     (monitor-error 401 "tahto.monitor/request-missing")
+     (let [wire (request-auth/decode-envelope encoded)
+           now-seconds (request-auth/host-call "now" [])
+           proof (request-auth/verify wire now-seconds)]
+       (if
+        (nil? proof)
+        (monitor-error 403 "tahto.monitor/signature-invalid")
+        (let [result
+              (coroutine/await
+               (monitor/diagnose proof (get wire "timestamp")))]
+          (if
+           (get result :ok)
+           (json-response 200 (get result :value))
+           (let [code (get-in result [:error :code])]
+             (monitor-error
+              (if (= code "tahto.monitor/device-not-authorized") 403 503)
+              code)))))))))
 
 (defn preflight
   [_request]
@@ -160,6 +194,12 @@
               :summary "Report installed Tahto fabric components"
               :handler #'status}
         :options {:name :tahto/status-options
+                  :handler #'preflight}}]
+      ["/tahto/v1/diagnostics"
+       {:post {:name :tahto/diagnostics
+               :summary "Report bounded diagnostics to one paired device"
+               :handler #'diagnostics}
+        :options {:name :tahto/diagnostics-options
                   :handler #'preflight}}]
       ["/tahto/v1/pairing/prepare"
        {:post {:name :tahto.pairing/prepare

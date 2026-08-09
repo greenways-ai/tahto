@@ -39,6 +39,7 @@
    {"discovery" "/.well-known/tahto"
     "health" "/tahto/v1/health"
     "status" "/tahto/v1/status"
+    "diagnostics" "/tahto/v1/diagnostics"
     "pairingPrepare" "/tahto/v1/pairing/prepare"
     "pairingComplete" "/tahto/v1/pairing/complete"}
    "components"
@@ -134,6 +135,21 @@
    "hostedSpace"
    {"required" false
     "adapter" "optional"}})
+
+(defn health-with
+  [inspection]
+  (assoc
+   (health)
+   "status" (get inspection :state)
+   "metadata" (get inspection :metadata)))
+
+(defn status-with
+  [inspection]
+  (assoc-in
+   (assoc-in
+    (status)
+    ["node" "status"] (get inspection :state))
+   ["fabric" "metadataProvider"] (get inspection :metadata)))
 
 (defn beacon-compatibility
   []
