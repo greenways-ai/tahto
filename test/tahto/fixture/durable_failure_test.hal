@@ -1,0 +1,126 @@
+(ns tahto.fixture.durable-failure-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.fixture.durable :as durable]
+            [tahto.fixture.ingress :as ingress]
+            [tahto.fixture.state :as fixture-state]
+            [tahto.fixture.two-device :as fixture]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]
+            [tahto.store.transaction :as transaction]
+            [tahto.store.vault :as vault]))
+
+(def request-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def result-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+(def state-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+
+(def plan-digest
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+
+(def lock-digest
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+(def accepted-at
+  "2026-08-09T05:20:00Z")
+
+(def completed-at
+  "2026-08-09T05:21:00Z")
+
+(def quota-bytes 2147483648)
+
+(def fixture-identity
+  {:profile ingress/ingress-profile
+   :subject "profile.primary"
+   :realm "application"
+   :device-id fixture/device-a
+   :key-id "key.device-a"
+   :application fixture/application
+   :application-version "1.0.0"
+   :publisher "greenways.example"
+   :lock-digest lock-digest
+   :namespace fixture/fixture-namespace
+   :collection fixture/collection
+   :operation "object.upload"
+   :content-digest fixture/production-payload-digest
+   :timestamp 1786252800
+   :replay-status "applied"
+   :request-fingerprint request-digest
+   :admitted-at 1786252801
+   :claims
+   {"application/id" fixture/application
+    "application/version" "1.0.0"
+    "application/publisher" "greenways.example"
+    "application/lock-digest" lock-digest
+    "application/namespace" fixture/fixture-namespace
+    "application/collection" fixture/collection
+    "application/operations" "object.upload,object.read"
+    "device/label" "Device-A"}})
+
+(def result-verification
+  {:protocol transaction/result-verification-protocol
+   :verified true
+   :operation "object.upload"
+   :request-digest request-digest
+   :outcome "ok"
+   :result-digest result-digest
+   :completed-at completed-at})
+
+(def commit-verification
+  {:protocol provider/commit-verification-protocol
+   :verified true
+   :expected-revision 0
+   :revision 1
+   :plan-digest plan-digest
+   :request-digest request-digest
+   :result-digest result-digest
+   :state-digest state-digest
+   :completed-at completed-at})
+
+(defn set-quota-transition
+  [state context value]
+  (vault/set-quota
+   state
+   {:application (get context :application)
+    :namespace (get context :namespace)
+    :quota-bytes value}))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "a rejected generic store result restores the exact pre-request state"
+   (let [initial (fixture-state/initial-state)
+         result
+         (durable/execute-mutation-with
+          initial
+          fixture-identity
+          accepted-at
+          set-quota-transition
+          quota-bytes
+          result-verification
+          commit-verification
+          (fn [_service _operation _request]
+            nil))]
+     [(get result :ok)
+      (error-code result)
+      (= initial (get result :state))
+      (transaction/current-revision
+       (get result :state))
+      (model/namespace-quota
+       (get result :state)
+       fixture/application
+       fixture/fixture-namespace)
+      (has? result :value)])
+   [false
+    "tahto.provider/result-invalid"
+    true
+    0
+    nil
+    false])])
