@@ -1,0 +1,262 @@
+(ns tahto.fixture.authorized-transaction-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.fixture.ingress :as ingress]
+            [tahto.fixture.state :as fixture-state]
+            [tahto.fixture.two-device :as fixture]
+            [tahto.store.model :as model]
+            [tahto.store.transaction :as transaction]
+            [tahto.store.vault :as vault]))
+
+(def request-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def result-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+(def lock-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+
+(def accepted-at
+  "2026-08-09T05:00:00Z")
+
+(def completed-at
+  "2026-08-09T05:01:00Z")
+
+(def quota-bytes 2147483648)
+
+(defn ingress-identity
+  [replay-status]
+  {:profile ingress/ingress-profile
+   :subject "profile.primary"
+   :realm "application"
+   :device-id fixture/device-a
+   :key-id "key.device-a"
+   :application fixture/application
+   :application-version "1.0.0"
+   :publisher "greenways.example"
+   :lock-digest lock-digest
+   :namespace fixture/fixture-namespace
+   :collection fixture/collection
+   :operation "object.upload"
+   :content-digest fixture/production-payload-digest
+   :timestamp 1786251600
+   :replay-status replay-status
+   :request-fingerprint request-digest
+   :admitted-at 1786251601
+   :claims
+   {"application/id" fixture/application
+    "application/version" "1.0.0"
+    "application/publisher" "greenways.example"
+    "application/lock-digest" lock-digest
+    "application/namespace" fixture/fixture-namespace
+    "application/collection" fixture/collection
+    "application/operations" "object.upload,object.read"
+    "device/label" "Device-A"}})
+
+(defn result-verification
+  []
+  {:protocol transaction/result-verification-protocol
+   :verified true
+   :operation "object.upload"
+   :request-digest request-digest
+   :outcome "ok"
+   :result-digest result-digest
+   :completed-at completed-at})
+
+(defn set-quota-transition
+  [state context value]
+  (vault/set-quota
+   state
+   {:application (get context :application)
+    :namespace (get context :namespace)
+    :quota-bytes value}))
+
+(defn should-not-run
+  [state _context value]
+  (model/fail
+   (assoc state :unexpected-authorized-transition value)
+   "test/should-not-run"))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "an applied Hoplite ingress can continue through one authorized TAHTO-7 transaction"
+   (let [initial (fixture-state/initial-state)
+         authorized
+         (ingress/authorize
+          initial
+          (ingress-identity "applied")
+          accepted-at)
+         authorized-state (get authorized :state)
+         context (get authorized :value)
+         result
+         (transaction/execute-authorized
+          authorized-state
+          0
+          context
+          set-quota-transition
+          quota-bytes
+          (result-verification))
+         state (get result :state)]
+     [(get authorized :ok)
+      (get context :status)
+      (get result :ok)
+      (transaction/current-revision state)
+      (model/namespace-quota
+       state fixture/application fixture/fixture-namespace)
+      (get-in result [:value :context :status])
+      (get-in result [:value :context :result-digest])
+      (get-in result [:value :result :quota-bytes])
+      (fixture-state/fixture-state? state)])
+   [true
+    "pending"
+    true
+    1
+    quota-bytes
+    "completed"
+    result-digest
+    quota-bytes
+    true])
+
+  (test/check
+   "a pending exact Hoplite replay can continue without consuming the nonce twice"
+   (let [initial (fixture-state/initial-state)
+         applied
+         (ingress/authorize
+          initial
+          (ingress-identity "applied")
+          accepted-at)
+         pending-state (get applied :state)
+         replayed
+         (ingress/authorize
+          pending-state
+          (ingress-identity "replayed")
+          accepted-at)
+         context (get replayed :value)
+         result
+         (transaction/execute-authorized
+          (get replayed :state)
+          0
+          context
+          set-quota-transition
+          quota-bytes
+          (result-verification))]
+     [(get replayed :ok)
+      (= pending-state (get replayed :state))
+      (get context :status)
+      (get context :replayed)
+      (get result :ok)
+      (transaction/current-revision (get result :state))
+      (get-in result [:value :context :status])])
+   [true true "pending" true true 1 "completed"])
+
+  (test/check
+   "a fabricated context cannot continue another stored request"
+   (let [initial (fixture-state/initial-state)
+         authorized
+         (ingress/authorize
+          initial
+          (ingress-identity "applied")
+          accepted-at)
+         state (get authorized :state)
+         context
+         (assoc (get authorized :value)
+                :operation "object.read")
+         result
+         (transaction/execute-authorized
+          state
+          0
+          context
+          should-not-run
+          "must-not-run"
+          (assoc (result-verification)
+                 :operation "object.read"))]
+     [(get result :ok)
+      (error-code result)
+      (= state (get result :state))
+      (get (get result :state)
+           :unexpected-authorized-transition)])
+   [false
+    "tahto.transaction/context-state-mismatch"
+    true
+    nil])
+
+  (test/check
+   "invalid result evidence preserves the already authorized pending context"
+   (let [initial (fixture-state/initial-state)
+         authorized
+         (ingress/authorize
+          initial
+          (ingress-identity "applied")
+          accepted-at)
+         state (get authorized :state)
+         context (get authorized :value)
+         result
+         (transaction/execute-authorized
+          state
+          0
+          context
+          set-quota-transition
+          quota-bytes
+          nil)
+         stored
+         (model/idempotency-record
+          (get result :state)
+          fixture/device-a
+          request-digest)]
+     [(get result :ok)
+      (error-code result)
+      (= state (get result :state))
+      (get stored :status)
+      (transaction/current-revision
+       (get result :state))])
+   [false
+    "tahto.transaction/result-verification-invalid"
+    true
+    "pending"
+    0])
+
+  (test/check
+   "a completed context cannot rerun an authorized transition"
+   (let [initial (fixture-state/initial-state)
+         authorized
+         (ingress/authorize
+          initial
+          (ingress-identity "applied")
+          accepted-at)
+         first
+         (transaction/execute-authorized
+          (get authorized :state)
+          0
+          (get authorized :value)
+          set-quota-transition
+          quota-bytes
+          (result-verification))
+         completed-state (get first :state)
+         completed-context
+         (get-in first [:value :context])
+         repeated
+         (transaction/execute-authorized
+          completed-state
+          1
+          completed-context
+          should-not-run
+          "must-not-run"
+          (result-verification))]
+     [(get first :ok)
+      (get completed-context :status)
+      (get repeated :ok)
+      (error-code repeated)
+      (= completed-state (get repeated :state))
+      (get (get repeated :state)
+           :unexpected-authorized-transition)])
+   [true
+    "completed"
+    false
+    "tahto.transaction/context-not-pending"
+    true
+    nil])])
