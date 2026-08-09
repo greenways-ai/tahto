@@ -245,7 +245,7 @@
           (get head-value :namespace)
           (get head-value :collection)])))))
 
-(defn prepare
+(defn prepare-valid-request
   [state context request]
   (let [coordinate (context-coordinate context)
         root (get request :semantic-root)
@@ -286,14 +286,6 @@
           []
           (get current-head :commits))]
     (cond
-      (not (authorized-context? state context))
-      (model/fail state
-                  "tahto.semantic/prepare-context-not-authorized")
-
-      (not (request? request))
-      (model/fail state
-                  "tahto.semantic/prepare-request-invalid")
-
       (not (= (get context :device)
               (get request :device)))
       (model/fail state
@@ -393,3 +385,17 @@
          (model/ok state value)
          (model/fail state
                      "tahto.semantic/prepare-result-invalid"))))))
+
+(defn prepare
+  [state context request]
+  (cond
+    (not (authorized-context? state context))
+    (model/fail state
+                "tahto.semantic/prepare-context-not-authorized")
+
+    (not (request? request))
+    (model/fail state
+                "tahto.semantic/prepare-request-invalid")
+
+    :else
+    (prepare-valid-request state context request)))
