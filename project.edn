@@ -21,4 +21,18 @@
       {:management {:auth/providers [:auth/key]
                     :auth/required true}
        :application {:auth/providers [:auth/key]
+                     :auth/required false}}}}}}
+
+  :two-device-fixture
+  {:profile/language :hoplite
+   :profile/main tahto.fixture.app/app
+   :profile/options {:port 58101
+                     :workers 1}
+   :profile/extensions
+   {:extension/hoplite
+    {:hoplite/authentication
+     {:auth/realms
+      {:management {:auth/providers [:auth/key]
+                    :auth/required true}
+       :application {:auth/providers [:auth/key]
                      :auth/required false}}}}}}}}
