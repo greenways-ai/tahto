@@ -14,6 +14,12 @@ session.hal
   missing-object pull offers
   offline acknowledgements
   monotonic per-device collection cursors
+
+pairing.hal
+  short-lived invitation admission
+  exact node/device/P-256 intent binding
+  atomic identity-only completion
+  exact lost-result replay
 ```
 
 The kernel does not parse keys, verify signatures, read request bodies, write files or send network traffic. Installed Greenways OS/Hoplite providers perform those effects and return bounded proofs or opaque handles.

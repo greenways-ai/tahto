@@ -47,6 +47,34 @@
   []
   (get (pairing/issue (model/empty-state) (invitation)) :state))
 
+(defn prepare-request
+  []
+  {:protocol pairing/prepare-protocol
+   :invitation "invite.one"
+   :token-digest token-digest
+   :device "device.browser"
+   :public-key "p256:browser-public-key"
+   :algorithm "p256-sha256"
+   :prepared-at "2026-08-09T00:01:00Z"
+   :prepared-seconds 1786233660})
+
+(defn complete-request
+  [intent]
+  {:protocol pairing/complete-protocol
+   :token-digest token-digest
+   :accepted-at "2026-08-09T00:02:00Z"
+   :accepted-seconds 1786233720
+   :intent intent
+   :intent-verification
+   {:protocol pairing/intent-verification-protocol
+    :verified true
+    :intent-digest
+    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    :intent intent
+    :device "device.browser"
+    :public-key "p256:browser-public-key"
+    :algorithm "p256-sha256"}})
+
 (test/print-results
  [(test/check
    "pairing consumes one invitation and grants identity only"
@@ -101,4 +129,69 @@
      (issued-state)
      (acceptance token-digest "2026-08-09T00:05:00Z"))
     [:error :code])
-   "tahto.pairing/invitation-expired")])
+   "tahto.pairing/invitation-expired")
+
+  (test/check
+   "prepare binds one open invitation to the exact node device and P-256 key"
+   (let [result (pairing/prepare (issued-state) (prepare-request))
+         intent (get result :value)]
+     [(get result :ok)
+      (pairing/intent? intent)
+      (get intent :node)
+      (get intent :device)
+      (get intent :public-key)
+      (= intent
+         (get-in result [:state :pairing-invitations "invite.one" :intent]))])
+   [true true "node.home" "device.browser" "p256:browser-public-key" true])
+
+  (test/check
+   "complete atomically consumes the invite and replays an exact lost result"
+   (let [state (issued-state)
+         prepared (pairing/prepare state (prepare-request))
+         request (complete-request (get prepared :value))
+         first (pairing/complete (get prepared :state) request)
+         replay (pairing/complete (get first :state) request)]
+     [(get first :ok)
+      (get-in first [:state :pairing-invitations "invite.one" :status])
+      (get-in first [:state :devices "device.browser" :status])
+      (get-in first [:value :administrator])
+      (get-in first [:value :grants])
+      (get replay :ok)
+      (= (get first :state) (get replay :state))
+      (= (get first :value) (get replay :value))])
+   [true "consumed" "enrolled" false [] true true true])
+
+  (test/check
+   "complete rejects a tampered intent before consuming the invitation"
+   (let [state (issued-state)
+         prepared (pairing/prepare state (prepare-request))
+         intent (get prepared :value)
+         request (complete-request (assoc intent :device "device.other"))
+         result (pairing/complete (get prepared :state) request)]
+     [(get-in result [:error :code])
+      (= (get prepared :state) (get result :state))])
+   ["tahto.pairing/intent-mismatch" true])
+
+  (test/check
+   "a prepared intent is replayable but cannot be rebound or disclosed by another token"
+   (let [state (issued-state)
+         request (prepare-request)
+         first (pairing/prepare state request)
+         prepared-state (get first :state)
+         replay (pairing/prepare prepared-state request)
+         rebound
+         (pairing/prepare
+          prepared-state
+          (assoc request :device "device.other"))
+         wrong-token
+         (pairing/prepare
+          prepared-state
+          (assoc request
+                 :token-digest
+                 "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"))]
+     [(get replay :ok)
+      (= (get first :value) (get replay :value))
+      (= prepared-state (get replay :state))
+      (get-in rebound [:error :code])
+      (get-in wrong-token [:error :code])])
+   [true true true "tahto.pairing/intent-conflict" "tahto.pairing/token-invalid"])])
