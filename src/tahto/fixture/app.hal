@@ -1,5 +1,5 @@
 (ns tahto.fixture.app
-  (:require [std.json :as json]
+  (:require [std.foundation.json :as json]
             [tahto.fixture.two-device :as fixture]))
 
 ;; Closed HTTP-shaped values and handlers for the release fixture.  This

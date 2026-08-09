@@ -1,0 +1,77 @@
+(ns tahto.store.mutation
+  (:require [std.foundation :refer :all]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
+
+;; Management and bootstrap mutations enter through an authenticated host
+;; boundary rather than a signed, already-enrolled device. This coordinator
+;; gives those narrow transitions the same revision, digest and generic
+;; hara.store CAS laws as application transactions without manufacturing an
+;; application principal.
+
+(def replay-protocol "tahto.metadata-mutation-replay/1")
+
+(defn execute
+  [state expected-revision operation request-digest
+   transition input result-digest]
+  (let [revision (provider/state-revision state)]
+    (cond
+      (not (provider/provider-revision? expected-revision))
+      (model/fail state "tahto.mutation/expected-revision-invalid")
+
+      (not (= revision expected-revision))
+      (model/fail state
+                  "tahto.mutation/revision-conflict"
+                  {:expected expected-revision :current revision})
+
+      (not (model/identifier? operation))
+      (model/fail state "tahto.mutation/operation-invalid")
+
+      (not (model/canonical-digest? request-digest))
+      (model/fail state "tahto.mutation/request-digest-invalid")
+
+      (not (model/canonical-digest? result-digest))
+      (model/fail state "tahto.mutation/result-digest-invalid")
+
+      :else
+      (let [changed (transition state input)]
+        (cond
+          (not (and (map? changed)
+                    (boolean? (get changed :ok))
+                    (map? (get changed :state))
+                    (vector? (get changed :effects))))
+          (model/fail state "tahto.mutation/transition-result-invalid")
+
+          (not (get changed :ok))
+          changed
+
+          (not (empty? (get changed :effects)))
+          (model/fail state "tahto.mutation/effects-not-atomic")
+
+          (= state (get changed :state))
+          (model/ok
+           state
+           {:protocol replay-protocol
+            :operation operation
+            :request-digest request-digest
+            :result-digest result-digest
+            :result (get changed :value)})
+
+          :else
+          (let [next-revision (inc revision)
+                next-state
+                (assoc (get changed :state)
+                       :metadata-revision next-revision)]
+            (model/ok
+             next-state
+             {:protocol provider/mutation-protocol
+              :expected-revision revision
+              :revision next-revision
+              :request-digest request-digest
+              :result-digest result-digest
+              :operation operation
+              :result (get changed :value)})))))))
+
+(defn prepare-store-commit
+  [mutation-result verification]
+  (provider/prepare-compare-and-swap mutation-result verification))

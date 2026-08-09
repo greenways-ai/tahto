@@ -38,7 +38,9 @@
    "routes"
    {"discovery" "/.well-known/tahto"
     "health" "/tahto/v1/health"
-    "status" "/tahto/v1/status"}
+    "status" "/tahto/v1/status"
+    "pairingPrepare" "/tahto/v1/pairing/prepare"
+    "pairingComplete" "/tahto/v1/pairing/complete"}
    "components"
    {"controlPlane" "ready"
     "objects" "hara-kernel-ready:TAHTO-3"
@@ -58,7 +60,7 @@
     "sqliteMetadataProvider" "hoplite-generic-provider-ready"
     "metadataNodeService" "not-exposed"
     "semanticFabric" "planned:T-SF-01"
-    "signatureProvider" "not-wired"
+    "signatureProvider" "pairing-p256-ready"
     "resultVerificationProvider" "not-wired"
     "serviceExecutor" "not-wired"}
    "compatibility"
@@ -98,7 +100,7 @@
     "portableTwoDeviceLaw" "ready"
     "productionTwoDeviceFixture" "pending"
     "semanticFabric" "planned"
-    "signatureProvider" "not-wired"
+    "signatureProvider" "pairing-p256-ready"
     "resultVerificationProvider" "not-wired"
     "workerExecution" "not-wired"}
    "hostedSpace"

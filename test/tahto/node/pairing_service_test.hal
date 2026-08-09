@@ -1,0 +1,115 @@
+(ns tahto.node.pairing-service-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.node.pairing-service :as service]
+            [tahto.store.memory-store :as memory-store]
+            [tahto.store.provider :as provider]
+            [tahto.sync.pairing :as pairing]))
+
+(def digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def approval-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def prepare-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def complete-digest
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def state-digest
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def timestamp "2026-08-09T05:20:00Z")
+
+(def invitation
+  {:protocol pairing/invitation-protocol
+   :id "invite.live"
+   :node "node.home"
+   :token-digest digest
+   :approval-digest approval-digest
+   :created-at "2026-08-09T05:20:00Z"
+   :expires-at "2026-08-09T05:25:00Z"
+   :created-seconds 1786252800
+   :expires-seconds 1786253100
+   :status "open"})
+
+(def prepare-request
+  {:protocol pairing/prepare-protocol
+   :invitation "invite.live"
+   :token-digest digest
+   :device "device.browser"
+   :public-key "p256:browser-public-key"
+   :algorithm "p256-sha256"
+   :prepared-at "2026-08-09T05:21:00Z"
+   :prepared-seconds 1786252860})
+
+(defn complete-request
+  [intent]
+  {:protocol pairing/complete-protocol
+   :token-digest digest
+   :accepted-at "2026-08-09T05:22:00Z"
+   :accepted-seconds 1786252920
+   :intent intent
+   :intent-verification
+   {:protocol pairing/intent-verification-protocol
+    :verified true
+    :intent-digest digest
+    :intent intent
+    :device "device.browser"
+    :public-key "p256:browser-public-key"
+    :algorithm "p256-sha256"}})
+
+(defn executor
+  [memory]
+  (fn [host-service operation request]
+    (memory-store/invoke memory host-service operation request)))
+
+(defn digest-value
+  [value]
+  (let [operation (get value :operation)
+        protocol (get value :protocol)]
+    (cond
+      (= operation "pairing.prepare") prepare-digest
+      (= operation "pairing.complete") complete-digest
+      (= protocol pairing/intent-protocol) prepare-digest
+      (= protocol pairing/result-protocol) complete-digest
+      (has? value :metadata-revision) state-digest
+      :else digest)))
+
+(test/print-results
+ [(test/check
+   "issue prepare and complete survive reload and replay through hara.store"
+   (let [memory (memory-store/create)
+         invoke (executor memory)
+         issued
+         (service/execute-with
+          "pairing.issue" invitation timestamp invoke digest-value)
+         issue-replay
+         (service/execute-with
+          "pairing.issue" invitation timestamp invoke digest-value)
+         prepared
+         (service/execute-with
+          "pairing.prepare" prepare-request timestamp invoke digest-value)
+         completed
+         (service/execute-with
+          "pairing.complete"
+          (complete-request (get prepared :value))
+          timestamp invoke digest-value)
+         replayed
+         (service/execute-with
+          "pairing.complete"
+          (complete-request (get prepared :value))
+          timestamp invoke digest-value)
+         snapshot (memory-store/snapshot-entry memory)]
+     [(get issued :ok)
+      (get issue-replay :ok)
+      (get prepared :ok)
+      (get-in prepared [:error :code])
+      (get completed :ok)
+      (get-in completed [:error :code])
+      (get replayed :ok)
+      (= (get completed :value) (get replayed :value))
+      (get-in completed [:value :administrator])
+      (get-in completed [:value :grants])
+      (get snapshot :revision)
+      (provider/state-revision (get snapshot :value))
+      (get-in snapshot [:value :pairing-invitations "invite.live" :status])
+      (get-in snapshot [:value :devices "device.browser" :status])])
+   [true true true nil true nil true true false [] 3 3 "consumed" "enrolled"])])

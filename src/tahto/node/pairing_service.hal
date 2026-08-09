@@ -1,0 +1,209 @@
+(ns tahto.node.pairing-service
+  (:require [std.foundation :refer :all]
+            [std.foundation.coroutine :as coroutine]
+            [tahto.store.model :as model]
+            [tahto.store.mutation :as mutation]
+            [tahto.store.provider :as provider]
+            [tahto.sync.pairing :as pairing]))
+
+(defn canonical-digest
+  [value]
+  (std.native.Host/call
+   "hoplite.host" "canonical-value-digest" [value]))
+
+(def operations
+  #{"pairing.issue" "pairing.prepare" "pairing.complete"})
+
+(defn request-value
+  [operation input]
+  {:operation operation :input input})
+
+(defn state-verification
+  [state digest timestamp]
+  {:protocol provider/state-verification-protocol
+   :verified true
+   :revision (provider/state-revision state)
+   :state-digest (digest state)
+   :encoded-at timestamp})
+
+(defn commit-verification
+  [plan state digest timestamp]
+  {:protocol provider/commit-verification-protocol
+   :verified true
+   :expected-revision (get plan :expected-revision)
+   :revision (get plan :revision)
+   :plan-digest (digest plan)
+   :request-digest (get plan :request-digest)
+   :result-digest (get plan :result-digest)
+   :state-digest (digest state)
+   :completed-at timestamp})
+
+(defn transition
+  [operation]
+  (cond
+    (= operation "pairing.issue") pairing/issue
+    (= operation "pairing.prepare") pairing/prepare
+    (= operation "pairing.complete") pairing/complete
+    :else nil))
+
+(defn load-or-initialize-with
+  [invoke digest timestamp]
+  (let [initial (model/empty-state)
+        loaded
+        (provider/execute-prepared-with
+         (provider/prepare-load initial)
+         invoke)]
+    (if
+     (not (get loaded :ok))
+     loaded
+     (let [state (provider/loaded-state (get loaded :value))]
+       (if
+        (map? state)
+        (model/ok state state)
+        (let [initialized
+              (provider/execute-prepared-with
+               (provider/prepare-initialize
+                initial
+                (state-verification initial digest timestamp))
+               invoke)
+              initialized-state
+              (provider/loaded-state (get initialized :value))]
+          (if
+           (and (get initialized :ok) (map? initialized-state))
+           (model/ok initialized-state initialized-state)
+           initialized)))))))
+
+(defn execute-with
+  [operation input timestamp invoke digest]
+  (let [transition-fn (transition operation)]
+    (if
+     (nil? transition-fn)
+     (model/fail {} "tahto.pairing-service/operation-invalid")
+     (let [loaded (load-or-initialize-with invoke digest timestamp)]
+       (if
+        (not (get loaded :ok))
+        loaded
+        (let [state (get loaded :state)
+              preview (transition-fn state input)]
+          (if
+           (not (get preview :ok))
+           preview
+           (let [request-digest
+                 (digest (request-value operation input))
+                 result-digest (digest (get preview :value))
+                 changed
+                 (mutation/execute
+                  state
+                  (provider/state-revision state)
+                  operation
+                  request-digest
+                  transition-fn
+                  input
+                  result-digest)
+                 plan (get changed :value)]
+             (cond
+               (not (get changed :ok))
+               changed
+
+               (= mutation/replay-protocol (get plan :protocol))
+               (model/ok state (get plan :result))
+
+               :else
+               (let [verification
+                     (commit-verification
+                      plan (get changed :state) digest timestamp)
+                     committed
+                     (provider/execute-prepared-with
+                      (mutation/prepare-store-commit changed verification)
+                      invoke)]
+                 (if
+                  (and
+                   (get committed :ok)
+                   (provider/commit-result?
+                    changed verification (get committed :value)))
+                  (model/ok (get changed :state) (get plan :result))
+                  committed)))))))))))
+
+(defn ^:async load-or-initialize
+  [timestamp]
+  (let [initial (model/empty-state)
+        loaded
+        (coroutine/await
+         (provider/execute-prepared
+          (provider/prepare-load initial)))]
+    (if
+     (not (get loaded :ok))
+     loaded
+     (let [state (provider/loaded-state (get loaded :value))]
+       (if
+        (map? state)
+        (model/ok state state)
+        (let [initialized
+              (coroutine/await
+               (provider/execute-prepared
+                (provider/prepare-initialize
+                 initial
+                 (state-verification
+                  initial canonical-digest timestamp))))
+              initialized-state
+              (provider/loaded-state (get initialized :value))]
+          (if
+           (and (get initialized :ok) (map? initialized-state))
+           (model/ok initialized-state initialized-state)
+           initialized)))))))
+
+(defn ^:async execute
+  [operation input timestamp]
+  (let [transition-fn (transition operation)]
+    (if
+     (nil? transition-fn)
+     (model/fail {} "tahto.pairing-service/operation-invalid")
+     (let [loaded (coroutine/await (load-or-initialize timestamp))]
+       (if
+        (not (get loaded :ok))
+        loaded
+        (let [state (get loaded :state)
+              preview (transition-fn state input)]
+          (if
+           (not (get preview :ok))
+           preview
+           (let [request-digest
+                 (canonical-digest (request-value operation input))
+                 result-digest
+                 (canonical-digest (get preview :value))
+                 changed
+                 (mutation/execute
+                  state
+                  (provider/state-revision state)
+                  operation
+                  request-digest
+                  transition-fn
+                  input
+                  result-digest)
+                 plan (get changed :value)]
+             (cond
+               (not (get changed :ok))
+               changed
+
+               (= mutation/replay-protocol (get plan :protocol))
+               (model/ok state (get plan :result))
+
+               :else
+               (let [verification
+                     (commit-verification
+                      plan
+                      (get changed :state)
+                      canonical-digest
+                      timestamp)
+                     committed
+                     (coroutine/await
+                      (provider/execute-prepared
+                       (mutation/prepare-store-commit
+                        changed verification)))]
+                 (if
+                  (and
+                   (get committed :ok)
+                   (provider/commit-result?
+                    changed verification (get committed :value)))
+                  (model/ok (get changed :state) (get plan :result))
+                  committed)))))))))))

@@ -1,7 +1,7 @@
 (ns tahto.node.request-auth-test
   (:require [std.foundation :refer :all]
+            [std.foundation.json :as json]
             [std.lib.test :as test]
-            [std.json :as json]
             [tahto.node.request-auth :as auth]))
 
 (def request

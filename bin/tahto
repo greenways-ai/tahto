@@ -9,6 +9,26 @@ if [ "$#" -gt 0 ]; then
   shift
 fi
 
+sha256_text() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | cut -d ' ' -f 1
+  else
+    sha256sum | cut -d ' ' -f 1
+  fi
+}
+
+format_epoch() {
+  if date -u -r "$1" '+%Y-%m-%dT%H:%M:%SZ' >/dev/null 2>&1; then
+    date -u -r "$1" '+%Y-%m-%dT%H:%M:%SZ'
+  else
+    date -u -d "@$1" '+%Y-%m-%dT%H:%M:%SZ'
+  fi
+}
+
+base64url_text() {
+  openssl base64 -A | tr '+/' '-_' | tr -d '='
+}
+
 case "$ACTION" in
   run|foreground)
     exec "$HOPLITE" serve foreground --profile server --mode prod "$ROOT"
@@ -30,6 +50,46 @@ case "$ACTION" in
     printf '\n'
     curl --fail --silent --show-error "$ORIGIN/tahto/v1/status"
     printf '\n'
+    ;;
+  invite)
+    command -v openssl >/dev/null 2>&1 || {
+      printf 'tahto: invite requires openssl\n' >&2
+      exit 1
+    }
+    NOW_SECONDS=$(date -u '+%s')
+    TTL_SECONDS=${TAHTO_INVITATION_TTL_SECONDS:-300}
+    case "$TTL_SECONDS" in
+      ''|*[!0-9]*)
+        printf 'tahto: TAHTO_INVITATION_TTL_SECONDS must be a positive integer\n' >&2
+        exit 2
+        ;;
+    esac
+    [ "$TTL_SECONDS" -gt 0 ] || {
+      printf 'tahto: TAHTO_INVITATION_TTL_SECONDS must be positive\n' >&2
+      exit 2
+    }
+    EXPIRES_SECONDS=$((NOW_SECONDS + TTL_SECONDS))
+    CREATED_AT=$(format_epoch "$NOW_SECONDS")
+    EXPIRES_AT=$(format_epoch "$EXPIRES_SECONDS")
+    TOKEN=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
+    TOKEN_HEX=$(printf '%s' "$TOKEN" | sha256_text)
+    INVITATION_ID="invite.$(printf '%.24s' "$TOKEN_HEX")"
+    TOKEN_DIGEST="sha256:$TOKEN_HEX"
+    APPROVAL_HEX=$(printf '%s\n%s\n%s\n%s' \
+      "$INVITATION_ID" "$TOKEN_DIGEST" "$CREATED_AT" "$EXPIRES_AT" | sha256_text)
+    APPROVAL_DIGEST="sha256:$APPROVAL_HEX"
+    NODE_ID=${TAHTO_NODE_ID:-node.home}
+    ENVELOPE=$(printf \
+      '{"protocol":"tahto.pairing-invitation/1","id":"%s","node":"%s","tokenDigest":"%s","approvalDigest":"%s","createdAt":"%s","expiresAt":"%s","createdSeconds":%s,"expiresSeconds":%s,"status":"open"}' \
+      "$INVITATION_ID" "$NODE_ID" "$TOKEN_DIGEST" "$APPROVAL_DIGEST" \
+      "$CREATED_AT" "$EXPIRES_AT" "$NOW_SECONDS" "$EXPIRES_SECONDS")
+    ENCODED=$(printf '%s' "$ENVELOPE" | base64url_text)
+    curl --fail --silent --show-error \
+      -X POST \
+      -H 'accept: application/json' \
+      -H "x-tahto-pairing: $ENCODED" \
+      "$ORIGIN/tahto/v1/pairing/invitations" >/dev/null
+    printf '%s~%s\n' "$INVITATION_ID" "$TOKEN"
     ;;
   open)
     URL="$ORIGIN/"
@@ -57,6 +117,7 @@ Usage:
   tahto install   Install the macOS LaunchAgent
   tahto uninstall Remove the macOS LaunchAgent
   tahto doctor    Read local health and status
+  tahto invite    Mint a short-lived one-time device invitation
   tahto open      Open the local Tahto descriptor
 
 Set HOPLITE to select the Hoplite executable and TAHTO_ORIGIN when operating a

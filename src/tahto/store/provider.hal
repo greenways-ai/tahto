@@ -22,6 +22,7 @@
 (def receipt-payload-protocol
   "tahto.metadata-receipt-payload/1")
 (def receipt-protocol "tahto.metadata-commit-receipt/1")
+(def mutation-protocol "tahto.metadata-mutation/1")
 
 (def max-provider-revision 9223372036854775807)
 
@@ -75,6 +76,10 @@
   #{:protocol :expected-revision :revision :request-digest
     :result-digest :context :result :replayed})
 
+(def mutation-plan-fields
+  #{:protocol :expected-revision :revision :request-digest
+    :result-digest :operation :result})
+
 (defn transaction-plan
   [transition-result]
   (if (and (map? transition-result)
@@ -105,6 +110,26 @@
       (get-in value [:context :result-digest]))
    (boolean? (get value :replayed))))
 
+(defn mutation-plan?
+  [value state]
+  (and
+   (validate/exact-record? value mutation-plan-fields #{})
+   (= mutation-protocol (get value :protocol))
+   (provider-revision? (get value :expected-revision))
+   (provider-revision? (get value :revision))
+   (< (get value :expected-revision) max-provider-revision)
+   (= (inc (get value :expected-revision))
+      (get value :revision))
+   (state-revision-valid? state (get value :revision))
+   (model/canonical-digest? (get value :request-digest))
+   (model/canonical-digest? (get value :result-digest))
+   (model/identifier? (get value :operation))))
+
+(defn commit-plan?
+  [value state]
+  (or (transaction-plan? value state)
+      (mutation-plan? value state)))
+
 (def commit-verification-fields
   #{:protocol :verified :expected-revision :revision
     :plan-digest :request-digest :result-digest
@@ -131,7 +156,7 @@
   [verification plan state]
   (and
    (commit-verification? verification)
-   (transaction-plan? plan state)
+   (commit-plan? plan state)
    (= (get plan :expected-revision)
       (get verification :expected-revision))
    (= (get plan :revision)
@@ -372,7 +397,7 @@
       (not (map? state))
       (model/fail {} "tahto.provider/transition-state-invalid")
 
-      (not (transaction-plan? plan state))
+      (not (commit-plan? plan state))
       (model/fail state "tahto.provider/transaction-plan-invalid")
 
       (not (commit-verification-matches?
@@ -555,7 +580,7 @@
         plan (transaction-plan transition-result)
         receipt (receipt-from-store-result store-result)]
     (and
-     (transaction-plan? plan state)
+     (commit-plan? plan state)
      (commit-verification-matches? verification plan state)
      (receipt-matches? receipt verification))))
 

@@ -35,7 +35,15 @@ The current Hara/Hoplite control-plane application exposes:
 GET /.well-known/tahto
 GET /tahto/v1/health
 GET /tahto/v1/status
+POST /tahto/v1/pairing/prepare
+POST /tahto/v1/pairing/complete
 ```
+
+The loopback operator command `bin/tahto invite` issues a short-lived
+`invite.*~token` value through the non-advertised management route. Only the
+token digest enters durable metadata. Greenways OS sends the raw token to
+prepare, signs the exact returned intent, and completes enrolment without
+granting administrator or application authority.
 
 One bounded compatibility release also exposes:
 

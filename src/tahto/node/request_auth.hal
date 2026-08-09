@@ -1,7 +1,7 @@
 (ns tahto.node.request-auth
   (:require [std.foundation :refer :all]
+            [std.foundation.json :as json]
             [std.foundation.string :as string]
-            [std.json :as json]
             [tahto.protocol.validate :as validate]))
 
 (def request-protocol "tahto.device-request/1")

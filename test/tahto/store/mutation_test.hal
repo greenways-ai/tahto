@@ -1,0 +1,88 @@
+(ns tahto.store.mutation-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.store.memory-store :as memory-store]
+            [tahto.store.model :as model]
+            [tahto.store.mutation :as mutation]
+            [tahto.store.provider :as provider]))
+
+(def request-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def result-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def state-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def plan-digest
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def initial-digest
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+(defn install-marker
+  [state marker]
+  (if (= marker (get state :management-marker))
+    (model/ok state {:marker marker})
+    (model/ok (assoc state :management-marker marker)
+              {:marker marker})))
+
+(defn verification
+  [plan]
+  {:protocol provider/commit-verification-protocol
+   :verified true
+   :expected-revision (get plan :expected-revision)
+   :revision (get plan :revision)
+   :plan-digest plan-digest
+   :request-digest request-digest
+   :result-digest result-digest
+   :state-digest state-digest
+   :completed-at "2026-08-09T05:10:00Z"})
+
+(defn executor
+  [memory]
+  (fn [service operation request]
+    (memory-store/invoke memory service operation request)))
+
+(test/print-results
+ [(test/check
+   "a management mutation becomes one generic CAS plan and durable receipt"
+   (let [state (model/empty-state)
+         memory (memory-store/create)
+         initialized
+         (provider/execute-prepared-with
+          (provider/prepare-initialize
+           state
+           {:protocol provider/state-verification-protocol
+            :verified true
+            :revision 0
+            :state-digest initial-digest
+            :encoded-at "2026-08-09T05:09:00Z"})
+          (executor memory))
+         changed
+         (mutation/execute
+          state 0 "pairing.issue" request-digest
+          install-marker "invite.one" result-digest)
+         plan (get changed :value)
+         committed
+         (provider/execute-prepared-with
+          (mutation/prepare-store-commit changed (verification plan))
+          (executor memory))]
+     [(get initialized :ok)
+      (provider/mutation-plan? plan (get changed :state))
+      (get committed :ok)
+      (get-in committed [:value :status])
+      (= (get changed :state)
+         (get (memory-store/snapshot-entry memory) :value))])
+   [true true true "applied" true])
+
+  (test/check
+   "an exact transition replay does not create a second metadata revision"
+   (let [state (assoc (model/empty-state)
+                      :management-marker "invite.one")
+         replay
+         (mutation/execute
+          state 0 "pairing.issue" request-digest
+          install-marker "invite.one" result-digest)]
+     [(get replay :ok)
+      (= mutation/replay-protocol (get-in replay [:value :protocol]))
+      (= 0 (provider/state-revision (get replay :state)))
+      (= {:marker "invite.one"} (get-in replay [:value :result]))])
+   [true true true true])])
