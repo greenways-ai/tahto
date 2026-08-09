@@ -1,0 +1,75 @@
+(ns tahto.fixture.app
+  (:require [hoplite.core :as h]
+            [std.json :as json]
+            [tahto.fixture.two-device :as fixture]))
+
+;; This is a non-default release-conformance application.  It exposes only the
+;; closed fixture contract until the production hara.store/hara.blob handlers
+;; are added in later slices.  The ordinary Tahto node profile remains
+;; unchanged.
+
+(def fixture-status-protocol
+  "tahto.two-device-fixture-status/1")
+
+(def public-headers
+  {"content-type" "application/json; charset=utf-8"
+   "cache-control" "no-store"
+   "access-control-allow-origin" "*"
+   "access-control-allow-methods" "GET, OPTIONS"
+   "access-control-allow-headers" "authorization, content-type"
+   "x-content-type-options" "nosniff"})
+
+(defn json-response
+  [status value]
+  {:status status
+   :headers public-headers
+   :body (json/write value)})
+
+(defn descriptor-value
+  []
+  (fixture/descriptor))
+
+(defn health-value
+  []
+  {:protocol fixture-status-protocol
+   :status "ready"
+   :phase "contract"
+   :fixture-protocol fixture/fixture-protocol
+   :required-services ["hara.blob" "hara.store"]})
+
+(defn descriptor
+  [_request]
+  (json-response 200 (descriptor-value)))
+
+(defn health
+  [_request]
+  (json-response 200 (health-value)))
+
+(defn preflight
+  [_request]
+  {:status 204
+   :headers public-headers
+   :body ""})
+
+(def app
+  (h/app
+    {:name "tahto-two-device-fixture"
+     :resources
+     [["/.well-known/tahto-two-device-fixture"
+       {:get {:name :tahto.fixture/discovery
+              :summary "Describe the closed two-device release fixture"
+              :handler #'descriptor}
+        :options {:name :tahto.fixture/discovery-options
+                  :handler #'preflight}}]
+      ["/tahto/fixture/v1"
+       {:get {:name :tahto.fixture/descriptor
+              :summary "Return the exact two-device fixture descriptor"
+              :handler #'descriptor}
+        :options {:name :tahto.fixture/descriptor-options
+                  :handler #'preflight}}]
+      ["/tahto/fixture/v1/health"
+       {:get {:name :tahto.fixture/health
+              :summary "Report fixture-contract readiness"
+              :handler #'health}
+        :options {:name :tahto.fixture/health-options
+                  :handler #'preflight}}]]}))
