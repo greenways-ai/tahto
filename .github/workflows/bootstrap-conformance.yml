@@ -45,6 +45,7 @@ jobs:
           test -f src/tahto/semantic/root.hal
           test -f src/tahto/semantic/history.hal
           test -f src/tahto/semantic/canonical_value.hal
+          test -f src/tahto/semantic/read.hal
           test -f src/tahto/sync/device.hal
           test -f src/tahto/sync/session.hal
           test -f src/tahto/service/state.hal
@@ -65,6 +66,7 @@ jobs:
           test -f test/tahto/semantic/index_root_test.hal
           test -f test/tahto/semantic/history_test.hal
           test -f test/tahto/semantic/canonical_value_test.hal
+          test -f test/tahto/semantic/read_test.hal
           test -f test/tahto/sync/device_test.hal
           test -f test/tahto/sync/session_test.hal
           test -f test/tahto/sync/two_device_object_test.hal
@@ -82,6 +84,7 @@ jobs:
           test -f protocol/semantic-index-roots.md
           test -f protocol/semantic-history.md
           test -f protocol/canonical-values.md
+          test -f protocol/semantic-read.md
 
           grep -F '(def host-service "hara.blob")' src/tahto/store/capability.hal
           grep -F '(def host-service "hara.store")' src/tahto/store/provider.hal
@@ -97,6 +100,9 @@ jobs:
           grep -F '(ns tahto.semantic.root' src/tahto/semantic/root.hal
           grep -F '(ns tahto.semantic.history' src/tahto/semantic/history.hal
           grep -F '(ns tahto.semantic.canonical-value' src/tahto/semantic/canonical_value.hal
+          grep -F '(ns tahto.semantic.read' src/tahto/semantic/read.hal
+          grep -F '(def operation "semantic.read")' src/tahto/semantic/read.hal
+          grep -F '"semantic.read"' src/tahto/protocol/validate.hal
           grep -F '[std.foundation.canonical-value :as portable]' src/tahto/semantic/canonical_value.hal
           grep -F 'portable/verification-request' src/tahto/semantic/canonical_value.hal
           grep -F '(def admission-fields' src/tahto/semantic/admission.hal
@@ -114,6 +120,7 @@ jobs:
           grep -F '(ns tahto.semantic.index-root-test' test/tahto/semantic/index_root_test.hal
           grep -F '(ns tahto.semantic.history-test' test/tahto/semantic/history_test.hal
           grep -F '(ns tahto.semantic.canonical-value-test' test/tahto/semantic/canonical_value_test.hal
+          grep -F '(ns tahto.semantic.read-test' test/tahto/semantic/read_test.hal
           grep -F '(ns tahto.sync.two-device-object-test' test/tahto/sync/two_device_object_test.hal
           grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
 

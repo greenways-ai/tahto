@@ -1,0 +1,369 @@
+(ns tahto.semantic.read-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.history :as semantic-history]
+            [tahto.semantic.read :as read]
+            [tahto.store.model :as model]))
+
+(def application "fixture.world")
+(def namespace "world.a")
+(def collection "scene")
+
+(def value-left
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+(def value-right
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def object-left
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def object-right
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+(def index-left
+  "sha256:4444444444444444444444444444444444444444444444444444444444444444")
+(def index-right
+  "sha256:5555555555555555555555555555555555555555555555555555555555555555")
+(def root-left
+  "sha256:6666666666666666666666666666666666666666666666666666666666666666")
+(def root-right
+  "sha256:7777777777777777777777777777777777777777777777777777777777777777")
+(def commit-left
+  "sha256:8888888888888888888888888888888888888888888888888888888888888888")
+(def commit-right
+  "sha256:9999999999999999999999999999999999999999999999999999999999999999")
+(def head-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def request-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def package-root
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+
+(def schema-ref
+  {:protocol "tahto.schema-ref/1"
+   :schema "fixture.entity"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root
+   :entry "fixture.entity/spec"})
+
+(defn signature
+  [key-id]
+  {:profile "tahto-signature/1"
+   :algorithm "ed25519"
+   :key-id key-id
+   :value "abcdefghijklmnopqrstuvwxyz0123456789"})
+
+(def object-left-projection
+  {:root object-left
+   :id "entity/tree"
+   :schema-ref schema-ref
+   :value-root value-left
+   :value-size 64
+   :links []})
+
+(def object-right-projection
+  {:root object-right
+   :id "entity/tree"
+   :schema-ref schema-ref
+   :value-root value-right
+   :value-size 72
+   :links []})
+
+(def index-left-projection
+  {:root index-left
+   :entries [{:id "entity/tree" :root object-left}]})
+
+(def index-right-projection
+  {:root index-right
+   :entries [{:id "entity/tree" :root object-right}]})
+
+(def root-left-projection
+  {:root root-left
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema-refs [schema-ref]
+   :index-root index-left
+   :roots
+   [{:name "document"
+     :id "entity/tree"
+     :root object-left}]})
+
+(def root-right-projection
+  {:root root-right
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema-refs [schema-ref]
+   :index-root index-right
+   :roots
+   [{:name "document"
+     :id "entity/tree"
+     :root object-right}]})
+
+(defn commit-record
+  [root device semantic-root sequence]
+  {:protocol model/commit-protocol
+   :root root
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema semantic-history/schema
+   :schema-version semantic-history/schema-version
+   :device device
+   :parents []
+   :objects [semantic-root]
+   :tombstones []
+   :sequence sequence
+   :timestamp "2026-08-09T01:00:00Z"
+   :signature (signature (str device ".key"))})
+
+(def left-commit
+  (commit-record commit-left "device.a" root-left 1))
+
+(def right-commit
+  (commit-record commit-right "device.b" root-right 1))
+
+(def head
+  {:protocol model/head-protocol
+   :application application
+   :namespace namespace
+   :collection collection
+   :kind "main"
+   :name "primary"
+   :commits [commit-left commit-right]
+   :expected []
+   :updated-at "2026-08-09T01:10:00Z"
+   :signature (signature "head.key")})
+
+(def device
+  {:protocol model/device-protocol
+   :id "device.a"
+   :node "node.home"
+   :public-key "ed25519:device-a-public-key"
+   :status "enrolled"
+   :enrolled-at "2026-08-09T00:00:00Z"})
+
+(def context
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation read/operation
+   :application application
+   :namespace namespace
+   :collection collection
+   :request-digest request-digest
+   :idempotency-key "semantic-read-idempotency-0001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(def request
+  {:kind "main"
+   :name "primary"
+   :max-commits 2})
+
+(defn base-state
+  []
+  (let [head-key
+        (model/head-key application namespace collection "main" "primary")]
+    (assoc
+     (model/empty-state)
+     :devices {"device.a" device}
+     :semantic-objects
+     {object-left object-left-projection
+      object-right object-right-projection}
+     :semantic-indexes
+     {index-left index-left-projection
+      index-right index-right-projection}
+     :semantic-roots
+     {root-left root-left-projection
+      root-right root-right-projection}
+     :commits
+     {commit-left left-commit
+      commit-right right-commit}
+     :heads {head-key head}
+     :head-digests {head-key head-digest})))
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "semantic reads preserve divergent head order without selecting a winner"
+   (let [state (base-state)
+         result (read/read state context request)
+         value (get result :value)]
+     [(get result :ok)
+      (get value :protocol)
+      (get value :head-digest)
+      (get-in value [:head :commits])
+      (vec (map (fn [branch]
+                  (get branch :commit-root))
+                (get value :branches)))
+      (vec (map (fn [branch]
+                  (get branch :semantic-root))
+                (get value :branches)))
+      (vec (map (fn [branch]
+                  (get branch :selection))
+                (get value :branches)))
+      (= state (result-state result))
+      (read/result? value)])
+   [true
+    "tahto.semantic-read-result/1"
+    head-digest
+    [commit-left commit-right]
+    [commit-left commit-right]
+    [root-left root-right]
+    [nil nil]
+    true
+    true])
+
+  (test/check
+   "one stable ID is resolved independently in every branch"
+   (let [state (base-state)
+         result
+         (read/read
+          state
+          context
+          (assoc request :id "entity/tree"))
+         branches (get-in result [:value :branches])]
+     [(get result :ok)
+      (get-in result [:value :requested-id])
+      (get-in branches [0 :selection :root])
+      (get-in branches [0 :selection :value-root])
+      (get-in branches [1 :selection :root])
+      (get-in branches [1 :selection :value-root])
+      (= state (result-state result))])
+   [true
+    "entity/tree"
+    object-left value-left
+    object-right value-right
+    true])
+
+  (test/check
+   "an absent stable ID remains absent per branch without widening the result"
+   (let [result
+         (read/read
+          (base-state)
+          context
+          (assoc request :id "entity/missing"))]
+     [(get result :ok)
+      (get-in result [:value :requested-id])
+      (vec (map (fn [branch]
+                  (get branch :selection))
+                (get-in result [:value :branches])))])
+   [true "entity/missing" [nil nil]])
+
+  (test/check
+   "head width is rejected rather than truncated"
+   (let [state (base-state)
+         too-narrow
+         (read/read state context (assoc request :max-commits 1))
+         above-profile
+         (read/read
+          state context
+          (assoc request
+                 :max-commits
+                 (inc read/max-read-commits)))]
+     [(error-code too-narrow)
+      (get-in too-narrow [:error :details :commits])
+      (error-code above-profile)
+      (= state (result-state too-narrow))
+      (= state (result-state above-profile))])
+   ["tahto.semantic/read-head-too-wide"
+    2
+    "tahto.semantic/read-request-invalid"
+    true true])
+
+  (test/check
+   "contexts must be pending semantic.read requests from an enrolled device"
+   (let [state (base-state)
+         completed
+         (read/read
+          state
+          (assoc context :status "completed"
+                         :result-digest head-digest)
+          request)
+         wrong-operation
+         (read/read
+          state
+          (assoc context :operation "head.read")
+          request)
+         revoked-state
+         (assoc-in state [:devices "device.a" :status] "revoked")
+         revoked (read/read revoked-state context request)]
+     [(error-code completed)
+      (error-code wrong-operation)
+      (error-code revoked)
+      (= state (result-state completed))
+      (= state (result-state wrong-operation))
+      (= revoked-state (result-state revoked))])
+   ["tahto.semantic/read-context-not-authorized"
+    "tahto.semantic/read-context-not-authorized"
+    "tahto.semantic/read-context-not-authorized"
+    true true true])
+
+  (test/check
+   "missing and non-semantic heads fail closed"
+   (let [state (base-state)
+         missing
+         (read/read state context (assoc request :name "missing"))
+         invalid-state
+         (assoc-in state
+                   [:commits commit-left :schema]
+                   "fixture.other")
+         invalid (read/read invalid-state context request)]
+     [(error-code missing)
+      (error-code invalid)
+      (= state (result-state missing))
+      (= invalid-state (result-state invalid))])
+   ["tahto.semantic/read-head-missing"
+    "tahto.semantic/read-head-profile-invalid"
+    true true])
+
+  (test/check
+   "missing index and selected object projections are explicit failures"
+   (let [state (base-state)
+         no-index
+         (update state :semantic-indexes dissoc index-left)
+         index-result (read/read no-index context request)
+         no-selection
+         (update state :semantic-objects dissoc object-left)
+         selection-result
+         (read/read
+          no-selection
+          context
+          (assoc request :id "entity/tree"))]
+     [(error-code index-result)
+      (get-in index-result [:error :details :root])
+      (error-code selection-result)
+      (get-in selection-result [:error :details :root])
+      (= no-index (result-state index-result))
+      (= no-selection (result-state selection-result))])
+   ["tahto.semantic/read-index-missing"
+    index-left
+    "tahto.semantic/read-selection-missing"
+    object-left
+    true true])
+
+  (test/check
+   "request and result profiles reject widened or inconsistent values"
+   [(read/request? request)
+    (read/request? (assoc request :provider "filesystem"))
+    (read/request? (assoc request :id "Entity"))
+    (let [result
+          (get
+           (read/read
+            (base-state)
+            context
+            (assoc request :id "entity/tree"))
+           :value)]
+      (read/result?
+       (assoc result
+              :requested-id "entity/other")))])
+   [true false false false])])

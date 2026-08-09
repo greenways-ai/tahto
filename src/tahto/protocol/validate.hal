@@ -28,6 +28,7 @@
     "commit.accept"
     "head.read"
     "head.update"
+    "semantic.read"
     "backup.pin"
     "restore.read"
     "sync.push"
