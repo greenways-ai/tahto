@@ -1,0 +1,405 @@
+(ns tahto.semantic.prepare-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.history :as semantic-history]
+            [tahto.semantic.prepare :as prepare]
+            [tahto.store.model :as model]))
+
+(def application "fixture.world")
+(def namespace "world.a")
+(def collection "scene")
+
+(def candidate-root
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+(def parent-semantic-root
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def candidate-index
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def parent-index
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+(def candidate-object
+  "sha256:4444444444444444444444444444444444444444444444444444444444444444")
+(def parent-object
+  "sha256:5555555555555555555555555555555555555555555555555555555555555555")
+(def parent-commit-root
+  "sha256:6666666666666666666666666666666666666666666666666666666666666666")
+(def head-digest
+  "sha256:7777777777777777777777777777777777777777777777777777777777777777")
+(def request-digest
+  "sha256:8888888888888888888888888888888888888888888888888888888888888888")
+(def package-root
+  "sha256:9999999999999999999999999999999999999999999999999999999999999999")
+(def unknown-root
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def schema-ref
+  {:protocol "tahto.schema-ref/1"
+   :schema "fixture.entity"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root
+   :entry "fixture.entity/spec"})
+
+(defn signature
+  [key-id]
+  {:profile "tahto-signature/1"
+   :algorithm "ed25519"
+   :key-id key-id
+   :value "abcdefghijklmnopqrstuvwxyz0123456789"})
+
+(def candidate-projection
+  {:root candidate-root
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema-refs [schema-ref]
+   :index-root candidate-index
+   :roots
+   [{:name "document"
+     :id "entity/candidate"
+     :root candidate-object}]})
+
+(def parent-projection
+  {:root parent-semantic-root
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema-refs [schema-ref]
+   :index-root parent-index
+   :roots
+   [{:name "document"
+     :id "entity/parent"
+     :root parent-object}]})
+
+(def parent-commit
+  {:protocol model/commit-protocol
+   :root parent-commit-root
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema semantic-history/schema
+   :schema-version semantic-history/schema-version
+   :device "device.a"
+   :parents []
+   :objects [parent-semantic-root]
+   :tombstones []
+   :sequence 1
+   :timestamp "2026-08-09T01:00:00Z"
+   :signature (signature "device.a.key")})
+
+(def head
+  {:protocol model/head-protocol
+   :application application
+   :namespace namespace
+   :collection collection
+   :kind "main"
+   :name "primary"
+   :commits [parent-commit-root]
+   :expected []
+   :updated-at "2026-08-09T01:05:00Z"
+   :signature (signature "head.key")})
+
+(def device
+  {:protocol model/device-protocol
+   :id "device.a"
+   :node "node.home"
+   :public-key "ed25519:device-a-public-key"
+   :status "enrolled"
+   :enrolled-at "2026-08-09T00:00:00Z"})
+
+(def context
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation prepare/operation
+   :application application
+   :namespace namespace
+   :collection collection
+   :request-digest request-digest
+   :idempotency-key "semantic-prepare-idempotency-0001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(def request
+  {:device "device.a"
+   :semantic-root candidate-root
+   :sequence 2
+   :commit-timestamp "2026-08-09T01:10:00Z"
+   :parents [parent-commit-root]
+   :head-kind "main"
+   :head-name "primary"
+   :head-updated-at "2026-08-09T01:11:00Z"
+   :expected-head [parent-commit-root]
+   :retain-head []
+   :expected-metadata-revision 4})
+
+(defn base-state
+  []
+  (let [sequence-key
+        (model/sequence-key
+         application namespace collection "device.a")
+        head-key
+        (model/head-key
+         application namespace collection "main" "primary")]
+    (assoc
+     (model/empty-state)
+     :metadata-revision 4
+     :devices {"device.a" device}
+     :semantic-roots
+     {candidate-root candidate-projection
+      parent-semantic-root parent-projection}
+     :commits {parent-commit-root parent-commit}
+     :sequences {sequence-key 1}
+     :heads {head-key head}
+     :head-digests {head-key head-digest})))
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "prepare returns deterministic closed commit and head signing intents"
+   (let [state (base-state)
+         first (prepare/prepare state context request)
+         second (prepare/prepare state context request)
+         value (get first :value)]
+     [(get first :ok)
+      (= (get first :value) (get second :value))
+      (= state (result-state first))
+      (prepare/result? value)
+      value])
+   [true
+    true
+    true
+    true
+    {:protocol "tahto.semantic-prepare-result/1"
+     :operation "semantic.prepare"
+     :device "device.a"
+     :request-digest request-digest
+     :expected-metadata-revision 4
+     :current-head-digest head-digest
+     :commit-intent
+     {:protocol "tahto.semantic-commit-intent/1"
+      :record-protocol "tahto.commit/1"
+      :application application
+      :namespace namespace
+      :collection collection
+      :schema "tahto.semantic-root"
+      :schema-version 1
+      :device "device.a"
+      :parents [parent-commit-root]
+      :objects [candidate-root]
+      :tombstones []
+      :sequence 2
+      :timestamp "2026-08-09T01:10:00Z"}
+     :head-intent
+     {:protocol "tahto.semantic-head-intent/1"
+      :record-protocol "tahto.head/1"
+      :application application
+      :namespace namespace
+      :collection collection
+      :kind "main"
+      :name "primary"
+      :expected [parent-commit-root]
+      :retained []
+      :commit-insertion "append-signed-commit"
+      :updated-at "2026-08-09T01:11:00Z"}}])
+
+  (test/check
+   "genesis preparation has no current head and sequence one"
+   (let [state
+         (assoc
+          (base-state)
+          :metadata-revision 0
+          :commits {}
+          :sequences {}
+          :heads {}
+          :head-digests {})
+         genesis-request
+         (assoc request
+                :sequence 1
+                :parents []
+                :expected-head []
+                :expected-metadata-revision 0)
+         result
+         (prepare/prepare state context genesis-request)]
+     [(get result :ok)
+      (get-in result [:value :current-head-digest])
+      (get-in result [:value :commit-intent :sequence])
+      (get-in result [:value :head-intent :expected])
+      (= state (result-state result))])
+   [true nil 1 [] true])
+
+  (test/check
+   "existing head roots are retained only by explicit application choice"
+   (let [state (base-state)
+         result
+         (prepare/prepare
+          state
+          context
+          (assoc request :retain-head [parent-commit-root]))]
+     [(get result :ok)
+      (get-in result [:value :head-intent :retained])
+      (get-in result [:value :head-intent :commit-insertion])
+      (= state (result-state result))])
+   [true [parent-commit-root] "append-signed-commit" true])
+
+  (test/check
+   "revision sequence and current-head expectations are exact"
+   (let [state (base-state)
+         stale-revision
+         (prepare/prepare
+          state context
+          (assoc request :expected-metadata-revision 3))
+         wrong-sequence
+         (prepare/prepare
+          state context
+          (assoc request :sequence 3))
+         stale-head
+         (prepare/prepare
+          state context
+          (assoc request :expected-head []))]
+     [(error-code stale-revision)
+      (error-code wrong-sequence)
+      (error-code stale-head)
+      (= state (result-state stale-revision))
+      (= state (result-state wrong-sequence))
+      (= state (result-state stale-head))])
+   ["tahto.semantic/prepare-revision-mismatch"
+    "tahto.semantic/prepare-sequence-mismatch"
+    "tahto.semantic/prepare-head-expectation-mismatch"
+    true true true])
+
+  (test/check
+   "semantic roots and parents must use the exact collection profile"
+   (let [state (base-state)
+         missing-root
+         (prepare/prepare
+          state context
+          (assoc request :semantic-root unknown-root))
+         wrong-coordinate-state
+         (assoc-in state
+                   [:semantic-roots candidate-root :collection]
+                   "other")
+         wrong-coordinate
+         (prepare/prepare
+          wrong-coordinate-state context request)
+         missing-parent
+         (prepare/prepare
+          state context
+          (assoc request :parents [unknown-root]))]
+     [(error-code missing-root)
+      (error-code wrong-coordinate)
+      (error-code missing-parent)
+      (= state (result-state missing-root))
+      (= wrong-coordinate-state (result-state wrong-coordinate))
+      (= state (result-state missing-parent))])
+   ["tahto.semantic/prepare-root-not-admitted"
+    "tahto.semantic/prepare-root-projection-invalid"
+    "tahto.semantic/prepare-parent-profile-invalid"
+    true true true])
+
+  (test/check
+   "retained roots must come from the exact current head"
+   (let [state (base-state)
+         result
+         (prepare/prepare
+          state context
+          (assoc request :retain-head [unknown-root]))]
+     [(error-code result)
+      (get-in result [:error :details :current])
+      (get-in result [:error :details :retained])
+      (= state (result-state result))])
+   ["tahto.semantic/prepare-retained-head-invalid"
+    [parent-commit-root]
+    [unknown-root]
+    true])
+
+  (test/check
+   "configured parent and future-head bounds fail before intent construction"
+   (let [parent-bounded
+         (assoc-in (base-state)
+                   [:limits :max-commit-parents]
+                   0)
+         parent-result
+         (prepare/prepare parent-bounded context request)
+         head-bounded
+         (assoc-in (base-state)
+                   [:limits :max-head-commits]
+                   1)
+         head-result
+         (prepare/prepare
+          head-bounded context
+          (assoc request :retain-head [parent-commit-root]))]
+     [(error-code parent-result)
+      (error-code head-result)
+      (= parent-bounded (result-state parent-result))
+      (= head-bounded (result-state head-result))])
+   ["tahto.semantic/prepare-parents-too-many"
+    "tahto.semantic/prepare-head-too-wide"
+    true true])
+
+  (test/check
+   "contexts must be pending semantic.prepare requests from the same enrolled device"
+   (let [state (base-state)
+         completed
+         (prepare/prepare
+          state
+          (assoc context
+                 :status "completed"
+                 :result-digest head-digest)
+          request)
+         wrong-operation
+         (prepare/prepare
+          state
+          (assoc context :operation "semantic.read")
+          request)
+         wrong-device
+         (prepare/prepare
+          state context
+          (assoc request :device "device.b"))
+         revoked-state
+         (assoc-in state [:devices "device.a" :status] "revoked")
+         revoked
+         (prepare/prepare revoked-state context request)]
+     [(error-code completed)
+      (error-code wrong-operation)
+      (error-code wrong-device)
+      (error-code revoked)
+      (= state (result-state completed))
+      (= state (result-state wrong-operation))
+      (= state (result-state wrong-device))
+      (= revoked-state (result-state revoked))])
+   ["tahto.semantic/prepare-context-not-authorized"
+    "tahto.semantic/prepare-context-not-authorized"
+    "tahto.semantic/prepare-device-mismatch"
+    "tahto.semantic/prepare-context-not-authorized"
+    true true true true])
+
+  (test/check
+   "request and intent records reject widened authority and fabricated signatures"
+   (let [value
+         (get
+          (prepare/prepare (base-state) context request)
+          :value)]
+     [(prepare/request? request)
+      (prepare/request? (assoc request :provider "filesystem"))
+      (prepare/commit-intent?
+       (assoc (get value :commit-intent)
+              :signature (signature "device.a.key")))
+      (prepare/head-intent?
+       (assoc (get value :head-intent)
+              :provider "remote"))
+      (prepare/result? (assoc value :path "/tmp/state"))
+      (has? (get value :commit-intent) :root)
+      (has? (get value :commit-intent) :signature)
+      (has? (get value :head-intent) :commits)
+      (has? (get value :head-intent) :signature)])
+   [true false false false false false false false false])])
