@@ -65,71 +65,74 @@
 
 (defn operation-authorized?
   [operations operation]
-  (or
-   (= operations operation)
-   (= operations "object.upload,object.read")
-   (= operations "object.read,object.upload")))
+  (boolean
+   (or
+    (= operations operation)
+    (= operations "object.upload,object.read")
+    (= operations "object.read,object.upload"))))
 
 (defn claims?
   [claims identity]
-  (and
-   (validate/exact-record?
-    claims claim-fields optional-claim-fields)
-   (= (get claims "application/id")
-      (get identity :application))
-   (= (get claims "application/version")
-      (get identity :application-version))
-   (= (get claims "application/publisher")
-      (get identity :publisher))
-   (= (get claims "application/lock-digest")
-      (get identity :lock-digest))
-   (= (get claims "application/namespace")
-      (get identity :namespace))
-   (= (get claims "application/collection")
-      (get identity :collection))
-   (operation-authorized?
-    (get claims "application/operations")
-    (get identity :operation))
-   (or
-    (not (has? claims "device/label"))
-    (model/non-empty-string?
-     (get claims "device/label")))))
+  (boolean
+   (and
+    (validate/exact-record?
+     claims claim-fields optional-claim-fields)
+    (= (get claims "application/id")
+       (get identity :application))
+    (= (get claims "application/version")
+       (get identity :application-version))
+    (= (get claims "application/publisher")
+       (get identity :publisher))
+    (= (get claims "application/lock-digest")
+       (get identity :lock-digest))
+    (= (get claims "application/namespace")
+       (get identity :namespace))
+    (= (get claims "application/collection")
+       (get identity :collection))
+    (operation-authorized?
+     (get claims "application/operations")
+     (get identity :operation))
+    (or
+     (not (has? claims "device/label"))
+     (model/non-empty-string?
+      (get claims "device/label"))))))
 
 (defn identity?
   [value]
   (let [device-id (get value :device-id)
         public-key (fixture-public-key device-id)]
-    (and
-     (validate/exact-record? value ingress-fields #{})
-     (= ingress-profile (get value :profile))
-     (= "application" (get value :realm))
-     (model/identifier? (get value :subject))
-     (model/identifier? device-id)
-     (not (nil? public-key))
-     (model/identifier? (get value :key-id))
-     (= fixture/application (get value :application))
-     (model/non-empty-string?
-      (get value :application-version))
-     (model/identifier? (get value :publisher))
-     (model/canonical-digest?
-      (get value :lock-digest))
-     (= fixture/fixture-namespace
-        (get value :namespace))
-     (= fixture/collection
-        (get value :collection))
-     (has? fixture-operations
-           (get value :operation))
-     (model/canonical-digest?
-      (get value :content-digest))
-     (model/positive-integer?
-      (get value :timestamp))
-     (has? replay-statuses
-           (get value :replay-status))
-     (model/canonical-digest?
-      (get value :request-fingerprint))
-     (model/positive-integer?
-      (get value :admitted-at))
-     (claims? (get value :claims) value))))
+    (boolean
+     (and
+      (validate/exact-record? value ingress-fields #{})
+      (= ingress-profile (get value :profile))
+      (= "application" (get value :realm))
+      (model/identifier? (get value :subject))
+      (model/identifier? device-id)
+      (not (nil? public-key))
+      (model/identifier? (get value :key-id))
+      (= fixture/application (get value :application))
+      (model/non-empty-string?
+       (get value :application-version))
+      (model/identifier? (get value :publisher))
+      (model/canonical-digest?
+       (get value :lock-digest))
+      (= fixture/fixture-namespace
+         (get value :namespace))
+      (= fixture/collection
+         (get value :collection))
+      (has? fixture-operations
+            (get value :operation))
+      (model/canonical-digest?
+       (get value :content-digest))
+      (model/positive-integer?
+       (get value :timestamp))
+      (has? replay-statuses
+            (get value :replay-status))
+      (model/canonical-digest?
+       (get value :request-fingerprint))
+      (model/positive-integer?
+       (get value :admitted-at))
+      (claims? (get value :claims) value)))))
 
 (defn request-proof
   [identity accepted-at]
