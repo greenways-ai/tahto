@@ -68,19 +68,15 @@
            (semantic/coordinate-compare
             (semantic/schema-ref-coordinate candidate)
             (semantic/schema-ref-coordinate current))]
-       (cond
-         (= comparison 0)
+       (if (= comparison 0)
          ordered
-
-         (and (not inserted) (< comparison 0))
-         (recur (inc index)
-                (conj (conj output candidate) current)
-                true)
-
-         :else
-         (recur (inc index)
-                (conj output current)
-                inserted))))))
+         (if (and (not inserted) (< comparison 0))
+           (recur (inc index)
+                  (conj (conj output candidate) current)
+                  true)
+           (recur (inc index)
+                  (conj output current)
+                  inserted)))))))
 
 (defn selected-schema-refs
   [state entries]

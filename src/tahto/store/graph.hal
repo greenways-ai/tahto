@@ -34,29 +34,24 @@
          :visited visited
          :missing missing}
         (let [digest (nth queue index)]
-          (cond
-            (has? seen digest)
+          (if (has? seen digest)
             (recur queue (inc index) seen visited missing)
-
-            (>= (count visited) maximum)
-            {:complete false
-             :overflow true
-             :visited visited
-             :missing missing}
-
-            (nil? (model/stored-object state digest))
-            (recur queue
-                   (inc index)
-                   (conj seen digest)
-                   (conj visited digest)
-                   (conj missing digest))
-
-            :else
-            (recur (into queue (child-digests state digest))
-                   (inc index)
-                   (conj seen digest)
-                   (conj visited digest)
-                   missing)))))))
+            (if (>= (count visited) maximum)
+              {:complete false
+               :overflow true
+               :visited visited
+               :missing missing}
+              (if (nil? (model/stored-object state digest))
+                (recur queue
+                       (inc index)
+                       (conj seen digest)
+                       (conj visited digest)
+                       (conj missing digest))
+                (recur (into queue (child-digests state digest))
+                       (inc index)
+                       (conj seen digest)
+                       (conj visited digest)
+                       missing)))))))))
 
 (defn closure-report
   [state roots]

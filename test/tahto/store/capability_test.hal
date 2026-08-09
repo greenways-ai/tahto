@@ -80,12 +80,37 @@
    :offset 2
    :length 7})
 
+(def probe-result
+  {:protocol capability/result-protocol
+   :operation "probe"
+   :ready true})
+
 (defn error-code
   [result]
   (get-in result [:error :code]))
 
 (test/print-results
  [(test/check
+   "the generic blob provider exposes a closed non-mutating readiness probe"
+   (let [prepared (capability/prepare-probe {:marker "unchanged"})
+         call (get prepared :value)
+         result
+         (capability/execute-probe-with
+          {:marker "unchanged"}
+          (fn [service operation request]
+            (if (and (= capability/host-service service)
+                     (= "probe" operation)
+                     (= (capability/probe-request) request))
+              probe-result
+              nil)))]
+     [(capability/host-call? call)
+      (get call :operation)
+      (get result :ok)
+      (get result :state)
+      (get-in result [:value :ready])])
+   [true "probe" true {:marker "unchanged"} true])
+
+  (test/check
    "Tahto effects map to one application-neutral Host/call shape"
    (let [open-call (capability/call-from-effect open-effect)
          append-call (capability/call-from-effect append-effect)

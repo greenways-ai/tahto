@@ -123,7 +123,7 @@
   [value minimum maximum]
   (truth-value
    (and
-    (integer? value)
+    (model/integer-value? value)
     (<= minimum value)
     (<= value maximum))))
 
@@ -255,8 +255,8 @@
     (= left right)
     0
 
-    (and (integer? left)
-         (integer? right))
+    (and (model/integer-value? left)
+         (model/integer-value? right))
     (if (< left right) -1 1)
 
     :else

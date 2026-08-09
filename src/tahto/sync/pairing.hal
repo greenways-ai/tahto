@@ -32,8 +32,8 @@
    (model/canonical-digest? (get value :approval-digest))
    (validate/timestamp? (get value :created-at))
    (validate/timestamp? (get value :expires-at))
-   (integer? (get value :created-seconds))
-   (integer? (get value :expires-seconds))
+   (model/integer-value? (get value :created-seconds))
+   (model/integer-value? (get value :expires-seconds))
    (< (get value :created-seconds)
       (get value :expires-seconds))
    (< (compare (get value :created-at)
@@ -93,7 +93,7 @@
    (validate/public-key? (get value :public-key))
    (= "p256-sha256" (get value :algorithm))
    (validate/timestamp? (get value :prepared-at))
-   (integer? (get value :prepared-seconds))))
+   (model/integer-value? (get value :prepared-seconds))))
 
 (defn intent?
   [value]
@@ -170,7 +170,7 @@
    (model/identifier? (get value :invitation))
    (model/canonical-digest? (get value :token-digest))
    (validate/timestamp? (get value :accepted-at))
-   (integer? (get value :accepted-seconds))
+   (model/integer-value? (get value :accepted-seconds))
    (validate/device? (get value :device))
    (= "enrolled" (get-in value [:device :status]))))
 
@@ -252,7 +252,7 @@
    (= complete-protocol (get value :protocol))
    (model/canonical-digest? (get value :token-digest))
    (validate/timestamp? (get value :accepted-at))
-   (integer? (get value :accepted-seconds))
+   (model/integer-value? (get value :accepted-seconds))
    (intent? (get value :intent))
    (intent-verification? (get value :intent-verification))))
 

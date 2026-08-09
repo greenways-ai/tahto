@@ -235,7 +235,7 @@
    (model/canonical-digest? (get value :request-digest))
    (opaque-token? (get value :idempotency-key))
    (has? #{"pending" "completed"} (get value :status))
-   (boolean? (get value :replayed))
+   (model/boolean-value? (get value :replayed))
    (or (nil? (get value :result-digest))
        (model/canonical-digest? (get value :result-digest)))))
 

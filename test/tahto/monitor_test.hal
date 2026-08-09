@@ -3,6 +3,7 @@
             [std.lib.test :as test]
             [tahto.monitor :as monitor]
             [tahto.protocol.descriptor :as descriptor]
+            [tahto.store.capability :as capability]
             [tahto.store.model :as model]
             [tahto.store.provider :as provider]))
 
@@ -17,14 +18,28 @@
    :value state
    :value-digest digest})
 
+(def object-probe-result
+  {:protocol capability/result-protocol
+   :operation "probe"
+   :ready true})
+
+(defn invoke-with
+  [metadata-result]
+  (fn [service _operation _request]
+    (if (= provider/host-service service)
+      metadata-result
+      object-probe-result)))
+
 (test/print-results
  [(test/check
    "an absent metadata snapshot is explicitly not ready"
-   (monitor/probe-with (fn [_ _ _] nil))
+   (monitor/probe-with (invoke-with nil))
    {:protocol "tahto.monitor-probe/1"
     :state "not-ready"
     :metadata "uninitialized"
-    :error nil})
+    :error nil
+    :object "ready"
+    :object-error nil})
 
   (test/check
    "a valid provider load reports its real revision and bounded counts"
@@ -33,13 +48,32 @@
                       :devices {"device.a" {:status "enrolled"}}
                       :objects {"sha256:a" {}})]
      (monitor/probe-with
-      (fn [_ _ _] (loaded-result state))))
+      (invoke-with (loaded-result state))))
    {:protocol "tahto.monitor-probe/1"
     :state "ready"
     :metadata "ready"
     :error nil
+    :object "ready"
+    :object-error nil
     :revision 7
     :counts {:devices 1 :objects 1 :commits 0 :heads 0 :backups 0}})
+
+  (test/check
+   "object provider failures degrade an otherwise ready metadata service"
+   (let [state (model/empty-state)]
+     (monitor/probe-with
+      (fn [service _operation _request]
+        (if (= provider/host-service service)
+          (loaded-result state)
+          (model/fail {} "hoplite.blob/unavailable")))))
+   {:protocol "tahto.monitor-probe/1"
+    :state "degraded"
+    :metadata "ready"
+    :error nil
+    :object "unavailable"
+    :object-error "tahto.capability/result-invalid"
+    :revision 0
+    :counts {:devices 0 :objects 0 :commits 0 :heads 0 :backups 0}})
 
   (test/check
    "provider failures remain bounded diagnostic state"
@@ -52,26 +86,34 @@
 
   (test/check
    "public health and status project the live metadata probe"
-   (let [inspection {:state "degraded" :metadata "unavailable"}]
+   (let [inspection {:state "degraded"
+                     :metadata "unavailable"
+                     :object "unavailable"}]
      [(get (descriptor/health-with inspection) "status")
       (get (descriptor/health-with inspection) "metadata")
+      (get (descriptor/health-with inspection) "objects")
       (get-in (descriptor/status-with inspection)
-              ["fabric" "metadataProvider"])])
-   ["degraded" "unavailable" "unavailable"])
+              ["fabric" "metadataProvider"])
+      (get-in (descriptor/status-with inspection)
+              ["fabric" "objectUpload"])])
+   ["degraded" "unavailable" "unavailable" "unavailable" "unavailable"])
 
   (test/check
    "paired diagnostics contain aggregate state and no stored records"
    (monitor/diagnostics
     {:state "ready"
      :metadata "ready"
+     :object "ready"
      :revision 4
      :error nil
+     :object-error nil
      :counts {:devices 2 :objects 5 :commits 1 :heads 1 :backups 0}}
     "2026-08-09T00:00:00.000Z")
    {:protocol "tahto.diagnostics/1"
     :checkedAt "2026-08-09T00:00:00.000Z"
     :state "ready"
-    :checks {:metadata {:state "ready" :revision 4 :error nil}}
+    :checks {:metadata {:state "ready" :revision 4 :error nil}
+             :object {:state "ready" :error nil}}
     :counts {:devices 2 :objects 5 :commits 1 :heads 1 :backups 0}})
 
   (test/check

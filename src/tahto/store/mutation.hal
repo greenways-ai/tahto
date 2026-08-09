@@ -37,7 +37,7 @@
       (let [changed (transition state input)]
         (cond
           (not (and (map? changed)
-                    (boolean? (get changed :ok))
+                    (model/boolean-value? (get changed :ok))
                     (map? (get changed :state))
                     (vector? (get changed :effects))))
           (model/fail state "tahto.mutation/transition-result-invalid")

@@ -35,7 +35,7 @@
   [value]
   (and
    (map? value)
-   (boolean? (get value :ok))
+   (model/boolean-value? (get value :ok))
    (map? (get value :state))
    (vector? (get value :effects))
    (if (get value :ok)

@@ -85,14 +85,23 @@
        (not (string/includes? value "\r"))
        (not (string/includes? value "\n"))))
 
+(defn integer-value?
+  [value]
+  (= :hara.type/integer (type value)))
+
+(defn boolean-value?
+  [value]
+  (or (= true value)
+      (= false value)))
+
 (defn non-negative-integer?
   [value]
-  (and (integer? value)
+  (and (integer-value? value)
        (>= value 0)))
 
 (defn positive-integer?
   [value]
-  (and (integer? value)
+  (and (integer-value? value)
        (> value 0)))
 
 (defn canonical-digest?

@@ -83,7 +83,7 @@
 (defn transaction-plan
   [transition-result]
   (if (and (map? transition-result)
-           (boolean? (get transition-result :ok)))
+           (model/boolean-value? (get transition-result :ok)))
     (if (get transition-result :ok)
       (get transition-result :value)
       (get transition-result :transaction))
@@ -108,7 +108,7 @@
       (get-in value [:context :request-digest]))
    (= (get value :result-digest)
       (get-in value [:context :result-digest]))
-   (boolean? (get value :replayed))))
+   (model/boolean-value? (get value :replayed))))
 
 (defn mutation-plan?
   [value state]
@@ -503,7 +503,7 @@
   [prepared invoke]
   (if
    (and (map? prepared)
-        (boolean? (get prepared :ok)))
+        (model/boolean-value? (get prepared :ok)))
    (if
     (get prepared :ok)
     (execute-call-with
@@ -517,7 +517,7 @@
   [prepared]
   (if
    (and (map? prepared)
-        (boolean? (get prepared :ok)))
+        (model/boolean-value? (get prepared :ok)))
    (if
     (get prepared :ok)
     (let [state (get prepared :state)

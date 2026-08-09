@@ -1,6 +1,6 @@
 (ns tahto.monitor
   (:require [std.foundation :refer :all]
-            [std.foundation.coroutine :as coroutine]
+            [tahto.store.capability :as capability]
             [tahto.store.model :as model]
             [tahto.store.provider :as provider]))
 
@@ -24,7 +24,7 @@
   [result]
   (cond
     (not (and (map? result)
-              (boolean? (get result :ok))))
+              (model/boolean-value? (get result :ok))))
     {:protocol protocol
      :state "degraded"
      :metadata "invalid-result"
@@ -51,23 +51,45 @@
         :revision (provider/state-revision state)
         :counts (state-counts state)}))))
 
+(defn inspect-object-result
+  [result]
+  (cond
+    (not (and (map? result)
+              (model/boolean-value? (get result :ok))))
+    {:state "degraded"
+     :object "invalid-result"
+     :object-error "tahto.monitor/object-probe-result-invalid"}
+
+    (not (get result :ok))
+    {:state "degraded"
+     :object "unavailable"
+     :object-error (get-in result [:error :code])}
+
+    :else
+    {:state "ready"
+     :object "ready"
+     :object-error nil}))
+
+(defn inspect-results
+  [metadata-result object-result]
+  (let [metadata (inspect-result metadata-result)
+        object (inspect-object-result object-result)]
+    (assoc
+     (assoc
+      (assoc metadata :object (get object :object))
+      :object-error (get object :object-error))
+     :state
+     (if (= "ready" (get object :state))
+       (get metadata :state)
+       "degraded"))))
+
 (defn probe-with
   [invoke]
-  (inspect-result
+  (inspect-results
    (provider/execute-prepared-with
     (provider/prepare-load (model/empty-state))
-    invoke)))
-
-(defn ^:async load-state
-  []
-  (coroutine/await
-   (provider/execute-prepared
-    (provider/prepare-load (model/empty-state)))))
-
-(defn ^:async probe
-  []
-  (inspect-result
-   (coroutine/await (load-state))))
+    invoke)
+   (capability/execute-probe-with (model/empty-state) invoke)))
 
 (defn diagnostics
   [inspection checked-at]
@@ -78,7 +100,10 @@
    {:metadata
     {:state (get inspection :metadata)
      :revision (get inspection :revision)
-     :error (get inspection :error)}}
+     :error (get inspection :error)}
+    :object
+    {:state (get inspection :object)
+     :error (get inspection :object-error)}}
    :counts (model/value-or inspection :counts {})})
 
 (defn diagnostic-proof?
@@ -93,10 +118,10 @@
    (= (get proof :device)
       (model/public-key-device state (get proof :public-key)))))
 
-(defn diagnose-result
-  [result proof checked-at]
-  (let [inspection (inspect-result result)
-        state (provider/loaded-state (get result :value))]
+(defn diagnose-results
+  [metadata-result object-result proof checked-at]
+  (let [inspection (inspect-results metadata-result object-result)
+        state (provider/loaded-state (get metadata-result :value))]
     (cond
       (not (= "ready" (get inspection :state)))
       (model/fail {} "tahto.monitor/provider-not-ready")
@@ -107,9 +132,14 @@
       :else
       (model/ok state (diagnostics inspection checked-at)))))
 
-(defn ^:async diagnose
-  [proof checked-at]
-  (diagnose-result
-   (coroutine/await (load-state))
+(defn diagnose-result
+  [result proof checked-at]
+  (diagnose-results
+   result
+   (model/ok
+    {}
+    {:protocol capability/result-protocol
+     :operation "probe"
+     :ready true})
    proof
    checked-at))

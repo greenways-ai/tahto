@@ -46,7 +46,7 @@
    {"controlPlane" "ready"
     "objects" "hara-kernel-ready:TAHTO-3"
     "objectCapabilityClient" "ready:hoplite.blob-request/1"
-    "objectProviders" "hoplite-memory-and-filesystem-ready"
+    "objectProviders" "configured:not-probed"
     "uploadOrchestration" "hara-kernel-ready"
     "responseSourceProjection" "hara-kernel-ready"
     "responseSourceTransport" "hoplite-request-scoped-nginx-ready"
@@ -111,7 +111,7 @@
     "metadataProvider" "hoplite-sqlite-ready"
     "metadataNodeService" "not-exposed"
     "objectCapability" "hoplite.blob-client-ready"
-    "objectUpload" "filesystem-provider-ready"
+    "objectUpload" "not-probed"
     "objectResponseSource" "request-scoped-transport-ready"
     "portableTwoDeviceLaw" "ready"
     "productionTwoDeviceFixture" "pending"
@@ -139,17 +139,22 @@
 (defn health-with
   [inspection]
   (assoc
-   (health)
-   "status" (get inspection :state)
-   "metadata" (get inspection :metadata)))
+   (assoc
+    (assoc
+     (health)
+     "status" (get inspection :state))
+    "metadata" (get inspection :metadata))
+   "objects" (get inspection :object)))
 
 (defn status-with
   [inspection]
   (assoc-in
    (assoc-in
-    (status)
-    ["node" "status"] (get inspection :state))
-   ["fabric" "metadataProvider"] (get inspection :metadata)))
+    (assoc-in
+     (status)
+     ["node" "status"] (get inspection :state))
+    ["fabric" "metadataProvider"] (get inspection :metadata))
+   ["fabric" "objectUpload"] (get inspection :object)))
 
 (defn beacon-compatibility
   []

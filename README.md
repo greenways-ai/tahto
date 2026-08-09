@@ -48,6 +48,7 @@ The current Hara/Hoplite control-plane application exposes:
 GET  /.well-known/tahto
 GET  /tahto/v1/health
 GET  /tahto/v1/status
+POST /tahto/v1/diagnostics
 POST /tahto/v1/pairing/prepare
 POST /tahto/v1/pairing/complete
 ```
@@ -57,6 +58,20 @@ The loopback operator command `bin/tahto invite` issues a short-lived
 token digest enters durable metadata. Greenways OS sends the raw token to
 prepare, signs the exact returned intent, and completes identity-only enrolment
 without gaining administrator or application authority.
+
+Health and status perform a read-only `hoplite.store` load. They report the
+metadata provider as `ready`, `uninitialized`, or `unavailable`; they do not
+initialize state as a side effect. Object custody is reported as `not-probed`
+until the generic `hoplite.blob` contract provides an equivalent non-mutating
+probe. A configured provider is not reported as healthy merely because it was
+declared.
+
+Detailed diagnostics use the signed `monitor.diagnostics` operation at the
+fixed `greenways.os` / `tahto.monitor` / `diagnostics` coordinate. Tahto first
+re-verifies the request signature and current device enrolment, then returns
+only the metadata revision and aggregate device, object, commit, head and
+backup counts. Records, keys, provider credentials and application values are
+never projected through this route.
 
 One bounded compatibility release also exposes:
 
@@ -394,6 +409,17 @@ Then inspect:
 curl http://127.0.0.1:58100/.well-known/tahto
 curl http://127.0.0.1:58100/tahto/v1/status
 ```
+
+To prove the full health lifecycle against the real SQLite and filesystem
+providers, build Hoplite Nginx and Tahto, then run:
+
+```shell
+python3 scripts/health_acceptance.py
+```
+
+The acceptance starts with fresh storage, verifies `not-ready`, initializes the
+node through the loopback pairing API, verifies `ready`, restarts Nginx against
+the same storage root, and verifies that `ready` is recovered.
 
 See [`LINEAGE.md`](LINEAGE.md) for the extracted Beacon history and
 [`protocol/tahto.md`](protocol/tahto.md) for the product boundary.

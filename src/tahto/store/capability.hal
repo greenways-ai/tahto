@@ -21,7 +21,8 @@
     "object/read-range"})
 
 (def capability-operations
-  #{"staging/open"
+  #{"probe"
+    "staging/open"
     "staging/append-from-source"
     "staging/abort"
     "staging/verify-commit"
@@ -56,6 +57,9 @@
    (= request-protocol (get value :protocol))
    (capability-operation? (get value :operation))
    (cond
+     (= "probe" (get value :operation))
+     (host/exact-keys? value #{:protocol :operation})
+
      (= "staging/open" (get value :operation))
      (and
       (host/exact-keys?
@@ -105,6 +109,10 @@
       (model/positive-integer? (get value :length)))
 
      :else false)))
+
+(defn probe-request
+  []
+  (request-record "probe" {}))
 
 (defn request-from-effect
   [effect]
@@ -208,6 +216,11 @@
    (= result-protocol (get value :protocol))
    (capability-operation? (get value :operation))
    (cond
+     (= "probe" (get value :operation))
+     (and
+      (host/exact-keys? value #{:protocol :operation :ready})
+      (= true (get value :ready)))
+
      (= "staging/open" (get value :operation))
      (and
       (host/exact-keys?
@@ -269,6 +282,9 @@
    (let [operation (get call :operation)
          request (call-request call)]
      (cond
+       (= operation "probe")
+       true
+
        (= operation "staging/open")
        (and
         (= (get request :staging-key) (get result :staging-key))
@@ -329,6 +345,26 @@
      (get call :operation)
      (call-request call)))
    (model/fail state "tahto.capability/call-invalid")))
+
+(defn prepare-probe
+  [state]
+  (model/ok state (host-call (probe-request))))
+
+(defn execute-probe-with
+  [state invoke]
+  (let [call (host-call (probe-request))]
+    (execute-call-with state call invoke)))
+
+(defn ^:async execute-probe
+  [state]
+  (let [call (host-call (probe-request))
+        result
+        (coroutine/await
+         (foundation-host/call
+          (get call :service)
+          (get call :operation)
+          (call-request call)))]
+    (accept-result state call result)))
 
 (defn execute-with
   [state effect invoke]

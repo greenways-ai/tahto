@@ -1,12 +1,16 @@
 (ns tahto.node.app
   (:require [hoplite.core :as h]
             [std.foundation.coroutine :as coroutine]
+            [std.foundation.host :as foundation-host]
             [std.foundation.json :as json]
             [tahto.node.pairing-service :as pairing-service]
             [tahto.node.pairing-wire :as pairing-wire]
             [tahto.node.request-auth :as request-auth]
             [tahto.monitor :as monitor]
-            [tahto.protocol.descriptor :as descriptor]))
+            [tahto.protocol.descriptor :as descriptor]
+            [tahto.store.capability :as capability]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
 
 (def public-headers
   {"content-type" "application/json; charset=utf-8"
@@ -29,17 +33,55 @@
 
 (defn ^:async health
   [_request]
-  (json-response
-   200
-   (descriptor/health-with
-    (coroutine/await (monitor/probe)))))
+  (let [state (model/empty-state)
+        metadata-call (get (provider/prepare-load state) :value)
+        metadata-native
+        (coroutine/await
+         (foundation-host/call
+          (get metadata-call :service)
+          (get metadata-call :operation)
+          (provider/call-request metadata-call)))
+        metadata-result
+        (provider/accept-result state metadata-call metadata-native)
+        object-call (capability/host-call (capability/probe-request))
+        object-native
+        (coroutine/await
+         (foundation-host/call
+          (get object-call :service)
+          (get object-call :operation)
+          (capability/call-request object-call)))
+        object-result
+        (capability/accept-result state object-call object-native)]
+    (json-response
+     200
+     (descriptor/health-with
+      (monitor/inspect-results metadata-result object-result)))))
 
 (defn ^:async status
   [_request]
-  (json-response
-   200
-   (descriptor/status-with
-    (coroutine/await (monitor/probe)))))
+  (let [state (model/empty-state)
+        metadata-call (get (provider/prepare-load state) :value)
+        metadata-native
+        (coroutine/await
+         (foundation-host/call
+          (get metadata-call :service)
+          (get metadata-call :operation)
+          (provider/call-request metadata-call)))
+        metadata-result
+        (provider/accept-result state metadata-call metadata-native)
+        object-call (capability/host-call (capability/probe-request))
+        object-native
+        (coroutine/await
+         (foundation-host/call
+          (get object-call :service)
+          (get object-call :operation)
+          (capability/call-request object-call)))
+        object-result
+        (capability/accept-result state object-call object-native)]
+    (json-response
+     200
+     (descriptor/status-with
+      (monitor/inspect-results metadata-result object-result)))))
 
 (defn beacon-compatibility
   [_request]
@@ -61,9 +103,29 @@
        (if
         (nil? proof)
         (monitor-error 403 "tahto.monitor/signature-invalid")
-        (let [result
+        (let [state (model/empty-state)
+              metadata-call (get (provider/prepare-load state) :value)
+              metadata-native
               (coroutine/await
-               (monitor/diagnose proof (get wire "timestamp")))]
+               (foundation-host/call
+                (get metadata-call :service)
+                (get metadata-call :operation)
+                (provider/call-request metadata-call)))
+              metadata-result
+              (provider/accept-result state metadata-call metadata-native)
+              object-call
+              (capability/host-call (capability/probe-request))
+              object-native
+              (coroutine/await
+               (foundation-host/call
+                (get object-call :service)
+                (get object-call :operation)
+                (capability/call-request object-call)))
+              object-result
+              (capability/accept-result state object-call object-native)
+              result
+              (monitor/diagnose-results
+               metadata-result object-result proof (get wire "timestamp"))]
           (if
            (get result :ok)
            (json-response 200 (get result :value))
