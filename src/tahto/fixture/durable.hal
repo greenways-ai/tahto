@@ -10,6 +10,13 @@
 ;; Tahto request context; TAHTO-7 completes the deterministic mutation; and the
 ;; generic hara.store provider persists the exact next state and opaque receipt.
 
+(defn rollback-result
+  [state result]
+  (model/fail
+   state
+   (get-in result [:error :code])
+   (get-in result [:error :details])))
+
 (defn prepare-mutation
   [state identity accepted-at transition input
    result-verification commit-verification]
@@ -44,19 +51,23 @@
              (if
               (get prepared :ok)
               prepared
-              (model/fail
-               state
-               (get-in prepared [:error :code])
-               (get-in prepared [:error :details])))))))))))
+              (rollback-result state prepared))))))))))
 
 (defn execute-mutation-with
   [state identity accepted-at transition input
    result-verification commit-verification invoke]
-  (provider/execute-prepared-with
-   (prepare-mutation
-    state identity accepted-at transition input
-    result-verification commit-verification)
-   invoke))
+  (let [prepared
+        (prepare-mutation
+         state identity accepted-at transition input
+         result-verification commit-verification)
+        executed
+        (provider/execute-prepared-with prepared invoke)]
+    (if
+     (and
+      (get prepared :ok)
+      (not (get executed :ok)))
+     (rollback-result state executed)
+     executed)))
 
 (defn prepare-replay
   [state identity accepted-at plan-digest]
