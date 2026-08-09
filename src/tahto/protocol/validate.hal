@@ -30,6 +30,7 @@
     "head.update"
     "semantic.read"
     "semantic.prepare"
+    "semantic.submit"
     "backup.pin"
     "restore.read"
     "sync.push"

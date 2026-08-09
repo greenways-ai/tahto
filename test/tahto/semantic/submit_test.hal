@@ -1,0 +1,637 @@
+(ns tahto.semantic.submit-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.history :as semantic-history]
+            [tahto.semantic.prepare :as prepare]
+            [tahto.semantic.submit :as submit]
+            [tahto.store.history :as history]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]
+            [tahto.store.transaction :as transaction]))
+
+(def application "fixture.world")
+(def namespace "world.a")
+(def collection "scene")
+
+(def value-candidate
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+(def object-candidate
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def index-candidate
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def root-candidate
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+(def value-parent
+  "sha256:4444444444444444444444444444444444444444444444444444444444444444")
+(def object-parent
+  "sha256:5555555555555555555555555555555555555555555555555555555555555555")
+(def index-parent
+  "sha256:6666666666666666666666666666666666666666666666666666666666666666")
+(def root-parent
+  "sha256:7777777777777777777777777777777777777777777777777777777777777777")
+(def commit-parent
+  "sha256:8888888888888888888888888888888888888888888888888888888888888888")
+(def commit-new
+  "sha256:9999999999999999999999999999999999999999999999999999999999999999")
+(def head-current-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def head-new-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def prepare-request-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def submit-request-digest
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def result-digest
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def plan-digest
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def state-digest
+  "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+(def package-root
+  "sha256:123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0")
+(def approval-digest
+  "sha256:23456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01")
+(def unknown-digest
+  "sha256:3456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef012")
+
+(def schema-ref
+  {:protocol "tahto.schema-ref/1"
+   :schema "fixture.entity"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root
+   :entry "fixture.entity/spec"})
+
+(defn signature
+  [key-id]
+  {:profile "tahto-signature/1"
+   :algorithm "ed25519"
+   :key-id key-id
+   :value "abcdefghijklmnopqrstuvwxyz0123456789"})
+
+(def candidate-object-projection
+  {:root object-candidate
+   :id "entity/candidate"
+   :schema-ref schema-ref
+   :value-root value-candidate
+   :value-size 64
+   :links []})
+
+(def parent-object-projection
+  {:root object-parent
+   :id "entity/parent"
+   :schema-ref schema-ref
+   :value-root value-parent
+   :value-size 64
+   :links []})
+
+(def candidate-index-projection
+  {:root index-candidate
+   :entries
+   [{:id "entity/candidate"
+     :root object-candidate}]})
+
+(def parent-index-projection
+  {:root index-parent
+   :entries
+   [{:id "entity/parent"
+     :root object-parent}]})
+
+(def candidate-root-projection
+  {:root root-candidate
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema-refs [schema-ref]
+   :index-root index-candidate
+   :roots
+   [{:name "document"
+     :id "entity/candidate"
+     :root object-candidate}]})
+
+(def parent-root-projection
+  {:root root-parent
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema-refs [schema-ref]
+   :index-root index-parent
+   :roots
+   [{:name "document"
+     :id "entity/parent"
+     :root object-parent}]})
+
+(def parent-commit-record
+  {:protocol model/commit-protocol
+   :root commit-parent
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema semantic-history/schema
+   :schema-version semantic-history/schema-version
+   :device "device.a"
+   :parents []
+   :objects [root-parent]
+   :tombstones []
+   :sequence 1
+   :timestamp "2026-08-09T01:00:00Z"
+   :signature (signature "device.a.key")})
+
+(def current-head-record
+  {:protocol model/head-protocol
+   :application application
+   :namespace namespace
+   :collection collection
+   :kind "main"
+   :name "primary"
+   :commits [commit-parent]
+   :expected []
+   :updated-at "2026-08-09T01:05:00Z"
+   :signature (signature "head.key")})
+
+(def new-commit-record
+  {:protocol model/commit-protocol
+   :root commit-new
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema semantic-history/schema
+   :schema-version semantic-history/schema-version
+   :device "device.a"
+   :parents [commit-parent]
+   :objects [root-candidate]
+   :tombstones []
+   :sequence 2
+   :timestamp "2026-08-09T01:10:00Z"
+   :signature (signature "device.a.key")})
+
+(def new-head-record
+  {:protocol model/head-protocol
+   :application application
+   :namespace namespace
+   :collection collection
+   :kind "main"
+   :name "primary"
+   :commits [commit-new]
+   :expected [commit-parent]
+   :updated-at "2026-08-09T01:11:00Z"
+   :signature (signature "head.key")})
+
+(def device-record
+  {:protocol model/device-protocol
+   :id "device.a"
+   :node "node.home"
+   :public-key "ed25519:device-a-public-key"
+   :status "enrolled"
+   :enrolled-at "2026-08-09T00:00:00Z"})
+
+(def prepare-context
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation prepare/operation
+   :application application
+   :namespace namespace
+   :collection collection
+   :request-digest prepare-request-digest
+   :idempotency-key "semantic-prepare-idempotency-0001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(def submit-context
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation submit/operation
+   :application application
+   :namespace namespace
+   :collection collection
+   :request-digest submit-request-digest
+   :idempotency-key "semantic-submit-idempotency-0001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(def prepare-request
+  {:device "device.a"
+   :semantic-root root-candidate
+   :sequence 2
+   :commit-timestamp "2026-08-09T01:10:00Z"
+   :parents [commit-parent]
+   :head-kind "main"
+   :head-name "primary"
+   :head-updated-at "2026-08-09T01:11:00Z"
+   :expected-head [commit-parent]
+   :retain-head []
+   :expected-metadata-revision 4})
+
+(defn object-map
+  []
+  (reduce
+   (fn [objects digest]
+     (assoc objects digest (model/object-record digest 64)))
+   {}
+   [value-candidate
+    object-candidate
+    index-candidate
+    root-candidate
+    value-parent
+    object-parent
+    index-parent
+    root-parent
+    commit-parent
+    commit-new]))
+
+(defn base-state
+  []
+  (let [namespace-key (model/namespace-key application namespace)
+        sequence-key
+        (model/sequence-key
+         application namespace collection "device.a")
+        head-key
+        (model/head-key
+         application namespace collection "main" "primary")]
+    (assoc
+     (model/empty-state)
+     :metadata-revision 4
+     :devices {"device.a" device-record}
+     :objects (object-map)
+     :references
+     {namespace-key
+      (into #{}
+            [value-candidate
+             object-candidate
+             index-candidate
+             root-candidate
+             value-parent
+             object-parent
+             index-parent
+             root-parent
+             commit-parent
+             commit-new])}
+     :edges
+     {object-candidate [value-candidate]
+      index-candidate [object-candidate]
+      root-candidate [index-candidate object-candidate]
+      object-parent [value-parent]
+      index-parent [object-parent]
+      root-parent [index-parent object-parent]
+      commit-parent [root-parent]}
+     :semantic-objects
+     {object-candidate candidate-object-projection
+      object-parent parent-object-projection}
+     :semantic-indexes
+     {index-candidate candidate-index-projection
+      index-parent parent-index-projection}
+     :semantic-roots
+     {root-candidate candidate-root-projection
+      root-parent parent-root-projection}
+     :commits {commit-parent parent-commit-record}
+     :sequences {sequence-key 1}
+     :sequence-roots
+     {(model/sequence-slot-key
+       application namespace collection "device.a" 1)
+      commit-parent}
+     :heads {head-key current-head-record}
+     :head-digests {head-key head-current-digest})))
+
+(defn record-verification
+  [protocol digest record]
+  {:protocol validate/verification-protocol
+   :record-protocol protocol
+   :verified true
+   :canonical-digest digest
+   :key-id (get-in record [:signature :key-id])
+   :record record})
+
+(defn commit-verification
+  ([]
+   (commit-verification new-commit-record))
+  ([record]
+   (record-verification
+    model/commit-protocol
+    (get record :root)
+    record)))
+
+(defn head-verification
+  ([]
+   (head-verification head-new-digest new-head-record))
+  ([digest record]
+   (record-verification model/head-protocol digest record)))
+
+(defn prepared
+  [state]
+  (get
+   (prepare/prepare state prepare-context prepare-request)
+   :value))
+
+(defn submit-input
+  [state]
+  {:prepared (prepared state)
+   :commit-verification (commit-verification)
+   :head-verification (head-verification)})
+
+(defn request-proof
+  [nonce]
+  {:protocol validate/request-verification-protocol
+   :verified true
+   :device "device.a"
+   :public-key "ed25519:device-a-public-key"
+   :operation submit/operation
+   :application application
+   :namespace namespace
+   :collection collection
+   :request-digest submit-request-digest
+   :nonce nonce
+   :idempotency-key "semantic-submit-idempotency-0001"
+   :timestamp "2026-08-09T01:12:00Z"})
+
+(defn result-proof
+  []
+  {:protocol transaction/result-verification-protocol
+   :verified true
+   :operation submit/operation
+   :request-digest submit-request-digest
+   :outcome "ok"
+   :result-digest result-digest
+   :completed-at "2026-08-09T01:13:00Z"})
+
+(defn provider-verification
+  [expected revision]
+  {:protocol provider/commit-verification-protocol
+   :verified true
+   :expected-revision expected
+   :revision revision
+   :plan-digest plan-digest
+   :request-digest submit-request-digest
+   :result-digest result-digest
+   :state-digest state-digest
+   :completed-at "2026-08-09T01:14:00Z"})
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "one pure transition accepts the commit and head together"
+   (let [state (base-state)
+         input (submit-input state)
+         result
+         (submit/submit-transition
+          state submit-context input)
+         next-state (result-state result)]
+     [(get result :ok)
+      (get result :value)
+      (model/commit-record next-state commit-new)
+      (model/device-sequence
+       next-state application namespace collection "device.a")
+      (model/head-record
+       next-state application namespace collection "main" "primary")
+      (model/head-digest
+       next-state application namespace collection "main" "primary")
+      (get-in next-state [:edges commit-new])
+      (= 4 (provider/state-revision next-state))])
+   [true
+    {:protocol "tahto.semantic-submit-result/1"
+     :device "device.a"
+     :commit-root commit-new
+     :head-digest head-new-digest
+     :head-kind "main"
+     :head-name "primary"
+     :commits [commit-new]
+     :previous [commit-parent]}
+    new-commit-record
+    2
+    new-head-record
+    head-new-digest
+    [commit-parent root-candidate]
+    true])
+
+  (test/check
+   "commit and head proofs are bound to every prepared field"
+   (let [state (base-state)
+         input (submit-input state)
+         changed-commit
+         (assoc new-commit-record :timestamp "2026-08-09T01:10:01Z")
+         commit-result
+         (submit/submit-transition
+          state
+          submit-context
+          (assoc input
+                 :commit-verification
+                 (commit-verification changed-commit)))
+         changed-head
+         (assoc new-head-record :commits [commit-parent commit-new])
+         head-result
+         (submit/submit-transition
+          state
+          submit-context
+          (assoc input
+                 :head-verification
+                 (head-verification head-new-digest changed-head)))
+         digest-result
+         (submit/submit-transition
+          state
+          submit-context
+          (assoc input
+                 :commit-verification
+                 (assoc (commit-verification)
+                        :canonical-digest unknown-digest)))]
+     [(error-code commit-result)
+      (error-code head-result)
+      (error-code digest-result)
+      (= state (result-state commit-result))
+      (= state (result-state head-result))
+      (= state (result-state digest-result))])
+   ["tahto.semantic/submit-commit-intent-mismatch"
+    "tahto.semantic/submit-head-commits-mismatch"
+    "tahto.semantic/submit-commit-digest-mismatch"
+    true true true])
+
+  (test/check
+   "stale or substituted prepare evidence cannot be submitted"
+   (let [state (base-state)
+         input (submit-input state)
+         substituted
+         (assoc-in input [:prepared :current-head-digest] unknown-digest)
+         substituted-result
+         (submit/submit-transition
+          state submit-context substituted)
+         stale-state
+         (assoc state :metadata-revision 5)
+         stale-result
+         (submit/submit-transition
+          stale-state submit-context input)]
+     [(error-code substituted-result)
+      (error-code stale-result)
+      (get-in stale-result [:error :details :cause :code])
+      (= state (result-state substituted-result))
+      (= stale-state (result-state stale-result))])
+   ["tahto.semantic/submit-prepare-mismatch"
+    "tahto.semantic/submit-prepare-stale"
+    "tahto.semantic/prepare-revision-mismatch"
+    true true])
+
+  (test/check
+   "a head failure rolls back the accepted commit sequence and edges"
+   (let [state
+         (assoc-in (base-state)
+                   [:limits :max-history-commits]
+                   1)
+         result
+         (submit/submit-transition
+          state submit-context (submit-input state))]
+     [(get result :ok)
+      (error-code result)
+      (get-in result [:error :details :cause :code])
+      (model/commit-record (result-state result) commit-new)
+      (model/device-sequence
+       (result-state result)
+       application namespace collection "device.a")
+      (get-in (result-state result) [:edges commit-new])
+      (= state (result-state result))])
+   [false
+    "tahto.semantic/submit-head-rejected"
+    "tahto.history/head-history-overflow"
+    nil
+    1
+    nil
+    true])
+
+  (test/check
+   "TAHTO-7 commits submit authorization completion and one revision"
+   (let [state (base-state)
+         input (submit-input state)
+         executed
+         (submit/execute
+          state
+          4
+          (request-proof "submit-nonce-0001")
+          input
+          (result-proof))
+         next-state (result-state executed)]
+     [(get executed :ok)
+      (provider/state-revision next-state)
+      (model/commit-record next-state commit-new)
+      (get-in executed [:value :result :commit-root])
+      (get-in executed [:value :context :status])
+      (get-in executed [:value :context :result-digest])
+      (get-in executed [:value :replayed])])
+   [true
+    5
+    new-commit-record
+    commit-new
+    "completed"
+    result-digest
+    false])
+
+  (test/check
+   "completed submit retries record a fresh nonce without rerunning mutation"
+   (let [state (base-state)
+         input (submit-input state)
+         first
+         (submit/execute
+          state
+          4
+          (request-proof "submit-replay-nonce-0001")
+          input
+          (result-proof))
+         replay
+         (submit/execute
+          (result-state first)
+          5
+          (request-proof "submit-replay-nonce-0002")
+          input
+          nil)
+         next-state (result-state replay)]
+     [(get replay :ok)
+      (get-in replay [:value :replayed])
+      (get-in replay [:value :result-digest])
+      (provider/state-revision next-state)
+      (model/device-sequence
+       next-state application namespace collection "device.a")
+      (= new-commit-record
+         (model/commit-record next-state commit-new))
+      (not (nil?
+            (model/request-nonce
+             next-state "device.a" "submit-replay-nonce-0002")))])
+   [true true result-digest 6 2 true true])
+
+  (test/check
+   "the completed transaction prepares one generic durable compare-and-swap"
+   (let [state (base-state)
+         executed
+         (submit/execute
+          state
+          4
+          (request-proof "submit-store-nonce-0001")
+          (submit-input state)
+          (result-proof))
+         prepared-store
+         (submit/prepare-store-commit
+          executed
+          (provider-verification 4 5))
+         call (get prepared-store :value)
+         request (provider/call-request call)]
+     [(get prepared-store :ok)
+      (get call :service)
+      (get call :operation)
+      (get request :expected-revision)
+      (get request :revision)
+      (get request :receipt-key)
+      (get-in request [:receipt :request-digest])
+      (has? request :driver)
+      (has? request :path)])
+   [true
+    "hara.store"
+    "compare-and-swap"
+    4
+    5
+    plan-digest
+    submit-request-digest
+    false false])
+
+  (test/check
+   "invalid result evidence rolls back authorization and semantic mutation"
+   (let [state (base-state)
+         result
+         (submit/execute
+          state
+          4
+          (request-proof "submit-invalid-result-nonce-0001")
+          (submit-input state)
+          (assoc (result-proof) :operation "semantic.prepare"))]
+     [(get result :ok)
+      (error-code result)
+      (= state (result-state result))
+      (model/commit-record (result-state result) commit-new)
+      (model/request-nonce
+       (result-state result)
+       "device.a"
+       "submit-invalid-result-nonce-0001")])
+   [false
+    "tahto.transaction/result-verification-mismatch"
+    true nil nil])
+
+  (test/check
+   "closed submit records exclude provider and key authority"
+   (let [state (base-state)
+         input (submit-input state)
+         value
+         (get
+          (submit/submit-transition state submit-context input)
+          :value)]
+     [(submit/input? input)
+      (submit/input? (assoc input :provider "filesystem"))
+      (submit/result? value)
+      (submit/result? (assoc value :path "/tmp/state"))
+      (has? value :signature)
+      (has? value :private-key)
+      (has? value :source-handle)])
+   [true false true false false false false])])
