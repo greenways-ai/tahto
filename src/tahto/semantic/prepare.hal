@@ -1,0 +1,401 @@
+(ns tahto.semantic.prepare
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.history :as semantic-history]
+            [tahto.semantic.root :as semantic-root]
+            [tahto.store.model :as model]))
+
+(def operation "semantic.prepare")
+(def result-protocol "tahto.semantic-prepare-result/1")
+(def signing-intent-protocol "tahto.semantic-signing-intent/1")
+
+(def request-fields
+  #{:semantic-root
+    :commit-root
+    :device
+    :sequence
+    :commit-timestamp
+    :parents
+    :head-kind
+    :head-name
+    :head-commits
+    :expected-head
+    :head-updated-at
+    :expected-metadata-revision})
+
+(def unsigned-commit-fields
+  #{:protocol
+    :root
+    :application
+    :namespace
+    :collection
+    :schema
+    :schema-version
+    :device
+    :parents
+    :objects
+    :tombstones
+    :sequence
+    :timestamp})
+
+(def unsigned-head-fields
+  #{:protocol
+    :application
+    :namespace
+    :collection
+    :kind
+    :name
+    :commits
+    :expected
+    :updated-at})
+
+(def signing-intent-fields
+  #{:protocol :record-protocol :body})
+
+(def result-fields
+  #{:protocol
+    :device
+    :request-digest
+    :expected-metadata-revision
+    :current-head-digest
+    :commit-intent
+    :head-intent})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn metadata-revision
+  [state]
+  (model/value-or state :metadata-revision 0))
+
+(defn configured-limit
+  [state key]
+  (get (get state :limits) key))
+
+(defn contains-value?
+  [values target]
+  (truth-value (has? (into #{} values) target)))
+
+(defn request?
+  [state value]
+  (truth-value
+   (and
+    (validate/exact-record? value request-fields #{})
+    (model/canonical-digest? (get value :semantic-root))
+    (model/canonical-digest? (get value :commit-root))
+    (model/identifier? (get value :device))
+    (model/positive-integer? (get value :sequence))
+    (validate/timestamp? (get value :commit-timestamp))
+    (validate/digest-vector? (get value :parents))
+    (<= (count (get value :parents))
+        (configured-limit state :max-commit-parents))
+    (has? validate/head-kinds (get value :head-kind))
+    (model/identifier? (get value :head-name))
+    (validate/digest-vector? (get value :head-commits))
+    (> (count (get value :head-commits)) 0)
+    (<= (count (get value :head-commits))
+        (configured-limit state :max-head-commits))
+    (contains-value?
+     (get value :head-commits)
+     (get value :commit-root))
+    (validate/digest-vector? (get value :expected-head))
+    (<= (count (get value :expected-head))
+        (configured-limit state :max-head-commits))
+    (validate/timestamp? (get value :head-updated-at))
+    (model/non-negative-integer?
+     (get value :expected-metadata-revision)))))
+
+(defn context-coordinate
+  [context]
+  [(get context :application)
+   (get context :namespace)
+   (get context :collection)])
+
+(defn root-coordinate
+  [projection]
+  [(get projection :application)
+   (get projection :namespace)
+   (get projection :collection)])
+
+(defn authorized-context?
+  [state context]
+  (truth-value
+   (and
+    (validate/device-request-context? context)
+    (= operation (get context :operation))
+    (= "pending" (get context :status))
+    (nil? (get context :result-digest))
+    (model/device-enrolled? state (get context :device)))))
+
+(defn parent-compatible?
+  [state coordinate parent-root]
+  (let [parent (model/commit-record state parent-root)]
+    (truth-value
+     (and
+      (not (nil? parent))
+      (semantic-history/semantic-commit-record? state parent)
+      (= coordinate
+         (semantic-history/record-coordinate parent))))))
+
+(defn existing-head-compatible?
+  [state coordinate commit-root]
+  (let [commit (model/commit-record state commit-root)]
+    (truth-value
+     (and
+      (not (nil? commit))
+      (semantic-history/semantic-commit-record? state commit)
+      (= coordinate
+         (semantic-history/record-coordinate commit))))))
+
+(defn current-head
+  [state context request]
+  (model/head-record
+   state
+   (get context :application)
+   (get context :namespace)
+   (get context :collection)
+   (get request :head-kind)
+   (get request :head-name)))
+
+(defn current-head-digest
+  [state context request]
+  (model/head-digest
+   state
+   (get context :application)
+   (get context :namespace)
+   (get context :collection)
+   (get request :head-kind)
+   (get request :head-name)))
+
+(defn current-head-commits
+  [head]
+  (if (nil? head) [] (get head :commits)))
+
+(defn retained-current-commits?
+  [state coordinate request]
+  (every?
+   (fn [commit-root]
+     (if
+      (= commit-root (get request :commit-root))
+      true
+      (and
+       (contains-value? (get request :expected-head) commit-root)
+       (existing-head-compatible? state coordinate commit-root))))
+   (get request :head-commits)))
+
+(defn unsigned-commit
+  [context request]
+  {:protocol model/commit-protocol
+   :root (get request :commit-root)
+   :application (get context :application)
+   :namespace (get context :namespace)
+   :collection (get context :collection)
+   :schema semantic-history/schema
+   :schema-version semantic-history/schema-version
+   :device (get request :device)
+   :parents (get request :parents)
+   :objects [(get request :semantic-root)]
+   :tombstones []
+   :sequence (get request :sequence)
+   :timestamp (get request :commit-timestamp)})
+
+(defn unsigned-commit?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value unsigned-commit-fields #{})
+    (= model/commit-protocol (get value :protocol))
+    (model/canonical-digest? (get value :root))
+    (model/identifier? (get value :application))
+    (model/identifier? (get value :namespace))
+    (model/identifier? (get value :collection))
+    (= semantic-history/schema (get value :schema))
+    (= semantic-history/schema-version (get value :schema-version))
+    (model/identifier? (get value :device))
+    (validate/digest-vector? (get value :parents))
+    (vector? (get value :objects))
+    (= 1 (count (get value :objects)))
+    (model/canonical-digest? (get-in value [:objects 0]))
+    (= [] (get value :tombstones))
+    (model/positive-integer? (get value :sequence))
+    (validate/timestamp? (get value :timestamp)))))
+
+(defn unsigned-head
+  [context request]
+  {:protocol model/head-protocol
+   :application (get context :application)
+   :namespace (get context :namespace)
+   :collection (get context :collection)
+   :kind (get request :head-kind)
+   :name (get request :head-name)
+   :commits (get request :head-commits)
+   :expected (get request :expected-head)
+   :updated-at (get request :head-updated-at)})
+
+(defn unsigned-head?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value unsigned-head-fields #{})
+    (= model/head-protocol (get value :protocol))
+    (model/identifier? (get value :application))
+    (model/identifier? (get value :namespace))
+    (model/identifier? (get value :collection))
+    (has? validate/head-kinds (get value :kind))
+    (model/identifier? (get value :name))
+    (validate/digest-vector? (get value :commits))
+    (> (count (get value :commits)) 0)
+    (validate/digest-vector? (get value :expected))
+    (validate/timestamp? (get value :updated-at)))))
+
+(defn signing-intent
+  [record-protocol body]
+  {:protocol signing-intent-protocol
+   :record-protocol record-protocol
+   :body body})
+
+(defn signing-intent?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value signing-intent-fields #{})
+    (= signing-intent-protocol (get value :protocol))
+    (or
+     (and
+      (= model/commit-protocol (get value :record-protocol))
+      (unsigned-commit? (get value :body)))
+     (and
+      (= model/head-protocol (get value :record-protocol))
+      (unsigned-head? (get value :body)))))))
+
+(defn result?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value result-fields #{})
+    (= result-protocol (get value :protocol))
+    (model/identifier? (get value :device))
+    (model/canonical-digest? (get value :request-digest))
+    (model/non-negative-integer?
+     (get value :expected-metadata-revision))
+    (or
+     (nil? (get value :current-head-digest))
+     (model/canonical-digest? (get value :current-head-digest)))
+    (signing-intent? (get value :commit-intent))
+    (signing-intent? (get value :head-intent)))))
+
+(defn prepare
+  [state context request]
+  (let [coordinate (context-coordinate context)
+        root
+        (semantic-root/semantic-root-projection
+         state
+         (get request :semantic-root))
+        head (current-head state context request)
+        selected (current-head-commits head)
+        head-digest (current-head-digest state context request)
+        current-sequence
+        (model/device-sequence
+         state
+         (get context :application)
+         (get context :namespace)
+         (get context :collection)
+         (get request :device))]
+    (cond
+      (not (authorized-context? state context))
+      (model/fail state "tahto.semantic/prepare-context-not-authorized")
+
+      (not (request? state request))
+      (model/fail state "tahto.semantic/prepare-request-invalid")
+
+      (not (= (get context :device)
+              (get request :device)))
+      (model/fail state "tahto.semantic/prepare-device-mismatch")
+
+      (not (= (inc current-sequence)
+              (get request :sequence)))
+      (model/fail state
+                  "tahto.semantic/prepare-sequence-mismatch"
+                  {:current current-sequence
+                   :received (get request :sequence)})
+
+      (not (= (metadata-revision state)
+              (get request :expected-metadata-revision)))
+      (model/fail state
+                  "tahto.semantic/prepare-revision-mismatch"
+                  {:current (metadata-revision state)
+                   :received
+                   (get request :expected-metadata-revision)})
+
+      (nil? root)
+      (model/fail state
+                  "tahto.semantic/prepare-root-not-admitted"
+                  {:root (get request :semantic-root)})
+
+      (not (= coordinate (root-coordinate root)))
+      (model/fail state
+                  "tahto.semantic/prepare-root-coordinate-mismatch")
+
+      (not (nil? (model/commit-record
+                  state
+                  (get request :commit-root))))
+      (model/fail state
+                  "tahto.semantic/prepare-commit-root-exists"
+                  {:root (get request :commit-root)})
+
+      (not (every?
+            (fn [parent]
+              (parent-compatible? state coordinate parent))
+            (get request :parents)))
+      (model/fail state
+                  "tahto.semantic/prepare-parent-profile-invalid")
+
+      (and
+       (not (nil? head))
+       (not (semantic-history/semantic-head-record? state head)))
+      (model/fail state
+                  "tahto.semantic/prepare-head-profile-invalid")
+
+      (and
+       (nil? head)
+       (not (nil? head-digest)))
+      (model/fail state
+                  "tahto.semantic/prepare-head-state-invalid")
+
+      (and
+       (not (nil? head))
+       (not (model/canonical-digest? head-digest)))
+      (model/fail state
+                  "tahto.semantic/prepare-head-digest-invalid")
+
+      (not (= selected (get request :expected-head)))
+      (model/fail state
+                  "tahto.semantic/prepare-head-expected-mismatch"
+                  {:current selected
+                   :received (get request :expected-head)})
+
+      (not (retained-current-commits?
+            state coordinate request))
+      (model/fail state
+                  "tahto.semantic/prepare-head-commits-invalid")
+
+      :else
+      (let [commit-body (unsigned-commit context request)
+            head-body (unsigned-head context request)
+            value
+            {:protocol result-protocol
+             :device (get context :device)
+             :request-digest (get context :request-digest)
+             :expected-metadata-revision
+             (get request :expected-metadata-revision)
+             :current-head-digest head-digest
+             :commit-intent
+             (signing-intent model/commit-protocol commit-body)
+             :head-intent
+             (signing-intent model/head-protocol head-body)}]
+        (if
+         (result? value)
+         (model/ok state value)
+         (model/fail state
+                     "tahto.semantic/prepare-result-invalid"))))))
