@@ -1,14 +1,19 @@
 (ns tahto.node.app
   (:require [hoplite.core :as h]
-            [std.json :as json]
+            [std.foundation.coroutine :as coroutine]
+            [std.foundation.json :as json]
+            [tahto.node.pairing-service :as pairing-service]
+            [tahto.node.pairing-wire :as pairing-wire]
+            [tahto.node.request-auth :as request-auth]
             [tahto.protocol.descriptor :as descriptor]))
 
 (def public-headers
   {"content-type" "application/json; charset=utf-8"
    "cache-control" "no-store"
    "access-control-allow-origin" "*"
-   "access-control-allow-methods" "GET, OPTIONS"
-   "access-control-allow-headers" "authorization, content-type"
+   "access-control-allow-methods" "GET, POST, OPTIONS"
+   "access-control-allow-headers"
+   "authorization, content-type, x-tahto-pairing"
    "x-content-type-options" "nosniff"})
 
 (defn json-response
@@ -39,6 +44,95 @@
    :headers public-headers
    :body ""})
 
+(defn pairing-header
+  [request]
+  (get (get request :headers) "x-tahto-pairing"))
+
+(defn pairing-error
+  [status result]
+  (json-response status (pairing-wire/error-result result)))
+
+(defn loopback-request?
+  [request]
+  (has? #{"127.0.0.1" "::1"} (get request :remote-address)))
+
+(defn ^:async pairing-issue
+  [request]
+  (if
+   (not (loopback-request? request))
+   (json-response
+    403 {"error" {"code" "tahto.pairing/management-local-only"}})
+   (let [encoded (pairing-header request)]
+     (if
+      (not (string? encoded))
+      (json-response
+       400 {"error" {"code" "tahto.pairing/envelope-missing"}})
+      (let [wire (request-auth/decode-envelope encoded)
+            input (pairing-wire/issue-request wire)]
+        (if
+         (nil? input)
+         (json-response
+          400 {"error" {"code" "tahto.pairing/invitation-invalid"}})
+         (let [result
+               (coroutine/await
+                (pairing-service/execute
+                 "pairing.issue" input (get input :created-at)))]
+           (if
+            (get result :ok)
+            (json-response
+             201 (pairing-wire/issue-result (get result :value)))
+            (pairing-error 409 result)))))))))
+
+(defn ^:async pairing-prepare
+  [request]
+  (let [encoded (pairing-header request)]
+    (if
+     (not (string? encoded))
+     (json-response
+      400 {"error" {"code" "tahto.pairing/envelope-missing"}})
+     (let [wire (request-auth/decode-envelope encoded)
+           now-seconds
+           (request-auth/host-call "now" [])
+           input (pairing-wire/prepare-request wire now-seconds)]
+       (if
+        (nil? input)
+        (json-response
+         400 {"error" {"code" "tahto.pairing/prepare-invalid"}})
+        (let [result
+              (coroutine/await
+               (pairing-service/execute
+                "pairing.prepare" input (get input :prepared-at)))]
+          (if
+           (get result :ok)
+           (json-response
+            200 (pairing-wire/prepare-result (get result :value)))
+           (pairing-error 409 result))))))))
+
+(defn ^:async pairing-complete
+  [request]
+  (let [encoded (pairing-header request)]
+    (if
+     (not (string? encoded))
+     (json-response
+      400 {"error" {"code" "tahto.pairing/envelope-missing"}})
+     (let [wire (request-auth/decode-envelope encoded)
+           now-seconds
+           (request-auth/host-call "now" [])
+           input (pairing-wire/complete-request wire now-seconds)]
+       (if
+        (nil? input)
+        (json-response
+         403 {"error" {"code" "tahto.pairing/signature-invalid"}})
+        (let [result
+              (coroutine/await
+               (pairing-service/execute
+                "pairing.complete" input (get input :accepted-at)))]
+          (if
+           (get result :ok)
+           (json-response
+            200 (pairing-wire/complete-result (get result :value)))
+           (pairing-error 409 result))))))))
+
 (def app
   (h/app
     {:name "tahto"
@@ -66,6 +160,24 @@
               :summary "Report installed Tahto fabric components"
               :handler #'status}
         :options {:name :tahto/status-options
+                  :handler #'preflight}}]
+      ["/tahto/v1/pairing/prepare"
+       {:post {:name :tahto.pairing/prepare
+               :summary "Bind an invitation to one browser device key"
+               :handler #'pairing-prepare}
+        :options {:name :tahto.pairing/prepare-options
+                  :handler #'preflight}}]
+      ["/tahto/v1/pairing/invitations"
+       {:post {:name :tahto.pairing/issue
+               :summary "Mint one loopback-managed pairing invitation"
+               :handler #'pairing-issue}
+        :options {:name :tahto.pairing/issue-options
+                  :handler #'preflight}}]
+      ["/tahto/v1/pairing/complete"
+       {:post {:name :tahto.pairing/complete
+               :summary "Verify and atomically enrol one paired device"
+               :handler #'pairing-complete}
+        :options {:name :tahto.pairing/complete-options
                   :handler #'preflight}}]
       ["/.well-known/greenways-beacon"
        {:get {:name :tahto.compat/beacon-discovery

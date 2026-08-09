@@ -1,0 +1,261 @@
+(ns tahto.node.pairing-wire
+  (:require [std.foundation :refer :all]
+            [std.foundation.json :as json]
+            [std.foundation.string :as string]
+            [tahto.node.request-auth :as request-auth]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.sync.pairing :as pairing]))
+
+(def prepare-result-protocol "tahto.pairing-prepare-result/1")
+
+(def issue-wire-fields
+  #{"protocol" "id" "node" "tokenDigest" "approvalDigest"
+    "createdAt" "expiresAt" "createdSeconds" "expiresSeconds" "status"})
+
+(def prepare-wire-fields
+  #{"protocol" "invitation" "device" "publicKey"
+    "algorithm" "preparedAt"})
+
+(def complete-wire-fields
+  #{"protocol" "invitation" "acceptedAt" "intent" "signature"})
+
+(def signature-fields
+  #{"profile" "algorithm" "keyId" "value"})
+
+(def intent-wire-fields
+  #{"protocol" "invitation" "node" "device" "public-key"
+    "algorithm" "prepared-at" "expires-at"})
+
+(defn invitation-parts
+  [value]
+  (if
+   (string? value)
+   (let [parts (string/split value "~")]
+     (if
+      (and (= 2 (count parts))
+           (model/identifier? (first parts))
+           (validate/opaque-token? (nth parts 1)))
+      {:id (first parts) :token (nth parts 1)}
+      nil))
+   nil))
+
+(defn issue-request
+  [wire]
+  (if
+   (validate/exact-record? wire issue-wire-fields #{})
+   (let [value
+         {:protocol (get wire "protocol")
+          :id (get wire "id")
+          :node (get wire "node")
+          :token-digest (get wire "tokenDigest")
+          :approval-digest (get wire "approvalDigest")
+          :created-at (get wire "createdAt")
+          :expires-at (get wire "expiresAt")
+          :created-seconds (get wire "createdSeconds")
+          :expires-seconds (get wire "expiresSeconds")
+          :status (get wire "status")}]
+     (if (pairing/invitation? value) value nil))
+   nil))
+
+(defn sha256-digest
+  [value]
+  (str
+   "sha256:"
+   (request-auth/host-call
+    "hex-encode"
+    [(request-auth/host-call "hash" ["sha256" value])])))
+
+(defn token-digest-with
+  [invitation digest-fn]
+  (let [parts (invitation-parts invitation)]
+    (if (nil? parts) nil (digest-fn (get parts :token)))))
+
+(defn token-digest
+  [invitation]
+  (token-digest-with invitation sha256-digest))
+
+(defn prepare-request-with
+  [wire now-seconds digest-fn]
+  (let [parts (invitation-parts (get wire "invitation"))]
+    (if
+     (and
+      (validate/exact-record? wire prepare-wire-fields #{})
+      (= pairing/prepare-protocol (get wire "protocol"))
+      (not (nil? parts)))
+     {:protocol pairing/prepare-protocol
+      :invitation (get parts :id)
+      :token-digest (digest-fn (get parts :token))
+      :device (get wire "device")
+      :public-key (get wire "publicKey")
+      :algorithm (get wire "algorithm")
+      :prepared-at (get wire "preparedAt")
+      :prepared-seconds now-seconds}
+     nil)))
+
+(defn prepare-request
+  [wire now-seconds]
+  (prepare-request-with wire now-seconds sha256-digest))
+
+(defn intent-value
+  [wire]
+  (if
+   (and
+    (validate/exact-record? wire intent-wire-fields #{})
+    (= pairing/intent-protocol (get wire "protocol")))
+   {:protocol (get wire "protocol")
+    :invitation (get wire "invitation")
+    :node (get wire "node")
+    :device (get wire "device")
+    :public-key (get wire "public-key")
+    :algorithm (get wire "algorithm")
+    :prepared-at (get wire "prepared-at")
+    :expires-at (get wire "expires-at")}
+   nil))
+
+(defn intent-wire-value
+  [intent]
+  {"protocol" (get intent :protocol)
+   "invitation" (get intent :invitation)
+   "node" (get intent :node)
+   "device" (get intent :device)
+   "public-key" (get intent :public-key)
+   "algorithm" (get intent :algorithm)
+   "prepared-at" (get intent :prepared-at)
+   "expires-at" (get intent :expires-at)})
+
+(defn intent-json
+  [intent]
+  (str
+   "{\"algorithm\":" (json/write (get intent :algorithm))
+   ",\"device\":" (json/write (get intent :device))
+   ",\"expires-at\":" (json/write (get intent :expires-at))
+   ",\"invitation\":" (json/write (get intent :invitation))
+   ",\"node\":" (json/write (get intent :node))
+   ",\"prepared-at\":" (json/write (get intent :prepared-at))
+   ",\"protocol\":" (json/write (get intent :protocol))
+   ",\"public-key\":" (json/write (get intent :public-key))
+   "}"))
+
+(defn intent-digest-with
+  [intent digest-fn]
+  (digest-fn (intent-json intent)))
+
+(defn intent-digest
+  [intent]
+  (intent-digest-with intent sha256-digest))
+
+(defn prepare-result
+  [intent]
+  {"protocol" prepare-result-protocol
+   "intent" (intent-wire-value intent)
+   "intentDigest" (intent-digest intent)})
+
+(defn complete-result
+  [value]
+  {"protocol" (get value :protocol)
+   "node" (get value :node)
+   "device" (get value :device)
+   "administrator" (get value :administrator)
+   "grants" (get value :grants)})
+
+(defn issue-result
+  [value]
+  {"protocol" (get value :protocol)
+   "id" (get value :id)
+   "node" (get value :node)
+   "expiresAt" (get value :expires-at)
+   "status" (get value :status)})
+
+(defn error-result
+  [result]
+  {"error"
+   {"code" (get-in result [:error :code])}})
+
+(defn signature-shape?
+  [value]
+  (and
+   (validate/exact-record? value signature-fields #{})
+   (= request-auth/signature-protocol (get value "profile"))
+   (= "p256-sha256" (get value "algorithm"))
+   (model/canonical-digest? (get value "keyId"))
+   (string? (get value "value"))))
+
+(defn verify-intent-with
+  [intent signature digest-fn public-key-fn decode-fn verify-fn]
+  (if
+   (and (pairing/intent? intent) (signature-shape? signature))
+   (let [digest (intent-digest-with intent digest-fn)
+         key-id (digest-fn (get intent :public-key))
+         public-key
+         (public-key-fn (get intent :public-key))
+         signature-bytes
+         (decode-fn (get signature "value"))]
+     (if
+      (and
+       (= key-id (get signature "keyId"))
+       (verify-fn
+        public-key
+        (str pairing/intent-protocol "\n" digest)
+        signature-bytes))
+      {:protocol pairing/intent-verification-protocol
+       :verified true
+       :intent-digest digest
+       :intent intent
+       :device (get intent :device)
+       :public-key (get intent :public-key)
+       :algorithm (get intent :algorithm)}
+      nil))
+   nil))
+
+(defn verify-intent
+  [intent signature]
+  (verify-intent-with
+   intent
+   signature
+   sha256-digest
+   request-auth/p256-public-key-bytes
+   (fn [encoded]
+     (request-auth/host-call "base64url-decode" [encoded]))
+   (fn [public-key message signature-bytes]
+     (request-auth/host-call
+      "verify-signature"
+      ["p256-sha256" public-key message signature-bytes]))))
+
+(defn complete-request-with
+  [wire now-seconds digest-fn public-key-fn decode-fn verify-fn]
+  (let [parts (invitation-parts (get wire "invitation"))
+        intent (intent-value (get wire "intent"))
+        verification
+        (verify-intent-with
+         intent (get wire "signature") digest-fn
+         public-key-fn decode-fn verify-fn)]
+    (if
+     (and
+      (validate/exact-record? wire complete-wire-fields #{})
+      (= pairing/complete-protocol (get wire "protocol"))
+      (not (nil? parts))
+      (not (nil? intent))
+      (= (get parts :id) (get intent :invitation))
+      (not (nil? verification)))
+     {:protocol pairing/complete-protocol
+      :token-digest (digest-fn (get parts :token))
+      :accepted-at (get wire "acceptedAt")
+      :accepted-seconds now-seconds
+      :intent intent
+      :intent-verification verification}
+     nil)))
+
+(defn complete-request
+  [wire now-seconds]
+  (complete-request-with
+   wire
+   now-seconds
+   sha256-digest
+   request-auth/p256-public-key-bytes
+   (fn [encoded]
+     (request-auth/host-call "base64url-decode" [encoded]))
+   (fn [public-key message signature-bytes]
+     (request-auth/host-call
+      "verify-signature"
+      ["p256-sha256" public-key message signature-bytes]))))

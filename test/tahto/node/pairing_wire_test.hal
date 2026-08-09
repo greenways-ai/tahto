@@ -1,0 +1,124 @@
+(ns tahto.node.pairing-wire-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.node.pairing-wire :as wire]
+            [tahto.node.request-auth :as request-auth]
+            [tahto.sync.pairing :as pairing]))
+
+(def digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def prepare-wire
+  {"protocol" pairing/prepare-protocol
+   "invitation" "invite.live~secret-token"
+   "device" "device.browser"
+   "publicKey" "p256:browser-public-key"
+   "algorithm" "p256-sha256"
+   "preparedAt" "2026-08-09T05:21:00Z"})
+
+(def intent-wire
+  {"protocol" pairing/intent-protocol
+   "invitation" "invite.live"
+   "node" "node.home"
+   "device" "device.browser"
+   "public-key" "p256:browser-public-key"
+   "algorithm" "p256-sha256"
+   "prepared-at" "2026-08-09T05:21:00Z"
+   "expires-at" "2026-08-09T05:25:00Z"})
+
+(def signature
+  {"profile" request-auth/signature-protocol
+   "algorithm" "p256-sha256"
+   "keyId" digest
+   "value" "browser-signature"})
+
+(def complete-wire
+  {"protocol" pairing/complete-protocol
+   "invitation" "invite.live~secret-token"
+   "acceptedAt" "2026-08-09T05:22:00Z"
+   "intent" intent-wire
+   "signature" signature})
+
+(def issue-wire
+  {"protocol" pairing/invitation-protocol
+   "id" "invite.live"
+   "node" "node.home"
+   "tokenDigest" digest
+   "approvalDigest" digest
+   "createdAt" "2026-08-09T05:20:00Z"
+   "expiresAt" "2026-08-09T05:25:00Z"
+   "createdSeconds" 1786252800
+   "expiresSeconds" 1786253100
+   "status" "open"})
+
+(defn digest-value
+  [_value]
+  digest)
+
+(defn public-key
+  [value]
+  (str "decoded:" value))
+
+(defn verify-signature
+  [key message signature-value]
+  (and
+   (= "decoded:p256:browser-public-key" key)
+   (= (str pairing/intent-protocol "\n" digest) message)
+   (= "browser-signature" signature-value)))
+
+(test/print-results
+ [(test/check
+   "wire issue admits only a closed invitation record without a raw token"
+   (let [request (wire/issue-request issue-wire)]
+     [(pairing/invitation? request)
+      (get request :id)
+      (has? request :token)
+      (get request :token-digest)])
+   [true "invite.live" false digest])
+
+  (test/check
+   "wire prepare keeps the raw token out of the kernel request"
+   (let [request
+         (wire/prepare-request-with
+          prepare-wire 1786252860 digest-value)]
+     [(get request :invitation)
+      (get request :token-digest)
+      (has? request :token)
+      (get request :prepared-seconds)])
+   ["invite.live" digest false 1786252860])
+
+  (test/check
+   "pairing intent JSON is canonical across Hara and Greenways OS"
+   (wire/intent-json (wire/intent-value intent-wire))
+   "{\"algorithm\":\"p256-sha256\",\"device\":\"device.browser\",\"expires-at\":\"2026-08-09T05:25:00Z\",\"invitation\":\"invite.live\",\"node\":\"node.home\",\"prepared-at\":\"2026-08-09T05:21:00Z\",\"protocol\":\"tahto.pairing-intent/1\",\"public-key\":\"p256:browser-public-key\"}")
+
+  (test/check
+   "wire complete projects exact verified P-256 intent evidence"
+   (let [request
+         (wire/complete-request-with
+          complete-wire
+          1786252920
+          digest-value
+          public-key
+          identity
+          verify-signature)]
+     [(pairing/complete-request? request)
+      (get-in request [:intent-verification :verified])
+      (= (get request :intent)
+         (get-in request [:intent-verification :intent]))
+      (get request :token-digest)])
+   [true true true digest])
+
+  (test/check
+   "malformed invitations and signature failures fail closed"
+   [(wire/prepare-request-with
+     (assoc prepare-wire "invitation" "missing-delimiter")
+     1786252860 digest-value)
+    (wire/complete-request-with
+     complete-wire
+     1786252920
+     digest-value
+     public-key
+     identity
+     (fn [_key _message _signature] false))]
+   [nil nil])])

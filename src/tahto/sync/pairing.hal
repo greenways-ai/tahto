@@ -50,6 +50,10 @@
     (not (invitation? invitation))
     (model/fail state "tahto.pairing/invitation-invalid")
 
+    (= invitation
+       (get (invitations state) (get invitation :id)))
+    (model/ok state invitation)
+
     (has? (invitations state) (get invitation :id))
     (model/fail state "tahto.pairing/invitation-conflict")
 
