@@ -1,0 +1,236 @@
+(ns tahto.fixture.ingress
+  (:require [std.foundation :refer :all]
+            [tahto.fixture.two-device :as fixture]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.sync.device :as device]))
+
+;; Hoplite owns signature verification, freshness, key lifecycle and durable
+;; nonce/idempotency admission. Tahto receives one closed application identity
+;; and binds only its canonical request fingerprint into the ordinary device
+;; request ledger. Raw signatures, nonces and idempotency keys never cross this
+;; boundary.
+
+(def ingress-profile
+  "hoplite-application-ingress/1")
+
+(def ingress-fields
+  #{:profile
+    :subject
+    :realm
+    :device-id
+    :key-id
+    :application
+    :application-version
+    :publisher
+    :lock-digest
+    :namespace
+    :collection
+    :operation
+    :content-digest
+    :timestamp
+    :replay-status
+    :request-fingerprint
+    :admitted-at
+    :claims})
+
+(def claim-fields
+  #{"application/id"
+    "application/version"
+    "application/publisher"
+    "application/lock-digest"
+    "application/namespace"
+    "application/collection"
+    "application/operations"})
+
+(def optional-claim-fields
+  #{"device/label"})
+
+(def replay-statuses
+  #{"applied" "replayed"})
+
+(def fixture-operations
+  #{"object.upload" "object.read"})
+
+(defn fixture-public-key
+  [device-id]
+  (cond
+    (= device-id fixture/device-a)
+    fixture/public-key-a
+
+    (= device-id fixture/device-b)
+    fixture/public-key-b
+
+    :else nil))
+
+(defn operation-authorized?
+  [operations operation]
+  (or
+   (= operations operation)
+   (= operations "object.upload,object.read")
+   (= operations "object.read,object.upload")))
+
+(defn claims?
+  [claims identity]
+  (and
+   (validate/exact-record?
+    claims claim-fields optional-claim-fields)
+   (= (get claims "application/id")
+      (get identity :application))
+   (= (get claims "application/version")
+      (get identity :application-version))
+   (= (get claims "application/publisher")
+      (get identity :publisher))
+   (= (get claims "application/lock-digest")
+      (get identity :lock-digest))
+   (= (get claims "application/namespace")
+      (get identity :namespace))
+   (= (get claims "application/collection")
+      (get identity :collection))
+   (operation-authorized?
+    (get claims "application/operations")
+    (get identity :operation))
+   (or
+    (not (has? claims "device/label"))
+    (model/non-empty-string?
+     (get claims "device/label")))))
+
+(defn identity?
+  [value]
+  (let [device-id (get value :device-id)
+        public-key (fixture-public-key device-id)]
+    (and
+     (validate/exact-record? value ingress-fields #{})
+     (= ingress-profile (get value :profile))
+     (= "application" (get value :realm))
+     (model/identifier? (get value :subject))
+     (model/identifier? device-id)
+     (not (nil? public-key))
+     (model/identifier? (get value :key-id))
+     (= fixture/application (get value :application))
+     (model/non-empty-string?
+      (get value :application-version))
+     (model/identifier? (get value :publisher))
+     (model/canonical-digest?
+      (get value :lock-digest))
+     (= fixture/fixture-namespace
+        (get value :namespace))
+     (= fixture/collection
+        (get value :collection))
+     (has? fixture-operations
+           (get value :operation))
+     (model/canonical-digest?
+      (get value :content-digest))
+     (model/positive-integer?
+      (get value :timestamp))
+     (has? replay-statuses
+           (get value :replay-status))
+     (model/canonical-digest?
+      (get value :request-fingerprint))
+     (model/positive-integer?
+      (get value :admitted-at))
+     (claims? (get value :claims) value))))
+
+(defn request-proof
+  [identity accepted-at]
+  {:protocol validate/request-verification-protocol
+   :verified true
+   :device (get identity :device-id)
+   :public-key
+   (fixture-public-key (get identity :device-id))
+   :operation (get identity :operation)
+   :application (get identity :application)
+   :namespace (get identity :namespace)
+   :collection (get identity :collection)
+   :request-digest (get identity :request-fingerprint)
+   :nonce (get identity :request-fingerprint)
+   :idempotency-key (get identity :request-fingerprint)
+   :timestamp accepted-at})
+
+(defn stored-request-matches?
+  [stored identity]
+  (= [(get stored :device)
+      (get stored :operation)
+      (get stored :application)
+      (get stored :namespace)
+      (get stored :collection)
+      (get stored :request-digest)
+      (get stored :idempotency-key)]
+     [(get identity :device-id)
+      (get identity :operation)
+      (get identity :application)
+      (get identity :namespace)
+      (get identity :collection)
+      (get identity :request-fingerprint)
+      (get identity :request-fingerprint)]))
+
+(defn replay-context
+  [state identity accepted-at]
+  (let [device-id (get identity :device-id)
+        fingerprint (get identity :request-fingerprint)
+        existing
+        (model/idempotency-record
+         state device-id fingerprint)
+        nonce-entry
+        (model/request-nonce
+         state device-id fingerprint)]
+    (cond
+      (and (nil? existing)
+           (nil? nonce-entry))
+      (let [authorized
+            (device/authorize-request
+             state
+             (request-proof identity accepted-at))]
+        (if
+         (get authorized :ok)
+         (model/ok
+          (get authorized :state)
+          (assoc (get authorized :value)
+                 :replayed true))
+         authorized))
+
+      (nil? existing)
+      (model/fail
+       state
+       "tahto.fixture/replay-state-incomplete"
+       {:device device-id
+        :request-digest fingerprint})
+
+      (not (stored-request-matches?
+            existing identity))
+      (model/fail
+       state
+       "tahto.fixture/replay-conflict"
+       {:device device-id
+        :request-digest fingerprint})
+
+      :else
+      (let [context
+            (device/request-context existing true)]
+        (if
+         (validate/device-request-context? context)
+         (model/ok state context)
+         (model/fail
+          state
+          "tahto.fixture/replay-context-invalid"))))))
+
+(defn authorize
+  [state identity accepted-at]
+  (cond
+    (not (identity? identity))
+    (model/fail
+     state
+     "tahto.fixture/ingress-identity-invalid")
+
+    (not (validate/timestamp? accepted-at))
+    (model/fail
+     state
+     "tahto.fixture/ingress-timestamp-invalid")
+
+    (= "replayed" (get identity :replay-status))
+    (replay-context state identity accepted-at)
+
+    :else
+    (device/authorize-request
+     state
+     (request-proof identity accepted-at))))
