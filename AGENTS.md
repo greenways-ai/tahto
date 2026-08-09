@@ -5,8 +5,14 @@ Tahto is application-neutral infrastructure authored as Hara programs.
 Before changing core code, preserve these laws:
 
 - Greenways OS owns installation, consent, private keys, credentials, and grants.
-- Tahto owns application-neutral identity, custody, movement, immutable history,
-  graph closure and recovery—not application field meaning.
+- Greenways OS owns device identity, pairing, key custody, installation,
+  credentials, consent, grants, host-provider selection and backup policy.
+- Tahto owns semantic collections, stable logical IDs, typed links, exact roots,
+  graph closure, divergence preservation and synchronization planning—not
+  application field meaning, workflow control or physical storage.
+- Canonical application values are immutable content blocks selected by small
+  scoped refs. Tahto-local cursors, queues, leases and caches are operational
+  and rebuildable; deleting them must not delete authoritative app content.
 - Applications and exact installed specification packages own domain invariants,
   transformations, migrations, execution and merge policy.
 - Tahto domain state, effect interpretation, orchestration, recovery policy and
@@ -39,8 +45,9 @@ Before changing core code, preserve these laws:
 - Service descriptors are inert and never install remote JavaScript, HTML, HAL,
   arbitrary Wasm or native commands into Greenways OS.
 - Greenways Space is optional.
-- Tahto core must not depend on Historia, Hestia, Spaces, Worlds, Ignatius,
-  Hodos or Alumbra repositories.
+- Tahto core must not depend on Historia, Hestia, Spaces, Worlds, Hodos or
+  Alumbra repositories. Its storage edge may implement the generic Ignatius
+  block/ref contract without importing Ignatius workflow or ledger policy.
 
 Ordered Semantic Fabric work is tracked by #29:
 

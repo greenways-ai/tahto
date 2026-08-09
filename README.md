@@ -1,29 +1,37 @@
 # Tahto
 
-**Tahto is the Greenways application-state and semantic fabric.** It stores,
-synchronizes, backs up, restores and routes application state while Greenways OS
-retains installation, consent, private-key, credential and grant authority.
+**Tahto is the Greenways semantic and synchronization fabric.** Applications
+use it for semantic collections, stable IDs, typed links, exact roots,
+divergence and closure synchronization. Greenways OS retains installation,
+device identity, pairing, consent, private-key, credential, grant and provider
+authority.
 
 ```text
 Greenways OS applications
           │ exact grants and verified requests
           ▼
        Tahto HAL
-  semantic values · objects
-  commits · heads · sync
-  backup · restore
+  collections · stable IDs
+  links · roots · divergence
+  closure planning · sync
           │ closed generic capability calls
           ▼
- hara.value · hara.store · hara.blob
+ Ignatius blocks · scoped refs · hara.blob
           │ trusted host installation
           ▼
  specification packages · SQLite · filesystem · Nginx
 ```
 
-Applications and exact installed specification packages own the meaning of their
-values. Tahto owns application-neutral identity, custody, graph closure,
-immutable history, divergent heads and recovery. It does not invent a universal
-merge policy.
+Applications and exact installed specification packages own the meaning and
+merge policy of their values. Ignatius storage owns immutable byte custody and
+small scoped refs. Tahto owns the semantic collection model and synchronization
+laws over those values. Tahto operational persistence contains rebuildable
+cursors, queues, leases and caches; it is not the canonical application
+database.
+
+The repository still contains the earlier whole-state metadata implementation.
+It is migration evidence, not the target ownership boundary, and must not gain
+new canonical persistence responsibilities.
 
 The build is now **late kernel / early production integration**. The semantic
 model, history and pure read/prepare/submit kernels are implemented. The
@@ -116,12 +124,15 @@ Greenways OS
   installation · consent · grants · credentials · private keys
 
 Tahto HAL
-  application-neutral state custody · authorization · orchestration
-  semantic identity · history · divergence · validation evidence · recovery
+  semantic collections · stable IDs · links · roots · closure · divergence
+  synchronization planning · semantic transaction validation
+
+Ignatius storage
+  immutable content blocks · scoped refs · exact canonical retrieval
 
 Generic host capabilities
-  canonical value verification · metadata persistence · byte custody
-  bounded request and response sources
+  physical durability · large-byte custody · bounded transport
+  request and response sources
 
 Applications and exact installed specification packages
   domain fields · invariants · migrations · transforms · merge policy
