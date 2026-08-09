@@ -1,0 +1,348 @@
+(ns tahto.semantic.read
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.admission :as admission]
+            [tahto.semantic.history :as semantic-history]
+            [tahto.semantic.index :as index]
+            [tahto.semantic.model :as semantic]
+            [tahto.semantic.root :as semantic-root]
+            [tahto.store.model :as model]))
+
+(def operation "semantic.read")
+(def result-protocol "tahto.semantic-read-result/1")
+(def max-read-commits 16)
+
+(def request-fields
+  #{:kind :name :max-commits})
+
+(def request-optional-fields
+  #{:id})
+
+(def commit-summary-fields
+  #{:root :device :parents :sequence :timestamp})
+
+(def head-summary-fields
+  #{:kind :name :commits :updated-at})
+
+(def branch-fields
+  #{:commit-root
+    :commit
+    :semantic-root
+    :root-projection
+    :index-root
+    :index-size
+    :selection})
+
+(def result-fields
+  #{:protocol
+    :device
+    :request-digest
+    :application
+    :namespace
+    :collection
+    :head-digest
+    :head
+    :requested-id
+    :branches})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn request?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record?
+     value request-fields request-optional-fields)
+    (has? validate/head-kinds (get value :kind))
+    (model/identifier? (get value :name))
+    (model/positive-integer? (get value :max-commits))
+    (<= (get value :max-commits) max-read-commits)
+    (or
+     (not (has? value :id))
+     (model/identifier? (get value :id))))))
+
+(defn requested-id
+  [request]
+  (if (has? request :id) (get request :id) nil))
+
+(defn authorized-context?
+  [state context]
+  (truth-value
+   (and
+    (validate/device-request-context? context)
+    (= operation (get context :operation))
+    (= "pending" (get context :status))
+    (nil? (get context :result-digest))
+    (model/device-enrolled? state (get context :device)))))
+
+(defn commit-summary
+  [record]
+  {:root (get record :root)
+   :device (get record :device)
+   :parents (get record :parents)
+   :sequence (get record :sequence)
+   :timestamp (get record :timestamp)})
+
+(defn commit-summary?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value commit-summary-fields #{})
+    (model/canonical-digest? (get value :root))
+    (model/identifier? (get value :device))
+    (validate/digest-vector? (get value :parents))
+    (model/positive-integer? (get value :sequence))
+    (validate/timestamp? (get value :timestamp)))))
+
+(defn head-summary
+  [record]
+  {:kind (get record :kind)
+   :name (get record :name)
+   :commits (get record :commits)
+   :updated-at (get record :updated-at)})
+
+(defn head-summary?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value head-summary-fields #{})
+    (has? validate/head-kinds (get value :kind))
+    (model/identifier? (get value :name))
+    (validate/digest-vector? (get value :commits))
+    (> (count (get value :commits)) 0)
+    (<= (count (get value :commits)) max-read-commits)
+    (validate/timestamp? (get value :updated-at)))))
+
+(defn selection?
+  [value]
+  (truth-value
+   (or
+    (nil? value)
+    (admission/projection? value))))
+
+(defn branch?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value branch-fields #{})
+    (model/canonical-digest? (get value :commit-root))
+    (commit-summary? (get value :commit))
+    (= (get value :commit-root)
+       (get-in value [:commit :root]))
+    (model/canonical-digest? (get value :semantic-root))
+    (semantic-root/projection? (get value :root-projection))
+    (= (get value :semantic-root)
+       (get-in value [:root-projection :root]))
+    (model/canonical-digest? (get value :index-root))
+    (= (get value :index-root)
+       (get-in value [:root-projection :index-root]))
+    (model/positive-integer? (get value :index-size))
+    (<= (get value :index-size) semantic/max-index-entries)
+    (selection? (get value :selection)))))
+
+(defn result?
+  [value]
+  (let [head (get value :head)
+        branches (get value :branches)
+        requested (get value :requested-id)]
+    (truth-value
+     (and
+      (validate/exact-record? value result-fields #{})
+      (= result-protocol (get value :protocol))
+      (model/identifier? (get value :device))
+      (model/canonical-digest? (get value :request-digest))
+      (model/identifier? (get value :application))
+      (model/identifier? (get value :namespace))
+      (model/identifier? (get value :collection))
+      (model/canonical-digest? (get value :head-digest))
+      (head-summary? head)
+      (or (nil? requested)
+          (model/identifier? requested))
+      (vector? branches)
+      (> (count branches) 0)
+      (<= (count branches) max-read-commits)
+      (every? branch? branches)
+      (= (get head :commits)
+         (vec (map (fn [branch]
+                     (get branch :commit-root))
+                   branches)))
+      (every?
+       (fn [branch]
+         (let [selection (get branch :selection)]
+           (or
+            (nil? selection)
+            (and
+             (not (nil? requested))
+             (= requested (get selection :id))))))
+       branches)))))
+
+(defn branch-fail
+  ([code]
+   (branch-fail code {}))
+  ([code details]
+   {:ok false
+    :code code
+    :details details}))
+
+(defn branch-ok
+  [value]
+  {:ok true :value value})
+
+(defn branch-projection
+  [state commit-root requested]
+  (let [commit (model/commit-record state commit-root)]
+    (cond
+      (nil? commit)
+      (branch-fail
+       "tahto.semantic/read-commit-missing"
+       {:root commit-root})
+
+      (not (semantic-history/semantic-commit-record? state commit))
+      (branch-fail
+       "tahto.semantic/read-commit-profile-invalid"
+       {:root commit-root})
+
+      :else
+      (let [root (semantic-history/selected-root commit)
+            root-projection
+            (semantic-root/semantic-root-projection state root)]
+        (cond
+          (nil? root-projection)
+          (branch-fail
+           "tahto.semantic/read-root-missing"
+           {:root root})
+
+          :else
+          (let [index-root (get root-projection :index-root)
+                index-projection
+                (index/semantic-index-projection state index-root)]
+            (cond
+              (nil? index-projection)
+              (branch-fail
+               "tahto.semantic/read-index-missing"
+               {:root index-root})
+
+              :else
+              (let [entries (get index-projection :entries)
+                    entry
+                    (if
+                     (nil? requested)
+                     nil
+                     (index/index-entry entries requested))
+                    selection
+                    (if
+                     (nil? entry)
+                     nil
+                     (admission/semantic-object-projection
+                      state
+                      (get entry :root)))]
+                (cond
+                  (and (not (nil? entry))
+                       (nil? selection))
+                  (branch-fail
+                   "tahto.semantic/read-selection-missing"
+                   {:id requested
+                    :root (get entry :root)})
+
+                  (and (not (nil? selection))
+                       (not (= requested (get selection :id))))
+                  (branch-fail
+                   "tahto.semantic/read-selection-id-mismatch"
+                   {:requested requested
+                    :selected (get selection :id)
+                    :root (get selection :root)})
+
+                  :else
+                  (branch-ok
+                   {:commit-root commit-root
+                    :commit (commit-summary commit)
+                    :semantic-root root
+                    :root-projection root-projection
+                    :index-root index-root
+                    :index-size (count entries)
+                    :selection selection}))))))))))
+
+(defn fail-from-branch
+  [state result]
+  (model/fail state
+              (get result :code)
+              (get result :details)))
+
+(defn read
+  [state context request]
+  (let [application (get context :application)
+        namespace (get context :namespace)
+        collection (get context :collection)
+        kind (get request :kind)
+        name (get request :name)
+        maximum (get request :max-commits)
+        requested (requested-id request)]
+    (cond
+      (not (authorized-context? state context))
+      (model/fail state "tahto.semantic/read-context-not-authorized")
+
+      (not (request? request))
+      (model/fail state "tahto.semantic/read-request-invalid")
+
+      :else
+      (let [head
+            (model/head-record
+             state application namespace collection kind name)
+            head-digest
+            (model/head-digest
+             state application namespace collection kind name)]
+        (cond
+          (nil? head)
+          (model/fail state
+                      "tahto.semantic/read-head-missing"
+                      {:kind kind :name name})
+
+          (not (model/canonical-digest? head-digest))
+          (model/fail state
+                      "tahto.semantic/read-head-digest-missing"
+                      {:kind kind :name name})
+
+          (not (semantic-history/semantic-head-record? state head))
+          (model/fail state
+                      "tahto.semantic/read-head-profile-invalid")
+
+          (> (count (get head :commits)) maximum)
+          (model/fail state
+                      "tahto.semantic/read-head-too-wide"
+                      {:commits (count (get head :commits))
+                       :max-commits maximum})
+
+          :else
+          (loop [position 0
+                 branches []]
+            (if
+             (= position (count (get head :commits)))
+             (let [value
+                   {:protocol result-protocol
+                    :device (get context :device)
+                    :request-digest (get context :request-digest)
+                    :application application
+                    :namespace namespace
+                    :collection collection
+                    :head-digest head-digest
+                    :head (head-summary head)
+                    :requested-id requested
+                    :branches branches}]
+               (if
+                (result? value)
+                (model/ok state value)
+                (model/fail state
+                            "tahto.semantic/read-result-invalid")))
+             (let [branch-result
+                   (branch-projection
+                    state
+                    (nth (get head :commits) position)
+                    requested)]
+               (if
+                (get branch-result :ok)
+                (recur
+                 (inc position)
+                 (conj branches (get branch-result :value)))
+                (fail-from-branch state branch-result))))))))))
