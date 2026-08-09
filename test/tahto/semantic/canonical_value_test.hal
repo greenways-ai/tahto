@@ -1,0 +1,274 @@
+(ns tahto.semantic.canonical-value-test
+  (:require [std.foundation :refer :all]
+            [std.foundation.canonical-value :as portable]
+            [std.lib.test :as test]
+            [tahto.semantic.canonical-value :as canonical]
+            [tahto.semantic.model :as semantic]
+            [tahto.store.host :as host]
+            [tahto.store.model :as model]
+            [tahto.store.vault :as vault]))
+
+(def root
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def other-root
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def package-root
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+
+(def schema-ref
+  {:protocol semantic/schema-ref-protocol
+   :schema "fixture.entity"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root
+   :entry "fixture.entity/spec"})
+
+(def decoded-value
+  {:kind "tree"
+   :position [10 0 4]
+   :visible true})
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn install-object
+  [state upload-id application namespace digest size]
+  (let [begun
+        (vault/begin-upload
+         state
+         {:upload-id upload-id
+          :application application
+          :namespace namespace
+          :digest digest
+          :size size
+          :media-type "application/octet-stream"})
+        appended
+        (vault/append-upload
+         (result-state begun)
+         {:upload-id upload-id
+          :offset 0
+          :length size
+          :body-handle 17})
+        requested
+        (vault/request-install
+         (result-state appended)
+         {:upload-id upload-id})
+        accepted
+        (vault/accept-install
+         (result-state requested)
+         {:protocol host/result-protocol
+          :operation "upload/verify-install"
+          :upload-id upload-id
+          :digest digest
+          :size size
+          :verified true
+          :installed true})]
+    (result-state accepted)))
+
+(defn base-state
+  []
+  (install-object
+   (model/empty-state)
+   "upload.value"
+   "fixture.world"
+   "world.a"
+   root
+   96))
+
+(def read-input
+  {:application "fixture.world"
+   :namespace "world.a"
+   :root root
+   :max-bytes 1024})
+
+(def verify-input
+  (assoc read-input :schema-ref schema-ref))
+
+(defn success-provider
+  [service operation request]
+  (if
+   (and (= portable/service service)
+        (= portable/operation operation)
+        (= root (get request :digest)))
+   (portable/verified-result root 96 decoded-value)
+   (portable/failed-result
+    (get request :digest)
+    "hara.value/provider-failure")))
+
+(test/print-results
+ [(test/check
+   "authorized objects prepare one exact generic hara.value call"
+   (let [prepared (canonical/prepare-read (base-state) read-input)
+         call (get prepared :value)
+         request (canonical/call-request call)]
+     [(get prepared :ok)
+      call
+      (canonical/host-call? call)
+      (has? request :provider)
+      (has? request :path)
+      (has? request :source-handle)])
+   [true
+    {:service "hara.value"
+     :operation "object/verify-hta"
+     :arguments
+     [{:protocol "hara.value-request/1"
+       :operation "object/verify-hta"
+       :digest root
+       :max-bytes 1024}]}
+    true false false false])
+
+  (test/check
+   "generic success becomes one bounded read result without state mutation"
+   (let [state (base-state)
+         result (canonical/read-with state read-input success-provider)]
+     [(get result :ok)
+      (get result :value)
+      (canonical/read-result? (get result :value))
+      (= state (result-state result))])
+   [true
+    {:root root
+     :value-size 96
+     :profile "hara.hta/1"
+     :value decoded-value}
+    true true])
+
+  (test/check
+   "schema-bound verification translates exact generic evidence"
+   (let [state (base-state)
+         result
+         (canonical/verify-with state verify-input success-provider)
+         value (get result :value)]
+     [(get result :ok)
+      (get value :value)
+      (get value :verification)
+      (canonical/verified-value? value)
+      (= state (result-state result))])
+   [true
+    decoded-value
+    {:protocol "tahto.canonical-value-verification/1"
+     :verified true
+     :profile "hara.hta/1"
+     :schema-ref schema-ref
+     :value-root root
+     :value-size 96}
+    true true])
+
+  (test/check
+   "missing unauthorized and oversized objects fail before host dispatch"
+   (let [state (base-state)
+         missing
+         (canonical/prepare-read
+          state
+          (assoc read-input :root other-root))
+         hidden-state
+         (install-object
+          (model/empty-state)
+          "upload.hidden"
+          "fixture.world"
+          "world.hidden"
+          root
+          96)
+         hidden (canonical/prepare-read hidden-state read-input)
+         oversized
+         (canonical/prepare-read
+          state
+          (assoc read-input :max-bytes 95))]
+     [(error-code missing)
+      (error-code hidden)
+      (error-code oversized)])
+   ["tahto.canonical-value/object-missing"
+    "tahto.canonical-value/object-not-authorized"
+    "tahto.canonical-value/maximum-exceeded"])
+
+  (test/check
+   "result digest length and closed shape remain bound to the request"
+   (let [state (base-state)
+         wrong-digest
+         (canonical/read-with
+          state read-input
+          (fn [service operation request]
+            (portable/verified-result
+             other-root 96 decoded-value)))
+         wrong-size
+         (canonical/read-with
+          state read-input
+          (fn [service operation request]
+            (portable/verified-result root 95 decoded-value)))
+         widened
+         (canonical/read-with
+          state read-input
+          (fn [service operation request]
+            (assoc
+             (portable/verified-result root 96 decoded-value)
+             :provider "memory")))]
+     [(error-code wrong-digest)
+      (error-code wrong-size)
+      (error-code widened)
+      (= state (result-state wrong-digest))
+      (= state (result-state wrong-size))
+      (= state (result-state widened))])
+   ["tahto.canonical-value/result-mismatch"
+    "tahto.canonical-value/object-size-mismatch"
+    "tahto.canonical-value/result-invalid"
+    true true true])
+
+  (test/check
+   "generic failure codes remain evidence rather than semantic acceptance"
+   (let [state (base-state)
+         result
+         (canonical/read-with
+          state read-input
+          (fn [service operation request]
+            (portable/failed-result
+             root
+             "hara.value/hta-noncanonical")))]
+     [(get result :ok)
+      (error-code result)
+      (get-in result [:error :details :code])
+      (= state (result-state result))])
+   [false
+    "tahto.canonical-value/verification-failed"
+    "hara.value/hta-noncanonical"
+    true])
+
+  (test/check
+   "schema references and portable values fail closed"
+   [(canonical/verify-input? verify-input)
+    (canonical/verify-input?
+     (assoc verify-input :schema-ref
+            (assoc schema-ref :provider "remote")))
+    (canonical/read-result?
+     {:root root
+      :value-size 96
+      :profile "hara.hta/1"
+      :value inc})
+    (canonical/verified-value?
+     {:value decoded-value
+      :verification
+      (assoc
+       (canonical/verification-value
+        {:root root
+         :value-size 96
+         :profile "hara.hta/1"
+         :value decoded-value}
+        schema-ref)
+       :path "/tmp/value")})]
+   [true false false false])
+
+  (test/check
+   "Tahto caps semantic reads below the generic HTA frame ceiling"
+   [(canonical/read-input?
+     (assoc read-input
+            :max-bytes semantic/max-semantic-value-bytes))
+    (canonical/read-input?
+     (assoc read-input
+            :max-bytes
+            (inc semantic/max-semantic-value-bytes)))
+    (canonical/read-input? (assoc read-input :driver "filesystem"))]
+   [true false false])])
