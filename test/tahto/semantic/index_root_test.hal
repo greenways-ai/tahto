@@ -1,0 +1,598 @@
+(ns tahto.semantic.index-root-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.semantic.admission :as admission]
+            [tahto.semantic.index :as index]
+            [tahto.semantic.model :as semantic]
+            [tahto.semantic.root :as root]
+            [tahto.store.graph :as graph]
+            [tahto.store.model :as model]))
+
+(def application "fixture.world")
+(def namespace "world.a")
+(def collection "scene")
+
+(def package-root-a
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+(def package-root-b
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def envelope-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def envelope-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def value-a
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def value-b
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def index-root
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def semantic-root-root
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def alternate-index-root
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def alternate-root
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+(def missing-root
+  "sha256:4444444444444444444444444444444444444444444444444444444444444444")
+
+(def schema-a
+  {:protocol semantic/schema-ref-protocol
+   :schema "fixture.a"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root-a
+   :entry "fixture.a/spec"})
+
+(def schema-b
+  {:protocol semantic/schema-ref-protocol
+   :schema "fixture.b"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root-b
+   :entry "fixture.b/spec"})
+
+(def schema-c
+  {:protocol semantic/schema-ref-protocol
+   :schema "fixture.c"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root missing-root
+   :entry "fixture.c/spec"})
+
+(def link-a-to-b
+  {:protocol semantic/semantic-link-protocol
+   :role "peer"
+   :target-id "entity/b"
+   :target-root envelope-b})
+
+(def link-b-to-a
+  {:protocol semantic/semantic-link-protocol
+   :role "peer"
+   :target-id "entity/a"
+   :target-root envelope-a})
+
+(def object-a
+  {:protocol semantic/semantic-object-protocol
+   :id "entity/a"
+   :schema-ref schema-a
+   :value-root value-a
+   :value-size 128
+   :links [link-a-to-b]})
+
+(def object-b
+  {:protocol semantic/semantic-object-protocol
+   :id "entity/b"
+   :schema-ref schema-b
+   :value-root value-b
+   :value-size 192
+   :links [link-b-to-a]})
+
+(def semantic-index
+  {:protocol semantic/semantic-index-protocol
+   :entries
+   [{:id "entity/a" :root envelope-a}
+    {:id "entity/b" :root envelope-b}]})
+
+(def semantic-root
+  {:protocol semantic/semantic-root-protocol
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema-refs [schema-a schema-b]
+   :index-root index-root
+   :roots
+   [{:name "document" :id "entity/a" :root envelope-a}
+    {:name "secondary" :id "entity/b" :root envelope-b}]})
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn install-object
+  ([state digest size]
+   (install-object state application namespace digest size))
+  ([state application-value namespace-value digest size]
+   (let [objects
+         (assoc (get state :objects)
+                digest
+                (model/object-record digest size))
+         key (model/namespace-key application-value namespace-value)
+         references
+         (assoc (get state :references)
+                key
+                (conj
+                 (model/value-or (get state :references) key #{})
+                 digest))]
+     (assoc
+      (assoc state :objects objects)
+      :references references))))
+
+(defn base-installed-state
+  []
+  (reduce
+   (fn [state entry]
+     (install-object state (get entry :digest) (get entry :size)))
+   (model/empty-state)
+   [{:digest envelope-a :size 64}
+    {:digest envelope-b :size 64}
+    {:digest value-a :size 128}
+    {:digest value-b :size 192}
+    {:digest index-root :size 96}
+    {:digest semantic-root-root :size 112}
+    {:digest alternate-index-root :size 96}
+    {:digest alternate-root :size 112}]))
+
+(defn verification-for
+  [semantic-object]
+  {:protocol semantic/canonical-value-verification-protocol
+   :verified true
+   :profile semantic/canonical-value-profile
+   :schema-ref (get semantic-object :schema-ref)
+   :value-root (get semantic-object :value-root)
+   :value-size (get semantic-object :value-size)})
+
+(defn object-input
+  [root semantic-object]
+  {:application application
+   :namespace namespace
+   :collection collection
+   :root root
+   :semantic-object semantic-object
+   :verification (verification-for semantic-object)})
+
+(defn admitted-state-with
+  [semantic-object-a semantic-object-b]
+  (let [state (base-installed-state)
+        first-result
+        (admission/admit-projected
+         state
+         (object-input envelope-a semantic-object-a))
+        second-result
+        (admission/admit-projected
+         (result-state first-result)
+         (object-input envelope-b semantic-object-b))]
+    (result-state second-result)))
+
+(defn admitted-state
+  []
+  (admitted-state-with object-a object-b))
+
+(defn index-input
+  ([value]
+   (index-input index-root value))
+  ([root value]
+   {:application application
+    :namespace namespace
+    :collection collection
+    :root root
+    :semantic-index value}))
+
+(defn root-input
+  ([value]
+   (root-input semantic-root-root value))
+  ([root value]
+   {:application application
+    :namespace namespace
+    :collection collection
+    :root root
+    :semantic-root value}))
+
+(defn indexed-state
+  []
+  (let [state (admitted-state)
+        result
+        (index/admit-projected
+         state
+         (index-input semantic-index))]
+    (result-state result)))
+
+(test/print-results
+ [(test/check
+   "semantic index and root state remain additive before first use"
+   (let [state (model/empty-state)]
+     [(has? state :semantic-indexes)
+      (index/semantic-indexes state)
+      (has? state :semantic-roots)
+      (root/semantic-roots state)])
+   [false {} false {}])
+
+  (test/check
+   "a complete cyclic index selects admitted versions and closes over values"
+   (let [state (admitted-state)
+         result (index/admit-projected state (index-input semantic-index))
+         next-state (result-state result)
+         projection (get result :value)
+         report (graph/closure-report-value next-state [index-root])]
+     [(get result :ok)
+      projection
+      (get-in next-state [:edges index-root])
+      (index/projection? projection)
+      (get report :complete)
+      (get report :overflow)
+      (has? (into #{} (get report :visited)) value-a)
+      (has? (into #{} (get report :visited)) value-b)])
+   [true
+    {:root index-root
+     :entries
+     [{:id "entity/a" :root envelope-a}
+      {:id "entity/b" :root envelope-b}]}
+    [envelope-a envelope-b]
+    true true false true true])
+
+  (test/check
+   "every selected root has one matching semantic projection"
+   (let [state (admitted-state)
+         missing-state
+         (assoc state
+                :semantic-objects
+                (dissoc (admission/semantic-objects state) envelope-b))
+         missing
+         (index/admit-projected missing-state (index-input semantic-index))
+         mismatched-index
+         {:protocol semantic/semantic-index-protocol
+          :entries
+          [{:id "entity/aa" :root envelope-a}
+           {:id "entity/b" :root envelope-b}]}
+         mismatched
+         (index/admit-projected state (index-input mismatched-index))]
+     [(error-code missing)
+      (= missing-state (result-state missing))
+      (error-code mismatched)
+      (= state (result-state mismatched))])
+   ["tahto.semantic/index-entry-not-admitted"
+    true
+    "tahto.semantic/index-entry-id-mismatch"
+    true])
+
+  (test/check
+   "every v1 typed link resolves through the same exact index"
+   (let [missing-link (assoc link-a-to-b :target-id "entity/missing")
+         missing-object-a (assoc object-a :links [missing-link])
+         missing-state (admitted-state-with missing-object-a object-b)
+         missing
+         (index/admit-projected missing-state (index-input semantic-index))
+         wrong-root-link (assoc link-a-to-b :target-root envelope-a)
+         wrong-root-object-a (assoc object-a :links [wrong-root-link])
+         wrong-root-state (admitted-state-with wrong-root-object-a object-b)
+         wrong-root
+         (index/admit-projected wrong-root-state (index-input semantic-index))]
+     [(error-code missing)
+      (= missing-state (result-state missing))
+      (error-code wrong-root)
+      (= wrong-root-state (result-state wrong-root))])
+   ["tahto.semantic/index-link-target-missing"
+    true
+    "tahto.semantic/index-link-root-mismatch"
+    true])
+
+  (test/check
+   "the immutable index object is installed, authorized and role-distinct"
+   (let [state (admitted-state)
+         missing-state
+         (assoc state :objects (dissoc (get state :objects) index-root))
+         missing
+         (index/admit-projected missing-state (index-input semantic-index))
+         key (model/namespace-key application namespace)
+         unauthorized-state
+         (assoc state
+                :references
+                (assoc (get state :references)
+                       key
+                       (model/set-remove
+                        (get-in state [:references key])
+                        index-root)))
+         unauthorized
+         (index/admit-projected unauthorized-state (index-input semantic-index))
+         dual-use
+         (index/admit-projected
+          state
+          (index-input envelope-a semantic-index))]
+     [(error-code missing)
+      (= missing-state (result-state missing))
+      (error-code unauthorized)
+      (= unauthorized-state (result-state unauthorized))
+      (error-code dual-use)
+      (= state (result-state dual-use))])
+   ["tahto.semantic/index-object-missing"
+    true
+    "tahto.semantic/index-object-not-authorized"
+    true
+    "tahto.semantic/index-root-dual-use"
+    true])
+
+  (test/check
+   "index replay is exact and alternate projections or graph roles conflict"
+   (let [no-link-a (assoc object-a :links [])
+         no-link-b (assoc object-b :links [])
+         state (admitted-state-with no-link-a no-link-b)
+         narrow-index
+         {:protocol semantic/semantic-index-protocol
+          :entries [{:id "entity/a" :root envelope-a}]}
+         input (index-input semantic-index)
+         first (index/admit-projected state input)
+         replay (index/admit-projected (result-state first) input)
+         conflict
+         (index/admit-projected
+          (result-state first)
+          (index-input narrow-index))
+         occupied
+         (assoc state
+                :edges
+                (assoc (get state :edges) index-root [envelope-a]))
+         edge-conflict
+         (index/admit-projected occupied (index-input semantic-index))]
+     [(get replay :ok)
+      (= (result-state first) (result-state replay))
+      (error-code conflict)
+      (= (result-state first) (result-state conflict))
+      (error-code edge-conflict)
+      (= occupied (result-state edge-conflict))])
+   [true true
+    "tahto.semantic/index-projection-conflict" true
+    "tahto.semantic/index-edge-conflict" true])
+
+  (test/check
+   "candidate index closure rejects missing and overflowed descendants"
+   (let [state (base-installed-state)
+         missing
+         (index/candidate-closure-error state index-root [missing-root])
+         overflow-state
+         (assoc state
+                :limits
+                (assoc (get state :limits) :max-closure-objects 1))
+         overflow
+         (index/candidate-closure-error
+          overflow-state index-root [envelope-a])]
+     [(get missing :code)
+      (get-in missing [:details :missing])
+      (get overflow :code)])
+   ["tahto.semantic/index-closure-incomplete"
+    [missing-root]
+    "tahto.semantic/index-closure-overflow"])
+
+  (test/check
+   "a semantic root selects the index and completes ordinary graph closure"
+   (let [state (indexed-state)
+         result (root/admit-projected state (root-input semantic-root))
+         next-state (result-state result)
+         projection (get result :value)
+         report
+         (graph/closure-report-value next-state [semantic-root-root])]
+     [(get result :ok)
+      projection
+      (get-in next-state [:edges semantic-root-root])
+      (root/projection? projection)
+      (get report :complete)
+      (get report :overflow)
+      (has? (into #{} (get report :visited)) value-a)
+      (has? (into #{} (get report :visited)) value-b)])
+   [true
+    {:root semantic-root-root
+     :application application
+     :namespace namespace
+     :collection collection
+     :schema-refs [schema-a schema-b]
+     :index-root index-root
+     :roots
+     [{:name "document" :id "entity/a" :root envelope-a}
+      {:name "secondary" :id "entity/b" :root envelope-b}]}
+    [index-root envelope-a envelope-b]
+    true true false true true])
+
+  (test/check
+   "root admission requires an admitted authorized index"
+   (let [not-admitted-state (admitted-state)
+         not-admitted
+         (root/admit-projected not-admitted-state (root-input semantic-root))
+         state (indexed-state)
+         key (model/namespace-key application namespace)
+         unauthorized-state
+         (assoc state
+                :references
+                (assoc (get state :references)
+                       key
+                       (model/set-remove
+                        (get-in state [:references key])
+                        index-root)))
+         unauthorized
+         (root/admit-projected unauthorized-state (root-input semantic-root))]
+     [(error-code not-admitted)
+      (= not-admitted-state (result-state not-admitted))
+      (error-code unauthorized)
+      (= unauthorized-state (result-state unauthorized))])
+   ["tahto.semantic/root-index-not-admitted"
+    true
+    "tahto.semantic/root-index-not-authorized"
+    true])
+
+  (test/check
+   "the input and semantic-root collection coordinates agree exactly"
+   (let [state (indexed-state)
+         application-mismatch
+         (root/admit-projected
+          state
+          (assoc (root-input semantic-root) :application "other.app"))
+         namespace-mismatch
+         (root/admit-projected
+          state
+          (assoc (root-input semantic-root) :namespace "other"))
+         collection-mismatch
+         (root/admit-projected
+          state
+          (assoc (root-input semantic-root) :collection "other"))]
+     [(error-code application-mismatch)
+      (error-code namespace-mismatch)
+      (error-code collection-mismatch)
+      (= state (result-state application-mismatch))
+      (= state (result-state namespace-mismatch))
+      (= state (result-state collection-mismatch))])
+   ["tahto.semantic/root-application-mismatch"
+    "tahto.semantic/root-namespace-mismatch"
+    "tahto.semantic/root-collection-mismatch"
+    true true true])
+
+  (test/check
+   "named roots are exact role-distinct index selections"
+   (let [state (indexed-state)
+         missing-selection
+         (assoc-in semantic-root [:roots 0 :id] "entity/missing")
+         missing
+         (root/admit-projected state (root-input missing-selection))
+         wrong-root
+         (assoc-in semantic-root [:roots 0 :root] envelope-b)
+         mismatch
+         (root/admit-projected state (root-input wrong-root))
+         object-dual-use
+         (root/admit-projected
+          state
+          (root-input envelope-a semantic-root))
+         index-dual-use-value
+         (assoc-in semantic-root [:roots 0 :root] index-root)
+         index-dual-use
+         (root/admit-projected state (root-input index-dual-use-value))]
+     [(error-code missing)
+      (= state (result-state missing))
+      (error-code mismatch)
+      (= state (result-state mismatch))
+      (error-code object-dual-use)
+      (error-code index-dual-use)])
+   ["tahto.semantic/root-entry-not-selected"
+    true
+    "tahto.semantic/root-entry-mismatch"
+    true
+    "tahto.semantic/root-object-dual-use"
+    "tahto.semantic/root-index-dual-use"])
+
+  (test/check
+   "the root schema vector equals the exact derived selected set"
+   (let [state (indexed-state)
+         entries
+         (get (index/semantic-index-projection state index-root) :entries)
+         derived (root/selected-schema-refs state entries)
+         missing-value (assoc semantic-root :schema-refs [schema-a])
+         missing
+         (root/admit-projected state (root-input missing-value))
+         extra-value
+         (assoc semantic-root :schema-refs [schema-a schema-b schema-c])
+         extra
+         (root/admit-projected state (root-input extra-value))]
+     [derived
+      (error-code missing)
+      (= state (result-state missing))
+      (error-code extra)
+      (= state (result-state extra))])
+   [[schema-a schema-b]
+    "tahto.semantic/root-schema-refs-mismatch"
+    true
+    "tahto.semantic/root-schema-refs-mismatch"
+    true])
+
+  (test/check
+   "root replay is exact and alternate projections or graph roles conflict"
+   (let [state (indexed-state)
+         input (root-input semantic-root)
+         first (root/admit-projected state input)
+         replay (root/admit-projected (result-state first) input)
+         alternate-value
+         (assoc semantic-root
+                :roots
+                [{:name "document"
+                  :id "entity/a"
+                  :root envelope-a}])
+         conflict
+         (root/admit-projected
+          (result-state first)
+          (root-input alternate-value))
+         occupied
+         (assoc state
+                :edges
+                (assoc (get state :edges)
+                       semantic-root-root
+                       [index-root]))
+         edge-conflict
+         (root/admit-projected occupied (root-input semantic-root))]
+     [(get replay :ok)
+      (= (result-state first) (result-state replay))
+      (error-code conflict)
+      (= (result-state first) (result-state conflict))
+      (error-code edge-conflict)
+      (= occupied (result-state edge-conflict))])
+   [true true
+    "tahto.semantic/root-projection-conflict" true
+    "tahto.semantic/root-edge-conflict" true])
+
+  (test/check
+   "candidate root closure rejects missing and overflowed descendants"
+   (let [state (base-installed-state)
+         missing
+         (root/candidate-closure-error state semantic-root-root [missing-root])
+         overflow-state
+         (assoc state
+                :limits
+                (assoc (get state :limits) :max-closure-objects 1))
+         overflow
+         (root/candidate-closure-error
+          overflow-state semantic-root-root [index-root])]
+     [(get missing :code)
+      (get-in missing [:details :missing])
+      (get overflow :code)])
+   ["tahto.semantic/root-closure-incomplete"
+    [missing-root]
+    "tahto.semantic/root-closure-overflow"])
+
+  (test/check
+   "index and root inputs are closed and projections contain no host authority"
+   (let [state (indexed-state)
+         index-extended
+         (index/admit-projected
+          state
+          (assoc (index-input semantic-index) :provider "memory"))
+         root-extended
+         (root/admit-projected
+          state
+          (assoc (root-input semantic-root) :provider "memory"))
+         index-result
+         (index/admit-projected (admitted-state) (index-input semantic-index))
+         root-result
+         (root/admit-projected state (root-input semantic-root))
+         index-projection (get index-result :value)
+         root-projection (get root-result :value)]
+     [(error-code index-extended)
+      (error-code root-extended)
+      (index/projection? index-projection)
+      (root/projection? root-projection)
+      (has? index-projection :provider)
+      (has? index-projection :source-handle)
+      (has? root-projection :provider)
+      (has? root-projection :source-handle)
+      (has? root-projection :value)])
+   ["tahto.semantic/index-input-invalid"
+    "tahto.semantic/root-input-invalid"
+    true true false false false false false])])
