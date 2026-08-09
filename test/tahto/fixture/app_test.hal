@@ -1,0 +1,41 @@
+(ns tahto.fixture.app-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.fixture.app :as app]
+            [tahto.fixture.two-device :as fixture]))
+
+(test/print-results
+ [(test/check
+   "the deployable fixture returns the exact reusable descriptor"
+   [(app/descriptor-value)
+    (fixture/descriptor? (app/descriptor-value))]
+   [(fixture/descriptor) true])
+
+  (test/check
+   "fixture health names only generic required host services"
+   (app/health-value)
+   {:protocol "tahto.two-device-fixture-status/1"
+    :status "ready"
+    :phase "contract"
+    :fixture-protocol "tahto.two-device-fixture/1"
+    :required-services ["hara.blob" "hara.store"]})
+
+  (test/check
+   "fixture handlers retain closed JSON and preflight responses"
+   (let [descriptor-response (app/descriptor {})
+         health-response (app/health {})
+         preflight-response (app/preflight {})]
+     [(get descriptor-response :status)
+      (get-in descriptor-response [:headers "content-type"])
+      (string? (get descriptor-response :body))
+      (get health-response :status)
+      (string? (get health-response :body))
+      (get preflight-response :status)
+      (get preflight-response :body)])
+   [200
+    "application/json; charset=utf-8"
+    true
+    200
+    true
+    204
+    ""])])
