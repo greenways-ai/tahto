@@ -1,0 +1,131 @@
+(ns tahto.fixture.two-device-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.fixture.two-device :as fixture]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]))
+
+(def reference-root
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def commit-root
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def receipt-root
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def request-root
+  "sha256:7777777777777777777777777777777777777777777777777777777777777777")
+
+(test/print-results
+ [(test/check
+   "the reusable production fixture descriptor is exact and deterministic"
+   (let [descriptor (fixture/descriptor)]
+     [(fixture/descriptor? descriptor)
+      (get descriptor :application)
+      (get-in descriptor [:payload :digest])
+      (get-in descriptor [:payload :size])
+      (get-in descriptor [:range :start])
+      (get-in descriptor [:range :end])
+      fixture/production-range-length])
+   [true
+    "fixture.transfer"
+    "sha256:aca1cd027e979588d14b877b7b0cb8585ad9fec599eb45801992ee5382b3760f"
+    1048576
+    4096
+    69632
+    65536])
+
+  (test/check
+   "device and request builders preserve the portable two-device identity law"
+   (let [record-a
+         (fixture/device-record fixture/device-a
+                                fixture/public-key-a
+                                "2026-08-08T00:00:00Z")
+         record-b
+         (fixture/device-record fixture/device-b
+                                fixture/public-key-b
+                                "2026-08-08T00:00:00Z")
+         proof
+         (fixture/request-proof
+          fixture/device-b
+          fixture/public-key-b
+          "object.read"
+          request-root
+          "nonce-read-b-0001"
+          "request-read-b-0001"
+          "2026-08-08T00:22:00Z")]
+     [(validate/device? record-a)
+      (validate/device? record-b)
+      (validate/device-enrolment?
+       (fixture/enrolment record-a fixture/approval-a))
+      (validate/device-request-verification? proof)
+      (get proof :application)
+      (get proof :namespace)
+      (get proof :collection)])
+   [true true true true
+    "fixture.transfer" "world.shared" "objects"])
+
+  (test/check
+   "fixture-owned reference, commit, head and receipt remain ordinary records"
+   (let [reference
+         (fixture/object-reference
+          reference-root
+          fixture/production-payload-digest
+          fixture/production-payload-size)
+         commit
+         (fixture/commit-record
+          commit-root
+          reference-root
+          []
+          1
+          "2026-08-08T00:10:00Z")
+         head
+         (fixture/head-record
+          [commit-root]
+          []
+          "2026-08-08T00:11:00Z")
+         receipt
+         (fixture/receipt-record
+          receipt-root
+          "head.update"
+          (model/head-key fixture/application
+                          fixture/namespace
+                          fixture/collection
+                          "main"
+                          "primary")
+          "2026-08-08T00:12:00Z")]
+     [(fixture/object-reference? reference)
+      (validate/commit? commit)
+      (validate/head? head)
+      (validate/receipt? receipt)
+      (validate/verification?
+       (fixture/record-proof model/commit-protocol commit-root commit)
+       model/commit-protocol)])
+   [true true true true true])
+
+  (test/check
+   "durable fixture records contain no body, source, request or provider authority"
+   (let [reference
+         (fixture/object-reference
+          reference-root
+          fixture/production-payload-digest
+          fixture/production-payload-size)
+         commit
+         (fixture/commit-record
+          commit-root
+          reference-root
+          []
+          1
+          "2026-08-08T00:10:00Z")
+         head
+         (fixture/head-record
+          [commit-root]
+          []
+          "2026-08-08T00:11:00Z")]
+     [(has? reference :body-handle)
+      (has? reference :source-handle)
+      (has? reference :request-context)
+      (has? reference :path)
+      (has? commit :source-handle)
+      (has? commit :provider)
+      (has? head :source-handle)
+      (has? head :credential)])
+   [false false false false false false false false])])

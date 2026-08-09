@@ -1,0 +1,197 @@
+(ns tahto.fixture.two-device
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]))
+
+;; Stable application-owned fixture vocabulary shared by the pure portable law
+;; and the production Hoplite release harness.  This namespace contains only
+;; deterministic values and record builders; it performs no host calls and
+;; holds no request, work, source, path or credential authority.
+
+(def fixture-protocol "tahto.two-device-fixture/1")
+
+(def node "node.home")
+(def application "fixture.transfer")
+(def namespace "world.shared")
+(def collection "objects")
+
+(def device-a "device.a")
+(def device-b "device.b")
+(def public-key-a "ed25519:device-a-public-key")
+(def public-key-b "ed25519:device-b-public-key")
+(def work-a "work.device-a")
+(def work-b "work.device-b")
+
+(def approval-a
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def approval-b
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+
+(def production-payload-digest
+  "sha256:aca1cd027e979588d14b877b7b0cb8585ad9fec599eb45801992ee5382b3760f")
+(def production-payload-size 1048576)
+(def production-media-type "application/octet-stream")
+(def production-range-start 4096)
+(def production-range-end 69632)
+(def production-range-length
+  (- production-range-end production-range-start))
+
+(def reference-fields
+  #{:protocol :root :digest :size :media-type :signature})
+
+(def descriptor-fields
+  #{:protocol :node :application :namespace :collection
+    :devices :payload :range})
+
+(defn signature
+  [key-id]
+  {:profile "tahto-signature/1"
+   :algorithm "ed25519"
+   :key-id key-id
+   :value "0123456789abcdef"})
+
+(defn device-record
+  [id public-key enrolled-at]
+  {:protocol model/device-protocol
+   :id id
+   :node node
+   :public-key public-key
+   :status "enrolled"
+   :enrolled-at enrolled-at})
+
+(defn enrolment
+  [record approval]
+  {:protocol validate/device-enrolment-protocol
+   :authorized true
+   :node node
+   :approval-digest approval
+   :device record})
+
+(defn revocation
+  [id revoked-at approval]
+  {:protocol validate/device-revocation-protocol
+   :authorized true
+   :node node
+   :device id
+   :revoked-at revoked-at
+   :approval-digest approval})
+
+(defn request-proof
+  [id public-key operation request-root nonce idempotency-key timestamp]
+  {:protocol validate/request-verification-protocol
+   :verified true
+   :device id
+   :public-key public-key
+   :operation operation
+   :application application
+   :namespace namespace
+   :collection collection
+   :request-digest request-root
+   :nonce nonce
+   :idempotency-key idempotency-key
+   :timestamp timestamp})
+
+(defn record-proof
+  [record-protocol digest record]
+  {:protocol validate/verification-protocol
+   :record-protocol record-protocol
+   :verified true
+   :canonical-digest digest
+   :key-id (get-in record [:signature :key-id])
+   :record record})
+
+(defn object-reference
+  [root digest size]
+  {:protocol "fixture.object-reference/1"
+   :root root
+   :digest digest
+   :size size
+   :media-type production-media-type
+   :signature (signature "key.device-a")})
+
+(defn object-reference?
+  [value]
+  (and
+   (validate/exact-record? value reference-fields #{})
+   (= "fixture.object-reference/1" (get value :protocol))
+   (model/canonical-digest? (get value :root))
+   (model/canonical-digest? (get value :digest))
+   (model/positive-integer? (get value :size))
+   (model/media-type? (get value :media-type))
+   (validate/signature? (get value :signature))))
+
+(defn commit-record
+  [root reference-root parents sequence timestamp]
+  {:protocol model/commit-protocol
+   :root root
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema "fixture.object-reference"
+   :schema-version 1
+   :device device-a
+   :parents parents
+   :objects [reference-root]
+   :tombstones []
+   :sequence sequence
+   :timestamp timestamp
+   :signature (signature "key.device-a")})
+
+(defn head-record
+  [commit-roots expected updated-at]
+  {:protocol model/head-protocol
+   :application application
+   :namespace namespace
+   :collection collection
+   :kind "main"
+   :name "primary"
+   :commits commit-roots
+   :expected expected
+   :updated-at updated-at
+   :signature (signature "key.device-a")})
+
+(defn receipt-record
+  [root action subject timestamp]
+  {:protocol model/receipt-protocol
+   :id root
+   :node node
+   :action action
+   :subject subject
+   :timestamp timestamp
+   :signature (signature "key.node-home")})
+
+(defn descriptor
+  []
+  {:protocol fixture-protocol
+   :node node
+   :application application
+   :namespace namespace
+   :collection collection
+   :devices
+   [{:id device-a :public-key public-key-a :work work-a}
+    {:id device-b :public-key public-key-b :work work-b}]
+   :payload
+   {:digest production-payload-digest
+    :size production-payload-size
+    :media-type production-media-type}
+   :range
+   {:start production-range-start
+    :end production-range-end}})
+
+(defn descriptor?
+  [value]
+  (and
+   (validate/exact-record? value descriptor-fields #{})
+   (= fixture-protocol (get value :protocol))
+   (= node (get value :node))
+   (= application (get value :application))
+   (= namespace (get value :namespace))
+   (= collection (get value :collection))
+   (= 2 (count (get value :devices)))
+   (= production-payload-digest (get-in value [:payload :digest]))
+   (= production-payload-size (get-in value [:payload :size]))
+   (= production-range-start (get-in value [:range :start]))
+   (= production-range-end (get-in value [:range :end]))
+   (= production-range-length
+      (- (get-in value [:range :end])
+         (get-in value [:range :start])))))
