@@ -29,6 +29,7 @@
     "head.read"
     "head.update"
     "semantic.read"
+    "semantic.prepare"
     "backup.pin"
     "restore.read"
     "sync.push"
