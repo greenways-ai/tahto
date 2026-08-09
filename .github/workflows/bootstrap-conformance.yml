@@ -146,12 +146,15 @@ jobs:
           grep -F '(ns tahto.sync.two-device-object-test' test/tahto/sync/two_device_object_test.hal
           grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
 
-          grep -F '## Semantic Fabric release train' README.md
+          grep -F '## Readiness matrix' README.md
+          grep -F '| Semantic value profiles | ready |' README.md
           grep -F 'service: hara.store' protocol/metadata-store.md
           grep -F '"metadataHost" "generic-installed-hara-store-no-request-selection"' src/tahto/protocol/descriptor.hal
           grep -F '"objectResponseSource" "request-scoped-transport-ready"' src/tahto/protocol/descriptor.hal
           grep -F '"portableTwoDeviceLaw" "ready"' src/tahto/protocol/descriptor.hal
-          grep -F '"semanticFabric" "planned"' src/tahto/protocol/descriptor.hal
+          grep -F '"semanticFabric" "kernel-ready:service-pending"' src/tahto/protocol/descriptor.hal
+          grep -F '"semanticRoutes" "not-exposed"' src/tahto/protocol/descriptor.hal
+          grep -F '"canonicalValueProvider" "not-installed"' src/tahto/protocol/descriptor.hal
 
           ! grep -R -F '(def native-abi' src/tahto
           ! grep -R -F ':native-abi' src/tahto
