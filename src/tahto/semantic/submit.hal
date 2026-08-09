@@ -44,13 +44,14 @@
      model/head-protocol))))
 
 (defn authorized-context?
-  [context]
+  [state context]
   (truth-value
    (and
     (validate/device-request-context? context)
     (= operation (get context :operation))
     (= "pending" (get context :status))
-    (nil? (get context :result-digest)))))
+    (nil? (get context :result-digest))
+    (model/device-enrolled? state (get context :device)))))
 
 (defn prepared-request
   [prepared]
@@ -231,7 +232,7 @@
 (defn submit-transition
   [state context input]
   (cond
-    (not (authorized-context? context))
+    (not (authorized-context? state context))
     (model/fail state
                 "tahto.semantic/submit-context-not-authorized")
 
