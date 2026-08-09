@@ -302,7 +302,7 @@
       (= wrong-coordinate-state (result-state wrong-coordinate))
       (= state (result-state missing-parent))])
    ["tahto.semantic/prepare-root-not-admitted"
-    "tahto.semantic/prepare-root-projection-invalid"
+    "tahto.semantic/prepare-root-coordinate-mismatch"
     "tahto.semantic/prepare-parent-profile-invalid"
     true true true])
 
@@ -382,6 +382,28 @@
     "tahto.semantic/prepare-device-mismatch"
     "tahto.semantic/prepare-context-not-authorized"
     true true true true])
+
+  (test/check
+   "malformed context and request values fail before nested inspection"
+   (let [state (base-state)
+         missing-context
+         (prepare/prepare state nil request)
+         missing-request
+         (prepare/prepare state context nil)
+         incomplete-request
+         (prepare/prepare
+          state context
+          {:device "device.a"})]
+     [(error-code missing-context)
+      (error-code missing-request)
+      (error-code incomplete-request)
+      (= state (result-state missing-context))
+      (= state (result-state missing-request))
+      (= state (result-state incomplete-request))])
+   ["tahto.semantic/prepare-context-not-authorized"
+    "tahto.semantic/prepare-request-invalid"
+    "tahto.semantic/prepare-request-invalid"
+    true true true])
 
   (test/check
    "request and intent records reject widened authority and fabricated signatures"
