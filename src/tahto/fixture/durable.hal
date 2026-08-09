@@ -38,8 +38,16 @@
           (if
            (not (get executed :ok))
            executed
-           (provider/prepare-compare-and-swap
-            executed commit-verification))))))))
+           (let [prepared
+                 (provider/prepare-compare-and-swap
+                  executed commit-verification)]
+             (if
+              (get prepared :ok)
+              prepared
+              (model/fail
+               state
+               (get-in prepared [:error :code])
+               (get-in prepared [:error :details])))))))))))
 
 (defn execute-mutation-with
   [state identity accepted-at transition input
