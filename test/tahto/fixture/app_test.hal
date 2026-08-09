@@ -6,19 +6,46 @@
 
 (test/print-results
  [(test/check
-   "the deployable fixture returns the exact reusable descriptor"
+   "the fixture contract returns the exact reusable descriptor"
    [(app/descriptor-value)
     (fixture/descriptor? (app/descriptor-value))]
    [(fixture/descriptor) true])
 
   (test/check
+   "the descriptor wire projection is closed and JSON-safe"
+   (app/descriptor-wire-value)
+   {"protocol" "tahto.two-device-fixture/1"
+    "node" "node.home"
+    "application" "fixture.transfer"
+    "namespace" "world.shared"
+    "collection" "objects"
+    "devices"
+    [{"id" "device.a"
+      "public-key" "ed25519:device-a-public-key"
+      "work" "work.device-a"}
+     {"id" "device.b"
+      "public-key" "ed25519:device-b-public-key"
+      "work" "work.device-b"}]
+    "payload"
+    {"digest" "sha256:aca1cd027e979588d14b877b7b0cb8585ad9fec599eb45801992ee5382b3760f"
+     "size" 1048576
+     "media-type" "application/octet-stream"}
+    "range" {"start" 4096 "end" 69632}})
+
+  (test/check
    "fixture health names only generic required host services"
-   (app/health-value)
-   {:protocol "tahto.two-device-fixture-status/1"
-    :status "ready"
-    :phase "contract"
-    :fixture-protocol "tahto.two-device-fixture/1"
-    :required-services ["hara.blob" "hara.store"]})
+   [(app/health-value)
+    (app/health-wire-value)]
+   [{:protocol "tahto.two-device-fixture-status/1"
+     :status "ready"
+     :phase "contract"
+     :fixture-protocol "tahto.two-device-fixture/1"
+     :required-services ["hara.blob" "hara.store"]}
+    {"protocol" "tahto.two-device-fixture-status/1"
+     "status" "ready"
+     "phase" "contract"
+     "fixture-protocol" "tahto.two-device-fixture/1"
+     "required-services" ["hara.blob" "hara.store"]}])
 
   (test/check
    "fixture handlers retain closed JSON and preflight responses"
