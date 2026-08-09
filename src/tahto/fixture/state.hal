@@ -1,0 +1,205 @@
+(ns tahto.fixture.state
+  (:require [std.foundation :refer :all]
+            [std.foundation.coroutine :as coroutine]
+            [tahto.fixture.two-device :as fixture]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]
+            [tahto.sync.device :as device]))
+
+;; The fixture owns the shape and meaning of its initial state. The host owns
+;; only generic durable value mechanics through `hara.store`. No provider,
+;; database path, credential, source handle or request context enters this
+;; namespace or the persisted value.
+
+(def bootstrap-protocol
+  "tahto.two-device-bootstrap/1")
+
+(def bootstrap-statuses
+  #{"initialized" "loaded"})
+
+(def bootstrap-fields
+  #{:protocol :status :snapshot})
+
+(def enrolled-at
+  "2026-08-08T00:00:00Z")
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn initial-state-result
+  []
+  (let [first
+        (device/enrol-device
+         (model/empty-state)
+         (fixture/enrolment
+          (fixture/device-record
+           fixture/device-a
+           fixture/public-key-a
+           enrolled-at)
+          fixture/approval-a))]
+    (if
+     (not (get first :ok))
+     first
+     (device/enrol-device
+      (result-state first)
+      (fixture/enrolment
+       (fixture/device-record
+        fixture/device-b
+        fixture/public-key-b
+        enrolled-at)
+       fixture/approval-b)))))
+
+(defn fixture-device?
+  [record id public-key statuses]
+  (and
+   (validate/device? record)
+   (= id (get record :id))
+   (= fixture/node (get record :node))
+   (= public-key (get record :public-key))
+   (has? statuses (get record :status))))
+
+(defn fixture-state?
+  [state]
+  (and
+   (map? state)
+   (= model/state-protocol (get state :protocol))
+   (fixture-device?
+    (model/device-record state fixture/device-a)
+    fixture/device-a
+    fixture/public-key-a
+    #{"enrolled"})
+   (fixture-device?
+    (model/device-record state fixture/device-b)
+    fixture/device-b
+    fixture/public-key-b
+    #{"enrolled" "revoked"})
+   (= fixture/device-a
+      (model/public-key-device state fixture/public-key-a))
+   (= fixture/device-b
+      (model/public-key-device state fixture/public-key-b))))
+
+(defn initial-state
+  []
+  (let [result (initial-state-result)]
+    (if (get result :ok)
+      (result-state result)
+      nil)))
+
+(defn state-verification
+  [state-digest encoded-at]
+  {:protocol provider/state-verification-protocol
+   :verified true
+   :revision 0
+   :state-digest state-digest
+   :encoded-at encoded-at})
+
+(defn bootstrap-value
+  [status snapshot]
+  {:protocol bootstrap-protocol
+   :status status
+   :snapshot snapshot})
+
+(defn bootstrap-value?
+  [value]
+  (and
+   (validate/exact-record? value bootstrap-fields #{})
+   (= bootstrap-protocol (get value :protocol))
+   (has? bootstrap-statuses (get value :status))
+   (provider/snapshot? (get value :snapshot))
+   (fixture-state? (get-in value [:snapshot :state]))))
+
+(defn accept-snapshot
+  [fallback-state status store-result]
+  (let [snapshot (provider/loaded-snapshot store-result)
+        state (if (nil? snapshot)
+                nil
+                (get snapshot :state))
+        value (if (nil? snapshot)
+                nil
+                (bootstrap-value status snapshot))]
+    (cond
+      (nil? snapshot)
+      (model/fail fallback-state
+                  "tahto.fixture/store-snapshot-missing")
+
+      (not (fixture-state? state))
+      (model/fail fallback-state
+                  "tahto.fixture/store-state-foreign")
+
+      (not (bootstrap-value? value))
+      (model/fail fallback-state
+                  "tahto.fixture/bootstrap-value-invalid")
+
+      :else
+      (model/ok state value))))
+
+(defn initialize-with
+  [state verification invoke]
+  (let [prepared
+        (provider/prepare-initialize state verification)]
+    (if
+     (not (get prepared :ok))
+     prepared
+     (let [executed
+           (provider/execute-prepared-with prepared invoke)]
+       (if
+        (not (get executed :ok))
+        executed
+        (accept-snapshot
+         state "initialized" (get executed :value)))))))
+
+(defn load-or-initialize-with
+  [verification invoke]
+  (let [initial-result (initial-state-result)]
+    (if
+     (not (get initial-result :ok))
+     initial-result
+     (let [state (result-state initial-result)
+           loaded
+           (provider/execute-prepared-with
+            (provider/prepare-load state)
+            invoke)]
+       (if
+        (not (get loaded :ok))
+        loaded
+        (if
+         (nil? (get loaded :value))
+         (initialize-with state verification invoke)
+         (accept-snapshot state "loaded" (get loaded :value))))))))
+
+(defn ^:async initialize
+  [state verification]
+  (let [prepared
+        (provider/prepare-initialize state verification)]
+    (if
+     (not (get prepared :ok))
+     prepared
+     (let [executed
+           (coroutine/await
+            (provider/execute-prepared prepared))]
+       (if
+        (not (get executed :ok))
+        executed
+        (accept-snapshot
+         state "initialized" (get executed :value)))))))
+
+(defn ^:async load-or-initialize
+  [verification]
+  (let [initial-result (initial-state-result)]
+    (if
+     (not (get initial-result :ok))
+     initial-result
+     (let [state (result-state initial-result)
+           loaded
+           (coroutine/await
+            (provider/execute-prepared
+             (provider/prepare-load state)))]
+       (if
+        (not (get loaded :ok))
+        loaded
+        (if
+         (nil? (get loaded :value))
+         (coroutine/await (initialize state verification))
+         (accept-snapshot state "loaded" (get loaded :value))))))))
