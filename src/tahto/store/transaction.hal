@@ -186,7 +186,7 @@
                     next-state
                     (get-in transition-result [:error :code])
                     (get-in transition-result [:error :details]))
-                   :transaction value)))))))))))
+                   :transaction value))))))))))
 
 (defn execute-authorized
   [state expected-revision context transition input verification]
