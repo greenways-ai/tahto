@@ -1,0 +1,318 @@
+(ns tahto.semantic.root
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.admission :as admission]
+            [tahto.semantic.index :as index]
+            [tahto.semantic.model :as semantic]
+            [tahto.store.graph :as graph]
+            [tahto.store.model :as model]))
+
+(def admission-fields
+  #{:application
+    :namespace
+    :collection
+    :root
+    :semantic-root})
+
+(def projection-fields
+  #{:root
+    :application
+    :namespace
+    :collection
+    :schema-refs
+    :index-root
+    :roots})
+
+(defn semantic-roots
+  [state]
+  (model/value-or state :semantic-roots {}))
+
+(defn semantic-root-projection
+  [state root]
+  (model/value-or (semantic-roots state) root nil))
+
+(defn projection?
+  [value]
+  (and
+   (validate/exact-record? value projection-fields #{})
+   (model/canonical-digest? (get value :root))
+   (semantic/semantic-root?
+    {:protocol semantic/semantic-root-protocol
+     :application (get value :application)
+     :namespace (get value :namespace)
+     :collection (get value :collection)
+     :schema-refs (get value :schema-refs)
+     :index-root (get value :index-root)
+     :roots (get value :roots)})))
+
+(defn projection-value
+  [root semantic-root]
+  {:root root
+   :application (get semantic-root :application)
+   :namespace (get semantic-root :namespace)
+   :collection (get semantic-root :collection)
+   :schema-refs (get semantic-root :schema-refs)
+   :index-root (get semantic-root :index-root)
+   :roots (get semantic-root :roots)})
+
+(defn insert-schema-ref
+  [ordered candidate]
+  (loop [index 0
+         output []
+         inserted false]
+    (if
+     (= index (count ordered))
+     (if inserted output (conj output candidate))
+     (let [current (nth ordered index)
+           comparison
+           (semantic/coordinate-compare
+            (semantic/schema-ref-coordinate candidate)
+            (semantic/schema-ref-coordinate current))]
+       (cond
+         (= comparison 0)
+         ordered
+
+         (and (not inserted) (< comparison 0))
+         (recur (inc index)
+                (conj (conj output candidate) current)
+                true)
+
+         :else
+         (recur (inc index)
+                (conj output current)
+                inserted))))))
+
+(defn selected-schema-refs
+  [state entries]
+  (reduce
+   (fn [schema-refs entry]
+     (let [projection
+           (admission/semantic-object-projection
+            state
+            (get entry :root))]
+       (insert-schema-ref
+        schema-refs
+        (get projection :schema-ref))))
+   []
+   entries))
+
+(defn named-root-values
+  [roots]
+  (vec
+   (map (fn [entry]
+          (get entry :root))
+        roots)))
+
+(defn first-named-root-error
+  [state application namespace root index-root entries roots]
+  (reduce
+   (fn [error named-root]
+     (if
+      (not (nil? error))
+      error
+      (let [id (get named-root :id)
+            named-root-value (get named-root :root)
+            selected (index/index-entry entries id)]
+        (cond
+          (= root named-root-value)
+          {:code "tahto.semantic/root-object-dual-use"
+           :details {:root root
+                     :name (get named-root :name)}}
+
+          (= index-root named-root-value)
+          {:code "tahto.semantic/root-index-dual-use"
+           :details {:index-root index-root
+                     :name (get named-root :name)}}
+
+          (nil? selected)
+          {:code "tahto.semantic/root-entry-not-selected"
+           :details {:name (get named-root :name)
+                     :id id
+                     :root named-root-value}}
+
+          (not (= (get selected :root)
+                  named-root-value))
+          {:code "tahto.semantic/root-entry-mismatch"
+           :details {:name (get named-root :name)
+                     :id id
+                     :expected-root (get selected :root)
+                     :received-root named-root-value}}
+
+          (not (admission/object-authorized?
+                state application namespace named-root-value))
+          {:code "tahto.semantic/root-entry-not-authorized"
+           :details {:name (get named-root :name)
+                     :id id
+                     :root named-root-value}}
+
+          :else nil))))
+   nil
+   roots))
+
+(defn root-children
+  [semantic-root]
+  (vec
+   (distinct
+    (into
+     [(get semantic-root :index-root)]
+     (named-root-values (get semantic-root :roots))))))
+
+(defn existing-edge
+  [state root]
+  (model/value-or (get state :edges) root nil))
+
+(defn candidate-state
+  [state root children]
+  (assoc state
+         :edges
+         (assoc (get state :edges) root children)))
+
+(defn candidate-closure-error
+  [state root children]
+  (let [report
+        (graph/closure-report-value
+         (candidate-state state root children)
+         [root])]
+    (cond
+      (get report :overflow)
+      {:code "tahto.semantic/root-closure-overflow"
+       :details {:root root
+                 :visited (get report :visited)}}
+
+      (not (get report :complete))
+      {:code "tahto.semantic/root-closure-incomplete"
+       :details {:root root
+                 :missing (get report :missing)}}
+
+      :else nil)))
+
+(defn fail-from
+  [state error]
+  (model/fail state
+              (get error :code)
+              (get error :details)))
+
+(defn admit-projected
+  [state input]
+  (let [application (get input :application)
+        namespace (get input :namespace)
+        collection (get input :collection)
+        root (get input :root)
+        semantic-root (get input :semantic-root)]
+    (cond
+      (not (validate/exact-record? input admission-fields #{}))
+      (model/fail state "tahto.semantic/root-input-invalid")
+
+      (not (model/identifier? application))
+      (model/fail state "tahto.semantic/application-invalid")
+
+      (not (model/identifier? namespace))
+      (model/fail state "tahto.semantic/namespace-invalid")
+
+      (not (model/identifier? collection))
+      (model/fail state "tahto.semantic/collection-invalid")
+
+      (not (model/canonical-digest? root))
+      (model/fail state "tahto.semantic/root-invalid"
+                  {:root root})
+
+      (not (semantic/semantic-root? semantic-root))
+      (model/fail state "tahto.semantic/root-value-invalid")
+
+      (not (= application (get semantic-root :application)))
+      (model/fail state "tahto.semantic/root-application-mismatch")
+
+      (not (= namespace (get semantic-root :namespace)))
+      (model/fail state "tahto.semantic/root-namespace-mismatch")
+
+      (not (= collection (get semantic-root :collection)))
+      (model/fail state "tahto.semantic/root-collection-mismatch")
+
+      (= root (get semantic-root :index-root))
+      (model/fail state "tahto.semantic/root-index-dual-use"
+                  {:root root})
+
+      (not (admission/object-installed? state root))
+      (model/fail state "tahto.semantic/root-object-missing"
+                  {:root root})
+
+      (not (admission/object-authorized?
+            state application namespace root))
+      (model/fail state "tahto.semantic/root-object-not-authorized"
+                  {:root root})
+
+      :else
+      (let [index-root (get semantic-root :index-root)
+            index-projection
+            (index/semantic-index-projection state index-root)]
+        (cond
+          (nil? index-projection)
+          (model/fail state "tahto.semantic/root-index-not-admitted"
+                      {:root index-root})
+
+          (not (admission/object-installed? state index-root))
+          (model/fail state "tahto.semantic/root-index-missing"
+                      {:root index-root})
+
+          (not (admission/object-authorized?
+                state application namespace index-root))
+          (model/fail state "tahto.semantic/root-index-not-authorized"
+                      {:root index-root})
+
+          :else
+          (let [entries (get index-projection :entries)
+                named-error
+                (first-named-root-error
+                 state
+                 application
+                 namespace
+                 root
+                 index-root
+                 entries
+                 (get semantic-root :roots))]
+            (if
+             (not (nil? named-error))
+             (fail-from state named-error)
+             (let [expected-schema-refs
+                   (selected-schema-refs state entries)]
+               (if
+                (not (= expected-schema-refs
+                        (get semantic-root :schema-refs)))
+                (model/fail state
+                            "tahto.semantic/root-schema-refs-mismatch"
+                            {:expected expected-schema-refs
+                             :received (get semantic-root :schema-refs)})
+                (let [projection
+                      (projection-value root semantic-root)
+                      children (root-children semantic-root)
+                      existing (semantic-root-projection state root)
+                      edge (existing-edge state root)]
+                  (cond
+                    (not (nil? existing))
+                    (if
+                     (and (= existing projection)
+                          (= edge children))
+                     (model/ok state projection)
+                     (model/fail state
+                                 "tahto.semantic/root-projection-conflict"
+                                 {:root root}))
+
+                    (not (nil? edge))
+                    (model/fail state
+                                "tahto.semantic/root-edge-conflict"
+                                {:root root})
+
+                    :else
+                    (let [closure-error
+                          (candidate-closure-error state root children)]
+                      (if
+                       (not (nil? closure-error))
+                       (fail-from state closure-error)
+                       (let [next-state
+                             (assoc
+                              (candidate-state state root children)
+                              :semantic-roots
+                              (assoc (semantic-roots state)
+                                     root
+                                     projection))]
+                         (model/ok next-state projection)))))))))))))))

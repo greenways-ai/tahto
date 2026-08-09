@@ -1,0 +1,306 @@
+(ns tahto.semantic.root-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.semantic.fixture :as fixture]
+            [tahto.semantic.index :as index]
+            [tahto.semantic.model :as semantic]
+            [tahto.semantic.root :as root]
+            [tahto.store.graph :as graph]
+            [tahto.store.model :as model]))
+
+(def missing-root
+  "sha256:4444444444444444444444444444444444444444444444444444444444444444")
+
+(def schema-c
+  {:protocol semantic/schema-ref-protocol
+   :schema "fixture.c"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root missing-root
+   :entry "fixture.c/spec"})
+
+(defn indexed-state
+  []
+  (let [state (fixture/admitted-state)
+        result
+        (index/admit-projected
+         state
+         (fixture/index-input fixture/semantic-index))]
+    (fixture/result-state result)))
+
+(test/print-results
+ [(test/check
+   "semantic root state is additive and absent before first admission"
+   (let [state (model/empty-state)]
+     [(has? state :semantic-roots)
+      (root/semantic-roots state)
+      (root/semantic-root-projection
+       state fixture/semantic-root-root)])
+   [false {} nil])
+
+  (test/check
+   "a semantic root selects one complete index and closes over application values"
+   (let [state (indexed-state)
+         result
+         (root/admit-projected
+          state
+          (fixture/root-input fixture/semantic-root))
+         next-state (fixture/result-state result)
+         projection (get result :value)
+         report
+         (graph/closure-report-value
+          next-state
+          [fixture/semantic-root-root])]
+     [(get result :ok)
+      projection
+      (get-in next-state [:edges fixture/semantic-root-root])
+      (root/projection? projection)
+      (get report :complete)
+      (get report :overflow)
+      (has? (into #{} (get report :visited)) fixture/value-a)
+      (has? (into #{} (get report :visited)) fixture/value-b)])
+   [true
+    {:root fixture/semantic-root-root
+     :application fixture/application
+     :namespace fixture/namespace
+     :collection fixture/collection
+     :schema-refs [fixture/schema-a fixture/schema-b]
+     :index-root fixture/index-root
+     :roots
+     [{:name "document" :id "entity/a" :root fixture/envelope-a}
+      {:name "secondary" :id "entity/b" :root fixture/envelope-b}]}
+    [fixture/index-root fixture/envelope-a fixture/envelope-b]
+    true true false true true])
+
+  (test/check
+   "semantic root admission requires an admitted authorized index"
+   (let [not-admitted-state (fixture/admitted-state)
+         not-admitted
+         (root/admit-projected
+          not-admitted-state
+          (fixture/root-input fixture/semantic-root))
+         state (indexed-state)
+         key
+         (model/namespace-key fixture/application fixture/namespace)
+         unauthorized-state
+         (assoc state
+                :references
+                (assoc (get state :references)
+                       key
+                       (model/set-remove
+                        (get-in state [:references key])
+                        fixture/index-root)))
+         unauthorized
+         (root/admit-projected
+          unauthorized-state
+          (fixture/root-input fixture/semantic-root))]
+     [(fixture/error-code not-admitted)
+      (= not-admitted-state (fixture/result-state not-admitted))
+      (fixture/error-code unauthorized)
+      (= unauthorized-state (fixture/result-state unauthorized))])
+   ["tahto.semantic/root-index-not-admitted"
+    true
+    "tahto.semantic/root-index-not-authorized"
+    true])
+
+  (test/check
+   "the input and semantic-root collection coordinates must agree exactly"
+   (let [state (indexed-state)
+         application-mismatch
+         (root/admit-projected
+          state
+          (assoc (fixture/root-input fixture/semantic-root)
+                 :application "other.app"))
+         namespace-mismatch
+         (root/admit-projected
+          state
+          (assoc (fixture/root-input fixture/semantic-root)
+                 :namespace "other"))
+         collection-mismatch
+         (root/admit-projected
+          state
+          (assoc (fixture/root-input fixture/semantic-root)
+                 :collection "other"))]
+     [(fixture/error-code application-mismatch)
+      (fixture/error-code namespace-mismatch)
+      (fixture/error-code collection-mismatch)
+      (= state (fixture/result-state application-mismatch))
+      (= state (fixture/result-state namespace-mismatch))
+      (= state (fixture/result-state collection-mismatch))])
+   ["tahto.semantic/root-application-mismatch"
+    "tahto.semantic/root-namespace-mismatch"
+    "tahto.semantic/root-collection-mismatch"
+    true true true])
+
+  (test/check
+   "named roots must be exact selections from the immutable index"
+   (let [state (indexed-state)
+         missing-selection
+         (assoc-in fixture/semantic-root
+                   [:roots 0 :id]
+                   "entity/missing")
+         missing
+         (root/admit-projected
+          state
+          (fixture/root-input missing-selection))
+         wrong-root
+         (assoc-in fixture/semantic-root
+                   [:roots 0 :root]
+                   fixture/envelope-b)
+         mismatch
+         (root/admit-projected
+          state
+          (fixture/root-input wrong-root))]
+     [(fixture/error-code missing)
+      (= state (fixture/result-state missing))
+      (fixture/error-code mismatch)
+      (= state (fixture/result-state mismatch))])
+   ["tahto.semantic/root-entry-not-selected"
+    true
+    "tahto.semantic/root-entry-mismatch"
+    true])
+
+  (test/check
+   "semantic root index and named object roles cannot reuse one immutable root"
+   (let [state (indexed-state)
+         object-dual-use
+         (root/admit-projected
+          state
+          (fixture/root-input
+           fixture/envelope-a
+           fixture/semantic-root))
+         index-dual-use-value
+         (assoc-in fixture/semantic-root
+                   [:roots 0 :root]
+                   fixture/index-root)
+         index-dual-use
+         (root/admit-projected
+          state
+          (fixture/root-input index-dual-use-value))
+         root-index-dual-use-value
+         (assoc fixture/semantic-root
+                :index-root fixture/semantic-root-root)
+         root-index-dual-use
+         (root/admit-projected
+          state
+          (fixture/root-input root-index-dual-use-value))]
+     [(fixture/error-code object-dual-use)
+      (fixture/error-code index-dual-use)
+      (fixture/error-code root-index-dual-use)])
+   ["tahto.semantic/root-object-dual-use"
+    "tahto.semantic/root-index-dual-use"
+    "tahto.semantic/root-index-dual-use"])
+
+  (test/check
+   "the semantic root schema vector is the exact derived selected set"
+   (let [state (indexed-state)
+         entries
+         (get (index/semantic-index-projection
+               state fixture/index-root)
+              :entries)
+         derived (root/selected-schema-refs state entries)
+         missing-value
+         (assoc fixture/semantic-root
+                :schema-refs [fixture/schema-a])
+         missing
+         (root/admit-projected
+          state
+          (fixture/root-input missing-value))
+         extra-value
+         (assoc fixture/semantic-root
+                :schema-refs
+                [fixture/schema-a fixture/schema-b schema-c])
+         extra
+         (root/admit-projected
+          state
+          (fixture/root-input extra-value))]
+     [derived
+      (fixture/error-code missing)
+      (= state (fixture/result-state missing))
+      (fixture/error-code extra)
+      (= state (fixture/result-state extra))])
+   [[fixture/schema-a fixture/schema-b]
+    "tahto.semantic/root-schema-refs-mismatch"
+    true
+    "tahto.semantic/root-schema-refs-mismatch"
+    true])
+
+  (test/check
+   "root replay is exact and alternate projections or graph roles conflict"
+   (let [state (indexed-state)
+         input (fixture/root-input fixture/semantic-root)
+         first (root/admit-projected state input)
+         replay
+         (root/admit-projected (fixture/result-state first) input)
+         alternate-value
+         (assoc fixture/semantic-root
+                :roots
+                [{:name "document"
+                  :id "entity/a"
+                  :root fixture/envelope-a}])
+         conflict
+         (root/admit-projected
+          (fixture/result-state first)
+          (fixture/root-input alternate-value))
+         occupied
+         (assoc state
+                :edges
+                (assoc (get state :edges)
+                       fixture/semantic-root-root
+                       [fixture/index-root]))
+         edge-conflict
+         (root/admit-projected
+          occupied
+          (fixture/root-input fixture/semantic-root))]
+     [(get replay :ok)
+      (= (fixture/result-state first)
+         (fixture/result-state replay))
+      (fixture/error-code conflict)
+      (= (fixture/result-state first)
+         (fixture/result-state conflict))
+      (fixture/error-code edge-conflict)
+      (= occupied (fixture/result-state edge-conflict))])
+   [true true
+    "tahto.semantic/root-projection-conflict" true
+    "tahto.semantic/root-edge-conflict" true])
+
+  (test/check
+   "candidate semantic root closure rejects missing and overflowed descendants"
+   (let [state (fixture/base-installed-state)
+         missing
+         (root/candidate-closure-error
+          state fixture/semantic-root-root [missing-root])
+         overflow-state
+         (assoc state
+                :limits
+                (assoc (get state :limits) :max-closure-objects 1))
+         overflow
+         (root/candidate-closure-error
+          overflow-state
+          fixture/semantic-root-root
+          [fixture/index-root])]
+     [(get missing :code)
+      (get-in missing [:details :missing])
+      (get overflow :code)])
+   ["tahto.semantic/root-closure-incomplete"
+    [missing-root]
+    "tahto.semantic/root-closure-overflow"])
+
+  (test/check
+   "root inputs are closed and durable projections contain no host authority"
+   (let [state (indexed-state)
+         input (fixture/root-input fixture/semantic-root)
+         extended
+         (root/admit-projected state (assoc input :provider "memory"))
+         admitted (root/admit-projected state input)
+         projection (get admitted :value)]
+     [(fixture/error-code extended)
+      (= state (fixture/result-state extended))
+      (root/projection? projection)
+      (has? projection :provider)
+      (has? projection :path)
+      (has? projection :source-handle)
+      (has? projection :value)])
+   ["tahto.semantic/root-input-invalid"
+    true true false false false false])])

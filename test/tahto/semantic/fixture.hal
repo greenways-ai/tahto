@@ -1,0 +1,190 @@
+(ns tahto.semantic.fixture
+  (:require [std.foundation :refer :all]
+            [tahto.semantic.admission :as admission]
+            [tahto.semantic.model :as semantic]
+            [tahto.store.model :as model]))
+
+(def application "fixture.world")
+(def namespace "world.a")
+(def collection "scene")
+
+(def package-root-a
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+(def package-root-b
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def envelope-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def envelope-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def value-a
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def value-b
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def index-root
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def semantic-root-root
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def alternate-index-root
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def alternate-root
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+
+(def schema-a
+  {:protocol semantic/schema-ref-protocol
+   :schema "fixture.a"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root-a
+   :entry "fixture.a/spec"})
+
+(def schema-b
+  {:protocol semantic/schema-ref-protocol
+   :schema "fixture.b"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root-b
+   :entry "fixture.b/spec"})
+
+(def link-a-to-b
+  {:protocol semantic/semantic-link-protocol
+   :role "peer"
+   :target-id "entity/b"
+   :target-root envelope-b})
+
+(def link-b-to-a
+  {:protocol semantic/semantic-link-protocol
+   :role "peer"
+   :target-id "entity/a"
+   :target-root envelope-a})
+
+(def object-a
+  {:protocol semantic/semantic-object-protocol
+   :id "entity/a"
+   :schema-ref schema-a
+   :value-root value-a
+   :value-size 128
+   :links [link-a-to-b]})
+
+(def object-b
+  {:protocol semantic/semantic-object-protocol
+   :id "entity/b"
+   :schema-ref schema-b
+   :value-root value-b
+   :value-size 192
+   :links [link-b-to-a]})
+
+(def semantic-index
+  {:protocol semantic/semantic-index-protocol
+   :entries
+   [{:id "entity/a" :root envelope-a}
+    {:id "entity/b" :root envelope-b}]})
+
+(def semantic-root
+  {:protocol semantic/semantic-root-protocol
+   :application application
+   :namespace namespace
+   :collection collection
+   :schema-refs [schema-a schema-b]
+   :index-root index-root
+   :roots
+   [{:name "document" :id "entity/a" :root envelope-a}
+    {:name "secondary" :id "entity/b" :root envelope-b}]})
+
+(defn result-state
+  [result]
+  (get result :state))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn install-object
+  ([state digest size]
+   (install-object state application namespace digest size))
+  ([state application-value namespace-value digest size]
+   (let [objects
+         (assoc (get state :objects)
+                digest
+                (model/object-record digest size))
+         key (model/namespace-key application-value namespace-value)
+         references
+         (assoc (get state :references)
+                key
+                (conj
+                 (model/value-or (get state :references) key #{})
+                 digest))]
+     (assoc
+      (assoc state :objects objects)
+      :references references))))
+
+(defn base-installed-state
+  []
+  (reduce
+   (fn [state entry]
+     (install-object state (get entry :digest) (get entry :size)))
+   (model/empty-state)
+   [{:digest envelope-a :size 64}
+    {:digest envelope-b :size 64}
+    {:digest value-a :size 128}
+    {:digest value-b :size 192}
+    {:digest index-root :size 96}
+    {:digest semantic-root-root :size 112}
+    {:digest alternate-index-root :size 96}
+    {:digest alternate-root :size 112}]))
+
+(defn verification-for
+  [semantic-object]
+  {:protocol semantic/canonical-value-verification-protocol
+   :verified true
+   :profile semantic/canonical-value-profile
+   :schema-ref (get semantic-object :schema-ref)
+   :value-root (get semantic-object :value-root)
+   :value-size (get semantic-object :value-size)})
+
+(defn object-input
+  [root semantic-object]
+  {:application application
+   :namespace namespace
+   :collection collection
+   :root root
+   :semantic-object semantic-object
+   :verification (verification-for semantic-object)})
+
+(defn admitted-state-with
+  [semantic-object-a semantic-object-b]
+  (let [state (base-installed-state)
+        first-result
+        (admission/admit-projected
+         state
+         (object-input envelope-a semantic-object-a))
+        second-result
+        (admission/admit-projected
+         (result-state first-result)
+         (object-input envelope-b semantic-object-b))]
+    (result-state second-result)))
+
+(defn admitted-state
+  []
+  (admitted-state-with object-a object-b))
+
+(defn index-input
+  ([value]
+   (index-input index-root value))
+  ([root value]
+   {:application application
+    :namespace namespace
+    :collection collection
+    :root root
+    :semantic-index value}))
+
+(defn root-input
+  ([value]
+   (root-input semantic-root-root value))
+  ([root value]
+   {:application application
+    :namespace namespace
+    :collection collection
+    :root root
+    :semantic-root value}))
