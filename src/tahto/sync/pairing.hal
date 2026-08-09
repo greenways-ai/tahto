@@ -1,0 +1,130 @@
+(ns tahto.sync.pairing
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.sync.device :as device]))
+
+(def invitation-protocol "tahto.pairing-invitation/1")
+(def acceptance-protocol "tahto.pairing-acceptance/1")
+(def result-protocol "tahto.pairing-result/1")
+
+(defn invitations
+  [state]
+  (or (get state :pairing-invitations) {}))
+
+(defn invitation?
+  [value]
+  (and
+   (validate/exact-record?
+    value
+    #{:protocol :id :node :token-digest :approval-digest
+      :created-at :expires-at :created-seconds :expires-seconds :status}
+    #{:consumed-at :device})
+   (= invitation-protocol (get value :protocol))
+   (model/identifier? (get value :id))
+   (model/identifier? (get value :node))
+   (model/canonical-digest? (get value :token-digest))
+   (model/canonical-digest? (get value :approval-digest))
+   (validate/timestamp? (get value :created-at))
+   (validate/timestamp? (get value :expires-at))
+   (integer? (get value :created-seconds))
+   (integer? (get value :expires-seconds))
+   (< (get value :created-seconds)
+      (get value :expires-seconds))
+   (< (compare (get value :created-at)
+               (get value :expires-at))
+      0)
+   (or (= "open" (get value :status))
+       (= "consumed" (get value :status)))))
+
+(defn issue
+  [state invitation]
+  (cond
+    (not (invitation? invitation))
+    (model/fail state "tahto.pairing/invitation-invalid")
+
+    (has? (invitations state) (get invitation :id))
+    (model/fail state "tahto.pairing/invitation-conflict")
+
+    :else
+    (model/ok
+     (assoc state
+            :pairing-invitations
+            (assoc (invitations state)
+                   (get invitation :id)
+                   invitation))
+     invitation)))
+
+(defn acceptance?
+  [value]
+  (and
+   (validate/exact-record?
+    value
+    #{:protocol :invitation :token-digest :accepted-at :accepted-seconds :device}
+    #{})
+   (= acceptance-protocol (get value :protocol))
+   (model/identifier? (get value :invitation))
+   (model/canonical-digest? (get value :token-digest))
+   (validate/timestamp? (get value :accepted-at))
+   (integer? (get value :accepted-seconds))
+   (validate/device? (get value :device))
+   (= "enrolled" (get-in value [:device :status]))))
+
+(defn accept
+  [state acceptance]
+  (let [entry
+        (get (invitations state)
+             (get acceptance :invitation))]
+    (cond
+      (not (acceptance? acceptance))
+      (model/fail state "tahto.pairing/acceptance-invalid")
+
+      (nil? entry)
+      (model/fail state "tahto.pairing/invitation-missing")
+
+      (not (= "open" (get entry :status)))
+      (model/fail state "tahto.pairing/invitation-consumed")
+
+      (not (= (get entry :token-digest)
+              (get acceptance :token-digest)))
+      (model/fail state "tahto.pairing/token-invalid")
+
+      (not (= (get entry :node)
+              (get-in acceptance [:device :node])))
+      (model/fail state "tahto.pairing/node-mismatch")
+
+      (not (< (get acceptance :accepted-seconds)
+              (get entry :expires-seconds)))
+      (model/fail state "tahto.pairing/invitation-expired")
+
+      :else
+      (let [enrolled
+            (device/enrol-device
+             state
+             {:protocol validate/device-enrolment-protocol
+              :authorized true
+              :node (get entry :node)
+              :approval-digest (get entry :approval-digest)
+              :device (get acceptance :device)})]
+        (if
+         (not (get enrolled :ok))
+         enrolled
+         (let [consumed
+               (assoc
+                (assoc entry :status "consumed")
+                :consumed-at (get acceptance :accepted-at)
+                :device (get-in acceptance [:device :id]))
+               next-state
+               (assoc
+                (get enrolled :state)
+                :pairing-invitations
+                (assoc (invitations (get enrolled :state))
+                       (get entry :id)
+                       consumed))]
+           (model/ok
+            next-state
+            {:protocol result-protocol
+             :node (get entry :node)
+             :device (get-in acceptance [:device :id])
+             :administrator false
+             :grants []})))))))

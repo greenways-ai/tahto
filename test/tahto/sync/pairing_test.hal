@@ -1,0 +1,104 @@
+(ns tahto.sync.pairing-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.store.model :as model]
+            [tahto.sync.pairing :as pairing]))
+
+(def token-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def approval-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+(defn invitation
+  []
+  {:protocol pairing/invitation-protocol
+   :id "invite.one"
+   :node "node.home"
+   :token-digest token-digest
+   :approval-digest approval-digest
+   :created-at "2026-08-09T00:00:00Z"
+   :expires-at "2026-08-09T00:05:00Z"
+   :created-seconds 1786233600
+   :expires-seconds 1786233900
+   :status "open"})
+
+(defn acceptance
+  [token accepted-at]
+  {:protocol pairing/acceptance-protocol
+   :invitation "invite.one"
+   :token-digest token
+   :accepted-at accepted-at
+   :accepted-seconds
+   (if (= accepted-at "2026-08-09T00:05:00Z")
+     1786233900
+     (if (= accepted-at "2026-08-09T00:02:00Z")
+       1786233720
+       1786233660))
+   :device
+   {:protocol model/device-protocol
+    :id "device.browser"
+    :node "node.home"
+    :public-key "p256:browser-public-key"
+    :status "enrolled"
+    :enrolled-at accepted-at}})
+
+(defn issued-state
+  []
+  (get (pairing/issue (model/empty-state) (invitation)) :state))
+
+(test/print-results
+ [(test/check
+   "pairing consumes one invitation and grants identity only"
+   (let [result
+         (pairing/accept
+          (issued-state)
+          (acceptance token-digest "2026-08-09T00:01:00Z"))]
+     [(get result :ok)
+      (get-in result [:value :administrator])
+      (get-in result [:value :grants])
+      (get-in result [:state :pairing-invitations "invite.one" :status])
+      (get-in result [:state :devices "device.browser" :status])])
+   [true false [] "consumed" "enrolled"])
+
+  (test/check
+   "an invitation is strictly one-time"
+   (let [first
+         (pairing/accept
+          (issued-state)
+          (acceptance token-digest "2026-08-09T00:01:00Z"))
+         second
+         (pairing/accept
+          (get first :state)
+          (acceptance token-digest "2026-08-09T00:02:00Z"))]
+     (get-in second [:error :code]))
+   "tahto.pairing/invitation-consumed")
+
+  (test/check
+   "the raw invitation token is never stored"
+   (let [state (issued-state)]
+     [(has? (get-in state [:pairing-invitations "invite.one"])
+            :token)
+      (get-in state [:pairing-invitations "invite.one" :token-digest])])
+   [false token-digest])
+
+  (test/check
+   "the wrong token digest is rejected without consuming the invitation"
+   (let [wrong
+         "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+         result
+         (pairing/accept
+          (issued-state)
+          (acceptance wrong "2026-08-09T00:01:00Z"))]
+     [(get-in result [:error :code])
+      (get-in result [:state :pairing-invitations "invite.one" :status])])
+   ["tahto.pairing/token-invalid" "open"])
+
+  (test/check
+   "an expired invitation is rejected"
+   (get-in
+    (pairing/accept
+     (issued-state)
+     (acceptance token-digest "2026-08-09T00:05:00Z"))
+    [:error :code])
+   "tahto.pairing/invitation-expired")])

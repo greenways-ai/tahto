@@ -1,0 +1,61 @@
+(ns tahto.node.request-auth-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [std.json :as json]
+            [tahto.node.request-auth :as auth]))
+
+(def request
+  {"protocol" auth/request-protocol
+   "device" "device.browser"
+   "publicKey" "p256:browser-public-key"
+   "algorithm" "p256-sha256"
+   "operation" "sync.pull"
+   "application" "app.example"
+   "namespace" "profile.primary"
+   "collection" "archive"
+   "timestamp" "2026-08-09T00:00:00Z"
+   "timestampSeconds" 1786233600
+   "nonce" "nonce-00000001"
+   "idempotencyKey" "request-00000001"
+   "payload" {"known" []}
+   "requestDigest"
+   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   "signature"
+   {"profile" auth/signature-protocol
+    "algorithm" "p256-sha256"
+    "keyId"
+    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    "value" "aaaaaaaaaaaaaaaa"}})
+
+(test/print-results
+ [(test/check
+   "the signed request wire shape maps to the existing verification proof"
+   (let [proof (auth/request-proof request)]
+     [(auth/request-shape? request)
+      (get proof :protocol)
+      (get proof :operation)
+      (get proof :idempotency-key)])
+   [true "tahto.request-verification/1" "sync.pull" "request-00000001"])
+
+  (test/check
+   "request timestamps are accepted only inside the closed five-minute window"
+   [(auth/fresh? request 1786233300)
+    (auth/fresh? request 1786233900)
+    (auth/fresh? request 1786233299)
+    (auth/fresh? request 1786233901)]
+   [true true false false])
+
+  (test/check
+   "the digest covers canonical unsigned request bytes only"
+   (auth/unsigned-json request)
+   (json/write
+    (dissoc
+     (dissoc request "requestDigest")
+     "signature")))
+
+  (test/check
+   "unknown or missing envelope fields fail closed"
+   [(auth/request-shape? (assoc request "remoteCode" "no"))
+    (auth/request-shape? (dissoc request "nonce"))
+    (auth/request-shape? (assoc request "algorithm" "ed25519"))]
+   [false false false])])
