@@ -33,6 +33,24 @@ enrolment and optional revocation timestamps
 
 It stores no administrator role, bearer credential, private key, provider credential or application grant. Merely pairing a device never grants management authority.
 
+## One-time pairing ceremony
+
+The CLI stores only a digest of a short-lived invitation token. Pairing prepare
+checks the open invitation and returns a closed `tahto.pairing-intent/1` binding
+its node, assigned device ID, exact P-256 public key and expiry. The intent is
+stored with the still-open invitation so a different binding cannot replace it.
+
+Greenways OS signs that exact intent with the browser-held key. The installed
+verifier projects only `tahto.pairing-intent-verification/1` evidence. Pairing
+complete requires every projected device, key and algorithm field to match the
+intent, then consumes the invitation and enrols the device in one state
+transition.
+
+An exact retry after a lost response reconstructs the same identity-only
+result from the consumed invitation and enrolled key. A different device or
+key cannot reuse the invitation. The result always contains
+`administrator false` and an empty grant vector.
+
 ## Provider proofs
 
 ### Enrolment
@@ -209,10 +227,8 @@ Pull offers include all valid current commit roots for the collection. Tahto nei
 This kernel does not yet provide:
 
 ```text
-Ed25519 or P-256 verification
-canonical request-byte construction
-clock/freshness enforcement
-SQLite or PostgreSQL transactions
+production route composition around the installed P-256 verifier
+CLI invitation persistence through the generic metadata store
 HTTP routes and Nginx backpressure
 device pairing UX
 nonce retention compaction

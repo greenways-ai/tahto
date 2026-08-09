@@ -7,6 +7,11 @@
 (def invitation-protocol "tahto.pairing-invitation/1")
 (def acceptance-protocol "tahto.pairing-acceptance/1")
 (def result-protocol "tahto.pairing-result/1")
+(def prepare-protocol "tahto.pairing-prepare/1")
+(def intent-protocol "tahto.pairing-intent/1")
+(def intent-verification-protocol
+  "tahto.pairing-intent-verification/1")
+(def complete-protocol "tahto.pairing-complete/1")
 
 (defn invitations
   [state]
@@ -19,7 +24,7 @@
     value
     #{:protocol :id :node :token-digest :approval-digest
       :created-at :expires-at :created-seconds :expires-seconds :status}
-    #{:consumed-at :device})
+    #{:consumed-at :device :intent})
    (= invitation-protocol (get value :protocol))
    (model/identifier? (get value :id))
    (model/identifier? (get value :node))
@@ -35,7 +40,9 @@
                (get value :expires-at))
       0)
    (or (= "open" (get value :status))
-       (= "consumed" (get value :status)))))
+       (= "consumed" (get value :status)))
+   (or (not (has? value :intent))
+       (map? (get value :intent)))))
 
 (defn issue
   [state invitation]
@@ -54,6 +61,99 @@
                    (get invitation :id)
                    invitation))
      invitation)))
+
+(def prepare-fields
+  #{:protocol :invitation :token-digest :device :public-key
+    :algorithm :prepared-at :prepared-seconds})
+
+(def intent-fields
+  #{:protocol :invitation :node :device :public-key
+    :algorithm :prepared-at :expires-at})
+
+(def intent-verification-fields
+  #{:protocol :verified :intent-digest :intent
+    :device :public-key :algorithm})
+
+(def complete-fields
+  #{:protocol :token-digest :accepted-at :accepted-seconds
+    :intent :intent-verification})
+
+(defn prepare-request?
+  [value]
+  (and
+   (validate/exact-record? value prepare-fields #{})
+   (= prepare-protocol (get value :protocol))
+   (model/identifier? (get value :invitation))
+   (model/canonical-digest? (get value :token-digest))
+   (model/identifier? (get value :device))
+   (validate/public-key? (get value :public-key))
+   (= "p256-sha256" (get value :algorithm))
+   (validate/timestamp? (get value :prepared-at))
+   (integer? (get value :prepared-seconds))))
+
+(defn intent?
+  [value]
+  (and
+   (validate/exact-record? value intent-fields #{})
+   (= intent-protocol (get value :protocol))
+   (model/identifier? (get value :invitation))
+   (model/identifier? (get value :node))
+   (model/identifier? (get value :device))
+   (validate/public-key? (get value :public-key))
+   (= "p256-sha256" (get value :algorithm))
+   (validate/timestamp? (get value :prepared-at))
+   (validate/timestamp? (get value :expires-at))))
+
+(defn prepare
+  [state request]
+  (let [entry (get (invitations state) (get request :invitation))
+        candidate
+        {:protocol intent-protocol
+         :invitation (get entry :id)
+         :node (get entry :node)
+         :device (get request :device)
+         :public-key (get request :public-key)
+         :algorithm (get request :algorithm)
+         :prepared-at (get request :prepared-at)
+         :expires-at (get entry :expires-at)}]
+    (cond
+      (not (prepare-request? request))
+      (model/fail state "tahto.pairing/prepare-invalid")
+
+      (nil? entry)
+      (model/fail state "tahto.pairing/invitation-missing")
+
+      (not (= "open" (get entry :status)))
+      (model/fail state "tahto.pairing/invitation-consumed")
+
+      (not (= (get entry :token-digest) (get request :token-digest)))
+      (model/fail state "tahto.pairing/token-invalid")
+
+      (not (< (get request :prepared-seconds)
+              (get entry :expires-seconds)))
+      (model/fail state "tahto.pairing/invitation-expired")
+
+      (and (has? entry :intent)
+           (= candidate (get entry :intent)))
+      (model/ok state (get entry :intent))
+
+      (has? entry :intent)
+      (model/fail state "tahto.pairing/intent-conflict")
+
+      (not (nil? (model/device-record state (get request :device))))
+      (model/fail state "tahto.pairing/device-conflict")
+
+      (not (nil? (model/public-key-device state (get request :public-key))))
+      (model/fail state "tahto.pairing/public-key-in-use")
+
+      :else
+      (model/ok
+       (assoc state
+              :pairing-invitations
+              (assoc (invitations state)
+                     (get entry :id)
+                     (assoc entry :intent candidate)))
+       candidate))))
 
 (defn acceptance?
   [value]
@@ -128,3 +228,98 @@
              :device (get-in acceptance [:device :id])
              :administrator false
              :grants []})))))))
+
+(defn intent-verification?
+  [value]
+  (and
+   (validate/exact-record? value intent-verification-fields #{})
+   (= intent-verification-protocol (get value :protocol))
+   (= true (get value :verified))
+   (model/canonical-digest? (get value :intent-digest))
+   (intent? (get value :intent))
+   (model/identifier? (get value :device))
+   (validate/public-key? (get value :public-key))
+   (= "p256-sha256" (get value :algorithm))))
+
+(defn complete-request?
+  [value]
+  (and
+   (validate/exact-record? value complete-fields #{})
+   (= complete-protocol (get value :protocol))
+   (model/canonical-digest? (get value :token-digest))
+   (validate/timestamp? (get value :accepted-at))
+   (integer? (get value :accepted-seconds))
+   (intent? (get value :intent))
+   (intent-verification? (get value :intent-verification))))
+
+(defn verification-matches-intent?
+  [intent verification]
+  (and
+   (= intent (get verification :intent))
+   (= [(get intent :device)
+       (get intent :public-key)
+       (get intent :algorithm)]
+      [(get verification :device)
+       (get verification :public-key)
+       (get verification :algorithm)])))
+
+(defn pairing-result
+  [entry]
+  {:protocol result-protocol
+   :node (get entry :node)
+   :device (get entry :device)
+   :administrator false
+   :grants []})
+
+(defn complete
+  [state request]
+  (let [intent (get request :intent)
+        verification (get request :intent-verification)
+        entry (get (invitations state) (get intent :invitation))]
+    (cond
+      (not (complete-request? request))
+      (model/fail state "tahto.pairing/complete-invalid")
+
+      (nil? entry)
+      (model/fail state "tahto.pairing/invitation-missing")
+
+      (not (= (get entry :token-digest) (get request :token-digest)))
+      (model/fail state "tahto.pairing/token-invalid")
+
+      (not (= [(get entry :id) (get entry :node) (get entry :expires-at)]
+              [(get intent :invitation)
+               (get intent :node)
+               (get intent :expires-at)]))
+      (model/fail state "tahto.pairing/intent-mismatch")
+
+      (not (= (get entry :intent) intent))
+      (model/fail state "tahto.pairing/intent-mismatch")
+
+      (not (verification-matches-intent? intent verification))
+      (model/fail state "tahto.pairing/intent-verification-mismatch")
+
+      (and (= "consumed" (get entry :status))
+           (= (get entry :device) (get intent :device))
+           (= (get intent :public-key)
+              (get (model/device-record state (get intent :device))
+                   :public-key)))
+      (model/ok state (pairing-result entry))
+
+      (not (= "open" (get entry :status)))
+      (model/fail state "tahto.pairing/invitation-consumed")
+
+      :else
+      (accept
+       state
+       {:protocol acceptance-protocol
+        :invitation (get intent :invitation)
+        :token-digest (get request :token-digest)
+        :accepted-at (get request :accepted-at)
+        :accepted-seconds (get request :accepted-seconds)
+        :device
+        {:protocol model/device-protocol
+         :id (get intent :device)
+         :node (get intent :node)
+         :public-key (get intent :public-key)
+         :status "enrolled"
+         :enrolled-at (get request :accepted-at)}}))))
