@@ -33,7 +33,7 @@
    "application/operations" "object.upload,object.read"
    "device/label" label})
 
-(defn identity
+(defn fixture-identity
   [device-id fingerprint replay-status operation]
   {:profile ingress/ingress-profile
    :subject
@@ -73,7 +73,7 @@
    "applied Hoplite ingress becomes an ordinary pending Tahto request"
    (let [state (fixture-state/initial-state)
          value
-         (identity
+         (fixture-identity
           fixture/device-a
           request-a
           "applied"
@@ -119,7 +119,7 @@
          applied
          (ingress/authorize
           initial
-          (identity
+          (fixture-identity
            fixture/device-a
            request-a
            "applied"
@@ -129,7 +129,7 @@
          replayed
          (ingress/authorize
           before
-          (identity
+          (fixture-identity
            fixture/device-a
            request-a
            "replayed"
@@ -150,7 +150,7 @@
          replayed
          (ingress/authorize
           initial
-          (identity
+          (fixture-identity
            fixture/device-a
            request-a
            "replayed"
@@ -177,7 +177,7 @@
          applied
          (ingress/authorize
           initial
-          (identity
+          (fixture-identity
            fixture/device-a
            request-a
            "applied"
@@ -186,7 +186,7 @@
          result
          (ingress/authorize
           (get applied :state)
-          (identity
+          (fixture-identity
            fixture/device-a
            request-a
            "replayed"
@@ -216,7 +216,7 @@
          result
          (ingress/authorize
           state
-          (identity
+          (fixture-identity
            fixture/device-b
            request-b
            "applied"
@@ -234,7 +234,7 @@
   (test/check
    "the bridge rejects widened identity and private wire authority"
    (let [value
-         (identity
+         (fixture-identity
           fixture/device-a
           request-a
           "applied"
@@ -263,7 +263,7 @@
   (test/check
    "proof projection uses only fixture authority and the canonical fingerprint"
    (let [value
-         (identity
+         (fixture-identity
           fixture/device-a
           request-a
           "applied"
