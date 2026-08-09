@@ -1,0 +1,297 @@
+(ns tahto.semantic.canonical-value
+  (:require [std.foundation :refer :all]
+            [std.foundation.canonical-value :as portable]
+            [std.foundation.coroutine :as coroutine]
+            [std.foundation.host :as foundation-host]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.model :as semantic]
+            [tahto.store.graph :as graph]
+            [tahto.store.model :as model]))
+
+;; This namespace binds one namespace-authorized Tahto object to Hara's generic
+;; bounded canonical-value capability. The host verifies actual bytes and HTA
+;; canonicality; Tahto accepts only the exact requested digest and installed
+;; object size, then creates schema-bound evidence for semantic admission.
+
+(def read-input-fields
+  #{:application :namespace :root :max-bytes})
+
+(def verify-input-fields
+  #{:application :namespace :root :max-bytes :schema-ref})
+
+(def host-call-fields
+  #{:service :operation :arguments})
+
+(def read-result-fields
+  #{:root :value-size :profile :value})
+
+(def verified-value-fields
+  #{:value :verification})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn object-installed?
+  [state root]
+  (not (nil? (model/stored-object state root))))
+
+(defn object-authorized?
+  [state application namespace root]
+  (truth-value
+   (graph/namespace-reachable? state application namespace root)))
+
+(defn read-input?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value read-input-fields #{})
+    (model/identifier? (get value :application))
+    (model/identifier? (get value :namespace))
+    (model/canonical-digest? (get value :root))
+    (portable/bounded-byte-count? (get value :max-bytes))
+    (<= (get value :max-bytes)
+        semantic/max-semantic-value-bytes))))
+
+(defn verify-input?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value verify-input-fields #{})
+    (read-input?
+     {:application (get value :application)
+      :namespace (get value :namespace)
+      :root (get value :root)
+      :max-bytes (get value :max-bytes)})
+    (semantic/schema-ref? (get value :schema-ref)))))
+
+(defn call-request
+  [call]
+  (get-in call [:arguments 0]))
+
+(defn host-call
+  [request]
+  {:service portable/service
+   :operation portable/operation
+   :arguments [request]})
+
+(defn host-call?
+  [value]
+  (let [arguments (get value :arguments)
+        request (call-request value)]
+    (truth-value
+     (and
+      (validate/exact-record? value host-call-fields #{})
+      (= portable/service (get value :service))
+      (= portable/operation (get value :operation))
+      (vector? arguments)
+      (= 1 (count arguments))
+      (portable/request? request)))))
+
+(defn prepare-read
+  [state input]
+  (let [application (get input :application)
+        namespace (get input :namespace)
+        root (get input :root)
+        maximum (get input :max-bytes)]
+    (cond
+      (not (read-input? input))
+      (model/fail state "tahto.canonical-value/input-invalid")
+
+      (not (object-installed? state root))
+      (model/fail state
+                  "tahto.canonical-value/object-missing"
+                  {:root root})
+
+      (not (object-authorized? state application namespace root))
+      (model/fail state
+                  "tahto.canonical-value/object-not-authorized"
+                  {:root root})
+
+      (> (model/object-size state root) maximum)
+      (model/fail state
+                  "tahto.canonical-value/maximum-exceeded"
+                  {:root root
+                   :object-size (model/object-size state root)
+                   :max-bytes maximum})
+
+      :else
+      (model/ok
+       state
+       (host-call
+        (portable/verification-request root maximum))))))
+
+(defn read-result?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value read-result-fields #{})
+    (model/canonical-digest? (get value :root))
+    (semantic/bounded-positive-integer?
+     (get value :value-size)
+     semantic/max-semantic-value-bytes)
+    (= portable/profile (get value :profile))
+    (portable/portable-value? (get value :value)))))
+
+(defn accept-read
+  [state input call result]
+  (cond
+    (not (read-input? input))
+    (model/fail state "tahto.canonical-value/input-invalid")
+
+    (not (host-call? call))
+    (model/fail state "tahto.canonical-value/call-invalid")
+
+    (not (portable/result? result))
+    (model/fail state "tahto.canonical-value/result-invalid")
+
+    (not (portable/result-matches-request?
+          (call-request call)
+          result))
+    (model/fail state "tahto.canonical-value/result-mismatch")
+
+    (portable/failure-result? result)
+    (model/fail state
+                "tahto.canonical-value/verification-failed"
+                {:root (get result :digest)
+                 :code (get result :code)})
+
+    (not (object-installed? state (get input :root)))
+    (model/fail state
+                "tahto.canonical-value/object-missing"
+                {:root (get input :root)})
+
+    (not (object-authorized?
+          state
+          (get input :application)
+          (get input :namespace)
+          (get input :root)))
+    (model/fail state
+                "tahto.canonical-value/object-not-authorized"
+                {:root (get input :root)})
+
+    (not (= (model/object-size state (get input :root))
+            (get result :byte-length)))
+    (model/fail state
+                "tahto.canonical-value/object-size-mismatch"
+                {:root (get input :root)
+                 :installed (model/object-size state (get input :root))
+                 :verified (get result :byte-length)})
+
+    :else
+    (let [accepted
+          {:root (get result :digest)
+           :value-size (get result :byte-length)
+           :profile (get result :profile)
+           :value (get result :value)}]
+      (if
+       (read-result? accepted)
+       (model/ok state accepted)
+       (model/fail state "tahto.canonical-value/read-invalid")))))
+
+(defn execute-call-with
+  [state input call invoke]
+  (if
+   (host-call? call)
+   (accept-read
+    state
+    input
+    call
+    (invoke
+     (get call :service)
+     (get call :operation)
+     (call-request call)))
+   (model/fail state "tahto.canonical-value/call-invalid")))
+
+(defn read-with
+  [state input invoke]
+  (let [prepared (prepare-read state input)]
+    (if
+     (get prepared :ok)
+     (execute-call-with
+      state input (get prepared :value) invoke)
+     prepared)))
+
+(defn ^:async read
+  [state input]
+  (let [prepared (prepare-read state input)]
+    (if
+     (get prepared :ok)
+     (let [call (get prepared :value)
+           result
+           (coroutine/await
+            (foundation-host/call
+             (get call :service)
+             (get call :operation)
+             (call-request call)))]
+       (accept-read state input call result))
+     prepared)))
+
+(defn verification-value
+  [read-value schema-ref]
+  {:protocol semantic/canonical-value-verification-protocol
+   :verified true
+   :profile semantic/canonical-value-profile
+   :schema-ref schema-ref
+   :value-root (get read-value :root)
+   :value-size (get read-value :value-size)})
+
+(defn verified-value?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value verified-value-fields #{})
+    (portable/portable-value? (get value :value))
+    (semantic/canonical-value-verification?
+     (get value :verification)))))
+
+(defn accept-verified
+  [state schema-ref read-value]
+  (let [value
+        {:value (get read-value :value)
+         :verification
+         (verification-value read-value schema-ref)}]
+    (if
+     (verified-value? value)
+     (model/ok state value)
+     (model/fail state
+                 "tahto.canonical-value/translation-invalid"))))
+
+(defn verify-with
+  [state input invoke]
+  (if
+   (not (verify-input? input))
+   (model/fail state "tahto.canonical-value/verify-input-invalid")
+   (let [read-input
+         {:application (get input :application)
+          :namespace (get input :namespace)
+          :root (get input :root)
+          :max-bytes (get input :max-bytes)}
+         read-result (read-with state read-input invoke)]
+     (if
+      (get read-result :ok)
+      (accept-verified
+       state
+       (get input :schema-ref)
+       (get read-result :value))
+      read-result))))
+
+(defn ^:async verify
+  [state input]
+  (if
+   (not (verify-input? input))
+   (model/fail state "tahto.canonical-value/verify-input-invalid")
+   (let [read-input
+         {:application (get input :application)
+          :namespace (get input :namespace)
+          :root (get input :root)
+          :max-bytes (get input :max-bytes)}
+         read-result
+         (coroutine/await (read state read-input))]
+     (if
+      (get read-result :ok)
+      (accept-verified
+       state
+       (get input :schema-ref)
+       (get read-result :value))
+      read-result))))
