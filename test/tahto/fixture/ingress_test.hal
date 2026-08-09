@@ -145,6 +145,40 @@
    [true true true true request-a true])
 
   (test/check
+   "replay fails closed when only half of the Tahto ledger remains"
+   (let [initial (fixture-state/initial-state)
+         applied
+         (ingress/authorize
+          initial
+          (fixture-identity
+           fixture/device-a
+           request-a
+           "applied"
+           "object.upload")
+          accepted-at)
+         damaged
+         (update
+          (get applied :state)
+          :request-nonces
+          dissoc
+          (model/nonce-key fixture/device-a request-a))
+         replayed
+         (ingress/authorize
+          damaged
+          (fixture-identity
+           fixture/device-a
+           request-a
+           "replayed"
+           "object.upload")
+          accepted-at)]
+     [(get replayed :ok)
+      (error-code replayed)
+      (= damaged (get replayed :state))])
+   [false
+    "tahto.fixture/replay-state-incomplete"
+    true])
+
+  (test/check
    "a replay can recover when Hoplite admitted before Tahto state was written"
    (let [initial (fixture-state/initial-state)
          replayed
@@ -280,7 +314,7 @@
       (has? proof :database-path)])
    [true
     "device.a"
-    "p256:fixture-device-a-public-key"
+    "ed25519:device-a-public-key"
     request-a
     request-a
     request-a
