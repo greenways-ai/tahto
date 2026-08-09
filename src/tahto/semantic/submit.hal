@@ -311,13 +311,13 @@
                         "tahto.semantic/submit-result-invalid")))))))))))))))
 
 (defn execute
-  [state proof input result-verification]
+  [state expected-revision proof input result-verification]
   (if
    (not (input? input))
    (model/fail state "tahto.semantic/submit-input-invalid")
    (transaction/execute
     state
-    (get-in input [:prepared :expected-metadata-revision])
+    expected-revision
     proof
     submit-transition
     input
