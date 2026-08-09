@@ -189,10 +189,19 @@
                  :replayed true))
          authorized))
 
-      (nil? existing)
+      (or (nil? existing)
+          (nil? nonce-entry))
       (model/fail
        state
        "tahto.fixture/replay-state-incomplete"
+       {:device device-id
+        :request-digest fingerprint})
+
+      (not (= fingerprint
+              (get nonce-entry :request-digest)))
+      (model/fail
+       state
+       "tahto.fixture/replay-conflict"
        {:device device-id
         :request-digest fingerprint})
 
