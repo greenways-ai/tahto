@@ -12,7 +12,7 @@
 
 (def node "node.home")
 (def application "fixture.transfer")
-(def namespace "world.shared")
+(def fixture-namespace "world.shared")
 (def collection "objects")
 
 (def device-a "device.a")
@@ -84,7 +84,7 @@
    :public-key public-key
    :operation operation
    :application application
-   :namespace namespace
+   :namespace fixture-namespace
    :collection collection
    :request-digest request-root
    :nonce nonce
@@ -125,7 +125,7 @@
   {:protocol model/commit-protocol
    :root root
    :application application
-   :namespace namespace
+   :namespace fixture-namespace
    :collection collection
    :schema "fixture.object-reference"
    :schema-version 1
@@ -141,7 +141,7 @@
   [commit-roots expected updated-at]
   {:protocol model/head-protocol
    :application application
-   :namespace namespace
+   :namespace fixture-namespace
    :collection collection
    :kind "main"
    :name "primary"
@@ -165,7 +165,7 @@
   {:protocol fixture-protocol
    :node node
    :application application
-   :namespace namespace
+   :namespace fixture-namespace
    :collection collection
    :devices
    [{:id device-a :public-key public-key-a :work work-a}
@@ -185,7 +185,7 @@
    (= fixture-protocol (get value :protocol))
    (= node (get value :node))
    (= application (get value :application))
-   (= namespace (get value :namespace))
+   (= fixture-namespace (get value :namespace))
    (= collection (get value :collection))
    (= 2 (count (get value :devices)))
    (= production-payload-digest (get-in value [:payload :digest]))

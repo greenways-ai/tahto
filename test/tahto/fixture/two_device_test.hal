@@ -87,7 +87,7 @@
           receipt-root
           "head.update"
           (model/head-key fixture/application
-                          fixture/namespace
+                          fixture/fixture-namespace
                           fixture/collection
                           "main"
                           "primary")
