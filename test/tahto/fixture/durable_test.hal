@@ -1,0 +1,326 @@
+(ns tahto.fixture.durable-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.fixture.durable :as durable]
+            [tahto.fixture.ingress :as ingress]
+            [tahto.fixture.state :as fixture-state]
+            [tahto.fixture.two-device :as fixture]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]
+            [tahto.store.transaction :as transaction]
+            [tahto.store.vault :as vault]))
+
+(def request-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+(def result-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+(def state-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+
+(def plan-digest
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+
+(def lock-digest
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+(def accepted-at
+  "2026-08-09T05:10:00Z")
+
+(def completed-at
+  "2026-08-09T05:11:00Z")
+
+(def quota-bytes 2147483648)
+
+(defn identity
+  [replay-status]
+  {:profile ingress/ingress-profile
+   :subject "profile.primary"
+   :realm "application"
+   :device-id fixture/device-a
+   :key-id "key.device-a"
+   :application fixture/application
+   :application-version "1.0.0"
+   :publisher "greenways.example"
+   :lock-digest lock-digest
+   :namespace fixture/fixture-namespace
+   :collection fixture/collection
+   :operation "object.upload"
+   :content-digest fixture/production-payload-digest
+   :timestamp 1786252200
+   :replay-status replay-status
+   :request-fingerprint request-digest
+   :admitted-at 1786252201
+   :claims
+   {"application/id" fixture/application
+    "application/version" "1.0.0"
+    "application/publisher" "greenways.example"
+    "application/lock-digest" lock-digest
+    "application/namespace" fixture/fixture-namespace
+    "application/collection" fixture/collection
+    "application/operations" "object.upload,object.read"
+    "device/label" "Device-A"}})
+
+(def result-verification
+  {:protocol transaction/result-verification-protocol
+   :verified true
+   :operation "object.upload"
+   :request-digest request-digest
+   :outcome "ok"
+   :result-digest result-digest
+   :completed-at completed-at})
+
+(def commit-verification
+  {:protocol provider/commit-verification-protocol
+   :verified true
+   :expected-revision 0
+   :revision 1
+   :plan-digest plan-digest
+   :request-digest request-digest
+   :result-digest result-digest
+   :state-digest state-digest
+   :completed-at completed-at})
+
+(defn set-quota-transition
+  [state context value]
+  (vault/set-quota
+   state
+   {:application (get context :application)
+    :namespace (get context :namespace)
+    :quota-bytes value}))
+
+(defn store-result
+  [status request]
+  {:protocol provider/result-protocol
+   :operation (get request :operation)
+   :status status
+   :revision (get request :revision)
+   :receipt-key (get request :receipt-key)
+   :receipt (get request :receipt)})
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "a signed applied mutation prepares one exact generic hara.store CAS"
+   (let [initial (fixture-state/initial-state)
+         prepared
+         (durable/prepare-mutation
+          initial
+          (identity "applied")
+          accepted-at
+          set-quota-transition
+          quota-bytes
+          result-verification
+          commit-verification)
+         call (get prepared :value)
+         request (provider/call-request call)
+         state (get prepared :state)]
+     [(get prepared :ok)
+      (provider/host-call? call)
+      (get call :service)
+      (get call :operation)
+      (get request :expected-revision)
+      (get request :revision)
+      (get request :receipt-key)
+      (get request :value-digest)
+      (get-in request [:receipt :request-digest])
+      (get-in request [:receipt :result-digest])
+      (transaction/current-revision state)
+      (model/namespace-quota
+       state fixture/application fixture/fixture-namespace)
+      (has? request :database-path)
+      (has? request :driver)
+      (has? request :credential)])
+   [true
+    true
+    "hara.store"
+    "compare-and-swap"
+    0
+    1
+    plan-digest
+    state-digest
+    request-digest
+    result-digest
+    1
+    quota-bytes
+    false
+    false
+    false])
+
+  (test/check
+   "the injected generic store accepts the prepared mutation without widening authority"
+   (let [initial (fixture-state/initial-state)
+         result
+         (durable/execute-mutation-with
+          initial
+          (identity "applied")
+          accepted-at
+          set-quota-transition
+          quota-bytes
+          result-verification
+          commit-verification
+          (fn [service operation request]
+            (if
+             (and
+              (= "hara.store" service)
+              (= "compare-and-swap" operation)
+              (provider/provider-request? request))
+             (store-result "applied" request)
+             nil)))
+         state (get result :state)
+         value (get result :value)]
+     [(get result :ok)
+      (transaction/current-revision state)
+      (model/namespace-quota
+       state fixture/application fixture/fixture-namespace)
+      (get value :operation)
+      (get value :status)
+      (get value :receipt-key)
+      (provider/receipt-payload?
+       (get value :receipt))])
+   [true
+    1
+    quota-bytes
+    "compare-and-swap"
+    "applied"
+    plan-digest
+    true])
+
+  (test/check
+   "a completed signed replay prepares only generic receipt recovery"
+   (let [initial (fixture-state/initial-state)
+         applied
+         (durable/execute-mutation-with
+          initial
+          (identity "applied")
+          accepted-at
+          set-quota-transition
+          quota-bytes
+          result-verification
+          commit-verification
+          (fn [service operation request]
+            (if
+             (= "compare-and-swap" operation)
+             (store-result "applied" request)
+             nil)))
+         state (get applied :state)
+         replay
+         (durable/prepare-replay
+          state
+          (identity "replayed")
+          accepted-at
+          plan-digest)
+         call (get replay :value)
+         request (provider/call-request call)]
+     [(get applied :ok)
+      (get replay :ok)
+      (= state (get replay :state))
+      (get call :service)
+      (get call :operation)
+      (get request :receipt-key)
+      (count (keys request))
+      (has? request :value)
+      (has? request :database-path)])
+   [true
+    true
+    true
+    "hara.store"
+    "receipt"
+    plan-digest
+    3
+    false
+    false])
+
+  (test/check
+   "receipt recovery translates the exact prior opaque evidence"
+   (let [initial (fixture-state/initial-state)
+         prepared
+         (durable/prepare-mutation
+          initial
+          (identity "applied")
+          accepted-at
+          set-quota-transition
+          quota-bytes
+          result-verification
+          commit-verification)
+         commit-request
+         (provider/call-request (get prepared :value))
+         committed
+         (provider/accept-result
+          (get prepared :state)
+          (get prepared :value)
+          (store-result "applied" commit-request))
+         replayed
+         (durable/execute-replay-with
+          (get committed :state)
+          (identity "replayed")
+          accepted-at
+          plan-digest
+          (fn [service operation request]
+            (if
+             (= "receipt" operation)
+             {:protocol provider/result-protocol
+              :operation "receipt"
+              :status "replayed"
+              :revision 1
+              :receipt-key plan-digest
+              :receipt (get commit-request :receipt)}
+             nil)))]
+     [(get committed :ok)
+      (get replayed :ok)
+      (= (get committed :state)
+         (get replayed :state))
+      (get-in replayed [:value :operation])
+      (get-in replayed [:value :status])
+      (get-in replayed [:value :receipt-key])
+      (provider/receipt-payload?
+       (get-in replayed [:value :receipt]))])
+   [true
+    true
+    true
+    "receipt"
+    "replayed"
+    plan-digest
+    true])
+
+  (test/check
+   "mismatched commit evidence fails before a host call is exposed"
+   (let [initial (fixture-state/initial-state)
+         result
+         (durable/prepare-mutation
+          initial
+          (identity "applied")
+          accepted-at
+          set-quota-transition
+          quota-bytes
+          result-verification
+          (assoc commit-verification
+                 :result-digest plan-digest))]
+     [(get result :ok)
+      (error-code result)
+      (= initial (get result :state))
+      (has? result :value)])
+   [false
+    "tahto.provider/commit-verification-invalid"
+    true
+    false])
+
+  (test/check
+   "pending requests cannot be misrepresented as completed receipt replays"
+   (let [initial (fixture-state/initial-state)
+         result
+         (durable/prepare-replay
+          initial
+          (identity "replayed")
+          accepted-at
+          plan-digest)]
+     [(get result :ok)
+      (error-code result)
+      (= initial (get result :state))])
+   [false
+    "tahto.fixture/replay-not-completed"
+    true])])
