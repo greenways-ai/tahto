@@ -60,9 +60,7 @@ jobs:
           test -f test/tahto/store/memory_store_test.hal
           test -f test/tahto/semantic/model_test.hal
           test -f test/tahto/semantic/admission_test.hal
-          test -f test/tahto/semantic/fixture.hal
-          test -f test/tahto/semantic/index_test.hal
-          test -f test/tahto/semantic/root_test.hal
+          test -f test/tahto/semantic/index_root_test.hal
           test -f test/tahto/sync/device_test.hal
           test -f test/tahto/sync/session_test.hal
           test -f test/tahto/sync/two_device_object_test.hal
@@ -103,8 +101,7 @@ jobs:
           grep -F '"tahto.semantic-root/1"' src/tahto/semantic/model.hal
           grep -F '(ns tahto.semantic.model-test' test/tahto/semantic/model_test.hal
           grep -F '(ns tahto.semantic.admission-test' test/tahto/semantic/admission_test.hal
-          grep -F '(ns tahto.semantic.index-test' test/tahto/semantic/index_test.hal
-          grep -F '(ns tahto.semantic.root-test' test/tahto/semantic/root_test.hal
+          grep -F '(ns tahto.semantic.index-root-test' test/tahto/semantic/index_root_test.hal
           grep -F '(ns tahto.sync.two-device-object-test' test/tahto/sync/two_device_object_test.hal
           grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
 
