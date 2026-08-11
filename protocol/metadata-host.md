@@ -60,8 +60,8 @@ native library.
 ## Generic request profile
 
 ```text
-request protocol: hoplite.store-request/1
-result protocol: hoplite.store-result/1
+request protocol: hoplite.store-request/0-alpha
+result protocol: hoplite.store-result/0-alpha
 operations:
   load
   initialize
@@ -85,7 +85,7 @@ transaction meaning, authorization, merge policy or receipt fields.
 After HAL validates canonical state-encoding evidence, it prepares:
 
 ```clojure
-{:protocol "hoplite.store-request/1"
+{:protocol "hoplite.store-request/0-alpha"
  :operation "initialize"
  :revision 1
  :value tahto-state
@@ -103,14 +103,14 @@ HAL validates the complete TAHTO transaction plan and canonical encoding proof
 before preparing:
 
 ```clojure
-{:protocol "hoplite.store-request/1"
+{:protocol "hoplite.store-request/0-alpha"
  :operation "compare-and-swap"
  :expected-revision 0
  :revision 1
  :value tahto-state
  :value-digest "sha256:..."
  :receipt-key "sha256:plan..."
- :receipt {:protocol "tahto.metadata-receipt-payload/1"
+ :receipt {:protocol "tahto.metadata-receipt-payload/0-alpha"
            :revision 1
            :plan-digest "sha256:plan..."
            :request-digest "sha256:request..."

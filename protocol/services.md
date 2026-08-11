@@ -1,6 +1,6 @@
 # Tahto services and durable jobs, version 1
 
-TAHTO-6 adds deterministic state transitions around the stable `tahto.service/1` and `tahto.job/1` records defined by the Tahto core schema.
+TAHTO-6 adds deterministic state transitions around the stable `tahto.service/0-alpha` and `tahto.job/0-alpha` records defined by the Tahto core schema.
 
 ## Authority boundary
 

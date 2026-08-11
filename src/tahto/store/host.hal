@@ -2,8 +2,8 @@
   (:require [std.foundation :refer :all]
             [tahto.store.model :as model]))
 
-(def effect-protocol "tahto.store.host-effect/1")
-(def result-protocol "tahto.store.host-result/1")
+(def effect-protocol "tahto.store.host-effect/0-alpha")
+(def result-protocol "tahto.store.host-result/0-alpha")
 
 (def operations
   #{"upload/open"

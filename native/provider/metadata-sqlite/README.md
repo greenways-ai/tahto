@@ -1,6 +1,6 @@
 # Tahto SQLite metadata provider
 
-This crate implements `tahto-metadata-store/1` as a local SQLite compare-and-swap store.
+This crate implements `tahto-metadata-store/0-alpha` as a local SQLite compare-and-swap store.
 
 It persists one canonical HTA metadata snapshot and an append-only receipt row for each committed TAHTO-7 plan. Snapshot replacement and receipt insertion occur in one `BEGIN IMMEDIATE` transaction.
 

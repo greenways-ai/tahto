@@ -4,8 +4,8 @@
             [std.foundation.string :as string]
             [tahto.protocol.validate :as validate]))
 
-(def request-protocol "tahto.device-request/1")
-(def signature-protocol "tahto-signature/1")
+(def request-protocol "tahto.device-request/0-alpha")
+(def signature-protocol "tahto-signature/0-alpha")
 (def maximum-clock-skew-seconds 300)
 
 (def request-fields

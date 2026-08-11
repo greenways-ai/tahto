@@ -7,7 +7,7 @@
             [tahto.store.model :as model]
             [tahto.sync.pairing :as pairing]))
 
-(def prepare-result-protocol "tahto.pairing-prepare-result/1")
+(def prepare-result-protocol "tahto.pairing-prepare-result/0-alpha")
 
 (def issue-wire-fields
   #{"protocol" "id" "node" "tokenDigest" "approvalDigest"

@@ -10,7 +10,7 @@ Tahto domain semantics.
 
 ```text
 abi/metadata-store
-  superseded tahto-metadata-store/1 contract retained for comparison
+  superseded tahto-metadata-store/0-alpha contract retained for comparison
 
 provider/metadata-sqlite
   original SQLite durability experiment retained for parity fixtures

@@ -125,16 +125,16 @@ jobs:
           grep -F ':semantic-objects' src/tahto/semantic/admission.hal
           grep -F ':semantic-indexes' src/tahto/semantic/index.hal
           grep -F ':semantic-roots' src/tahto/semantic/root.hal
-          grep -F '"tahto.schema-ref/1"' src/tahto/semantic/model.hal
-          grep -F '"tahto.canonical-value-verification/1"' src/tahto/semantic/model.hal
-          grep -F '"tahto.semantic-link/1"' src/tahto/semantic/model.hal
-          grep -F '"tahto.semantic-object/1"' src/tahto/semantic/model.hal
-          grep -F '"tahto.semantic-index/1"' src/tahto/semantic/model.hal
-          grep -F '"tahto.semantic-root/1"' src/tahto/semantic/model.hal
-          grep -F '"tahto.semantic-commit-intent/1"' src/tahto/semantic/prepare.hal
-          grep -F '"tahto.semantic-head-intent/1"' src/tahto/semantic/prepare.hal
-          grep -F '"tahto.semantic-prepare-result/1"' src/tahto/semantic/prepare.hal
-          grep -F '"tahto.semantic-submit-result/1"' src/tahto/semantic/submit.hal
+          grep -F '"tahto.schema-ref/0-alpha"' src/tahto/semantic/model.hal
+          grep -F '"tahto.canonical-value-verification/0-alpha"' src/tahto/semantic/model.hal
+          grep -F '"tahto.semantic-link/0-alpha"' src/tahto/semantic/model.hal
+          grep -F '"tahto.semantic-object/0-alpha"' src/tahto/semantic/model.hal
+          grep -F '"tahto.semantic-index/0-alpha"' src/tahto/semantic/model.hal
+          grep -F '"tahto.semantic-root/0-alpha"' src/tahto/semantic/model.hal
+          grep -F '"tahto.semantic-commit-intent/0-alpha"' src/tahto/semantic/prepare.hal
+          grep -F '"tahto.semantic-head-intent/0-alpha"' src/tahto/semantic/prepare.hal
+          grep -F '"tahto.semantic-prepare-result/0-alpha"' src/tahto/semantic/prepare.hal
+          grep -F '"tahto.semantic-submit-result/0-alpha"' src/tahto/semantic/submit.hal
           grep -F '(transaction/execute' src/tahto/semantic/submit.hal
           grep -F '(provider/prepare-compare-and-swap' src/tahto/semantic/submit.hal
           grep -F '(ns tahto.semantic.model-test' test/tahto/semantic/model_test.hal
@@ -162,7 +162,7 @@ jobs:
           ! grep -R -F '(def native-abi' src/tahto
           ! grep -R -F ':native-abi' src/tahto
           ! grep -R -F '(def host-service "tahto.' src/tahto
-          ! grep -R -F '"tahto-metadata-store/1"' src/tahto
+          ! grep -R -F '"tahto-metadata-store/0-alpha"' src/tahto
           ! grep -R -F ':source-handle' src/tahto/semantic
           ! grep -R -F ':provider' src/tahto/semantic
           ! grep -R -F ':path' src/tahto/semantic

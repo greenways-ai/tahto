@@ -245,7 +245,7 @@
     (provider/receipt-payload?
      (assoc payload :status "applied"))]
    [true
-    "tahto.metadata-receipt-payload/1"
+    "tahto.metadata-receipt-payload/0-alpha"
     plan-digest
     nil])
 
@@ -275,7 +275,7 @@
     state
     state-digest
     plan-digest
-    "tahto.metadata-receipt-payload/1"])
+    "tahto.metadata-receipt-payload/0-alpha"])
 
   (test/check
    "a completed idempotent error uses the same generic durable boundary"

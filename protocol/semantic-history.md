@@ -2,14 +2,14 @@
 
 ## Decision
 
-T-SF-04 binds admitted `tahto.semantic-root/1` objects to the existing immutable
+T-SF-04 binds admitted `tahto.semantic-root/0-alpha` objects to the existing immutable
 history model. It does not introduce a semantic commit, semantic head or second
 ledger.
 
 ```text
 admitted semantic root
-  -> ordinary tahto.commit/1
-  -> ordinary tahto.head/1
+  -> ordinary tahto.commit/0-alpha
+  -> ordinary tahto.head/0-alpha
   -> existing divergence, CAS, replay and durable store plan
 ```
 
@@ -18,7 +18,7 @@ admitted semantic root
 A semantic revision is an unchanged commit:
 
 ```clojure
-{:protocol "tahto.commit/1"
+{:protocol "tahto.commit/0-alpha"
  :application "fixture.world"
  :namespace "world.a"
  :collection "scene"
@@ -100,7 +100,7 @@ history mutation.
 
 ## Compatibility
 
-- `tahto.commit/1` and `tahto.head/1` bytes are unchanged;
+- `tahto.commit/0-alpha` and `tahto.head/0-alpha` bytes are unchanged;
 - signing contexts and verification records are unchanged;
 - ordinary non-semantic history remains valid;
 - existing sequence, closure, head, receipt and provider tests remain authoritative;

@@ -9,7 +9,7 @@
 ;; present.
 
 (def fixture-status-protocol
-  "tahto.two-device-fixture-status/1")
+  "tahto.two-device-fixture-status/0-alpha")
 
 (def public-headers
   {"content-type" "application/json; charset=utf-8"

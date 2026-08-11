@@ -19,11 +19,11 @@ The atomic coordinator composes those logical steps before any provider commit.
 ## Protocols
 
 ```text
-tahto.metadata-transaction/1
-tahto.transaction-result-verification/1
+tahto.metadata-transaction/0-alpha
+tahto.transaction-result-verification/0-alpha
 ```
 
-`tahto.metadata-transaction/1` is the returned commit plan. It records:
+`tahto.metadata-transaction/0-alpha` is the returned commit plan. It records:
 
 ```text
 expected revision
@@ -35,7 +35,7 @@ canonical result or error value
 whether the request was replayed
 ```
 
-`tahto.transaction-result-verification/1` is produced by an installed canonical-result provider. It binds:
+`tahto.transaction-result-verification/0-alpha` is produced by an installed canonical-result provider. It binds:
 
 ```text
 operation

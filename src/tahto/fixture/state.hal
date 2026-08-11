@@ -13,7 +13,7 @@
 ;; namespace or the persisted value.
 
 (def bootstrap-protocol
-  "tahto.two-device-bootstrap/1")
+  "tahto.two-device-bootstrap/0-alpha")
 
 (def bootstrap-statuses
   #{"initialized" "loaded"})

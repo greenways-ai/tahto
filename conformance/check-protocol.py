@@ -14,18 +14,18 @@ VALID_PATH = ROOT / "conformance" / "fixtures" / "protocol" / "valid-core-record
 INVALID_PATH = ROOT / "conformance" / "fixtures" / "protocol" / "invalid-core-records.json"
 
 EXPECTED_PROTOCOLS = {
-    "tahto.node/1",
-    "tahto.device/1",
-    "tahto.application/1",
-    "tahto.namespace/1",
-    "tahto.collection/1",
-    "tahto.object/1",
-    "tahto.commit/1",
-    "tahto.head/1",
-    "tahto.backup/1",
-    "tahto.receipt/1",
-    "tahto.service/1",
-    "tahto.job/1",
+    "tahto.node/0-alpha",
+    "tahto.device/0-alpha",
+    "tahto.application/0-alpha",
+    "tahto.namespace/0-alpha",
+    "tahto.collection/0-alpha",
+    "tahto.object/0-alpha",
+    "tahto.commit/0-alpha",
+    "tahto.head/0-alpha",
+    "tahto.backup/0-alpha",
+    "tahto.receipt/0-alpha",
+    "tahto.service/0-alpha",
+    "tahto.job/0-alpha",
 }
 
 EXPECTED_MODES = {
@@ -106,7 +106,7 @@ def validate(schema_root: dict, fragment: dict, value, path: str = "$") -> None:
             try:
                 validate(schema_root, consequence, value, path)
             except ValidationError as error:
-                if value.get("protocol") == "tahto.collection/1":
+                if value.get("protocol") == "tahto.collection/0-alpha":
                     fail(path, f"derived collection constraint: {error}")
                 raise
 
@@ -225,10 +225,10 @@ def check_schema_contract(schema: dict) -> dict[str, dict]:
                 f"application-specific fields present: {sorted(overlap)}",
             )
 
-    commit_required = set(records["tahto.commit/1"]["required"])
+    commit_required = set(records["tahto.commit/0-alpha"]["required"])
     if commit_required != COMMIT_FIELDS:
         fail(
-            "$schema.tahto.commit/1",
+            "$schema.tahto.commit/0-alpha",
             "commit contract changed; "
             f"expected={sorted(COMMIT_FIELDS)}, actual={sorted(commit_required)}",
         )
@@ -249,7 +249,7 @@ def check_valid_fixtures(schema: dict, records: dict[str, dict]) -> None:
             fail(f"$valid[{index}]", f"duplicate fixture protocol: {protocol}")
         validate(schema, records[protocol], record, f"$valid[{index}]")
         seen.add(protocol)
-        if protocol == "tahto.head/1" and len(record["commits"]) > 1:
+        if protocol == "tahto.head/0-alpha" and len(record["commits"]) > 1:
             divergent_head = True
 
     if seen != EXPECTED_PROTOCOLS:

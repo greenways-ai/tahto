@@ -54,10 +54,10 @@ This keeps every semantic envelope bounded and prevents functions, cycles,
 native handles, callbacks or host objects from entering through an inline value
 field.
 
-## `tahto.schema-ref/1`
+## `tahto.schema-ref/0-alpha`
 
 ```clojure
-{:protocol "tahto.schema-ref/1"
+{:protocol "tahto.schema-ref/0-alpha"
  :schema "greenways.world.entity"
  :schema-version 1
  :package "hara:greenways/world-specs"
@@ -83,12 +83,12 @@ mutable names such as `latest` are invalid semantic evidence.
 There is no URL, branch, registry origin, path, provider, credential or command.
 The package root is mandatory.
 
-## `tahto.canonical-value-verification/1`
+## `tahto.canonical-value-verification/0-alpha`
 
 ```clojure
-{:protocol "tahto.canonical-value-verification/1"
+{:protocol "tahto.canonical-value-verification/0-alpha"
  :verified true
- :profile "hara.hta/1"
+ :profile "hara.hta/0-alpha"
  :schema-ref {...}
  :value-root "sha256:..."
  :value-size 512}
@@ -105,10 +105,10 @@ The initial value-size ceiling is 1 MiB. Larger media or dense engine data must
 remain in specialist object formats and may be linked from a bounded semantic
 value.
 
-## `tahto.semantic-link/1`
+## `tahto.semantic-link/0-alpha`
 
 ```clojure
-{:protocol "tahto.semantic-link/1"
+{:protocol "tahto.semantic-link/0-alpha"
  :role "world.parent"
  :target-id "world/main"
  :target-root "sha256:..."}
@@ -126,10 +126,10 @@ role -> target-id -> target-root
 Strict ordering rejects duplicates and avoids silently normalizing signed data.
 An empty link vector is valid.
 
-## `tahto.semantic-object/1`
+## `tahto.semantic-object/0-alpha`
 
 ```clojure
-{:protocol "tahto.semantic-object/1"
+{:protocol "tahto.semantic-object/0-alpha"
  :id "entity/tree-1"
  :schema-ref {...}
  :value-root "sha256:..."
@@ -143,10 +143,10 @@ to one canonical application value and carries only typed semantic links.
 The object contains no inline `value`, source handle, path, callback, executable
 source or provider metadata.
 
-## `tahto.semantic-index/1`
+## `tahto.semantic-index/0-alpha`
 
 ```clojure
-{:protocol "tahto.semantic-index/1"
+{:protocol "tahto.semantic-index/0-alpha"
  :entries
  [{:id "entity/tree-1" :root "sha256:..."}
   {:id "world/main" :root "sha256:..."}]}
@@ -157,12 +157,12 @@ least one and at most 4,096 entries. Entries are strictly ordered by `id`, which
 also rejects duplicate logical IDs.
 
 This first bounded vector is deliberately simple. It does not allocate a new
-tree codec or block the release on HPT1.
+tree codec or block the release on HPT0.
 
-## `tahto.semantic-root/1`
+## `tahto.semantic-root/0-alpha`
 
 ```clojure
-{:protocol "tahto.semantic-root/1"
+{:protocol "tahto.semantic-root/0-alpha"
  :application "fixture.world"
  :namespace "world.a"
  :collection "scene"
@@ -183,7 +183,7 @@ coordinate and limited to 64. Named roots are strictly ordered by name and
 limited to 64.
 
 The root does not contain a commit, head, device, signature or provider. #33
-binds verified roots to the existing `tahto.commit/1` and `tahto.head/1` laws.
+binds verified roots to the existing `tahto.commit/0-alpha` and `tahto.head/0-alpha` laws.
 
 ## Deterministic ordering
 

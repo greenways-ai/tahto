@@ -1,22 +1,22 @@
 (ns tahto.protocol.records
   (:require [std.foundation :refer :all]))
 
-(def signature-profile "tahto-signature/1")
-(def canonical-json-profile "tahto-canonical-json/1")
+(def signature-profile "tahto-signature/0-alpha")
+(def canonical-json-profile "tahto-canonical-json/0-alpha")
 
 (def core-protocols
-  #{"tahto.node/1"
-    "tahto.device/1"
-    "tahto.application/1"
-    "tahto.namespace/1"
-    "tahto.collection/1"
-    "tahto.object/1"
-    "tahto.commit/1"
-    "tahto.head/1"
-    "tahto.backup/1"
-    "tahto.receipt/1"
-    "tahto.service/1"
-    "tahto.job/1"})
+  #{"tahto.node/0-alpha"
+    "tahto.device/0-alpha"
+    "tahto.application/0-alpha"
+    "tahto.namespace/0-alpha"
+    "tahto.collection/0-alpha"
+    "tahto.object/0-alpha"
+    "tahto.commit/0-alpha"
+    "tahto.head/0-alpha"
+    "tahto.backup/0-alpha"
+    "tahto.receipt/0-alpha"
+    "tahto.service/0-alpha"
+    "tahto.job/0-alpha"})
 
 (def collection-modes
   #{"snapshot/1"

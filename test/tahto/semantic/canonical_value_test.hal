@@ -117,7 +117,7 @@
     {:service "hoplite.value"
      :operation "object/verify-hta"
      :arguments
-     [{:protocol "hoplite.value-request/1"
+     [{:protocol "hoplite.value-request/0-alpha"
        :operation "object/verify-hta"
        :digest root
        :max-bytes 1024}]}
@@ -134,7 +134,7 @@
    [true
     {:root root
      :value-size 96
-     :profile "hara.hta/1"
+     :profile "hara.hta/0-alpha"
      :value decoded-value}
     true true])
 
@@ -151,9 +151,9 @@
       (= state (result-state result))])
    [true
     decoded-value
-    {:protocol "tahto.canonical-value-verification/1"
+    {:protocol "tahto.canonical-value-verification/0-alpha"
      :verified true
-     :profile "hara.hta/1"
+     :profile "hara.hta/0-alpha"
      :schema-ref schema-ref
      :value-root root
      :value-size 96}
@@ -246,7 +246,7 @@
     (canonical/read-result?
      {:root root
       :value-size 96
-      :profile "hara.hta/1"
+      :profile "hara.hta/0-alpha"
       :value inc})
     (canonical/verified-value?
      {:value decoded-value
@@ -255,7 +255,7 @@
        (canonical/verification-value
         {:root root
          :value-size 96
-         :profile "hara.hta/1"
+         :profile "hara.hta/0-alpha"
          :value decoded-value}
         schema-ref)
        :path "/tmp/value")})]

@@ -12,7 +12,7 @@ namespace-authorized immutable object
 ## Portable request
 
 ```clojure
-{:protocol "hoplite.value-request/1"
+{:protocol "hoplite.value-request/0-alpha"
  :operation "object/verify-hta"
  :digest "sha256:..."
  :max-bytes 1048576}
@@ -28,7 +28,7 @@ Tahto owns:
 - the semantic 1 MiB maximum;
 - exact request/result identity matching;
 - agreement between verified byte length and the installed object descriptor;
-- translation into `tahto.canonical-value-verification/1`;
+- translation into `tahto.canonical-value-verification/0-alpha`;
 - all later schema validation and semantic mutation.
 
 Hara owns the closed generic request/result vocabulary and canonical portable-value profile.
@@ -44,9 +44,9 @@ A successful schema-bound read returns ephemeral composition data:
 ```clojure
 {:value decoded-portable-value
  :verification
- {:protocol "tahto.canonical-value-verification/1"
+ {:protocol "tahto.canonical-value-verification/0-alpha"
   :verified true
-  :profile "hara.hta/1"
+  :profile "hara.hta/0-alpha"
   :schema-ref exact-installed-schema-ref
   :value-root "sha256:..."
   :value-size 512}}
@@ -67,4 +67,4 @@ The adapter fails without state mutation when:
 - the provider reports canonicality, digest, object or provider failure;
 - a schema reference is not exact and immutable.
 
-Large media, chunks and response bodies remain on `hoplite.blob` and `hoplite.response-source/1` paths.
+Large media, chunks and response bodies remain on `hoplite.blob` and `hoplite.response-source/0-alpha` paths.

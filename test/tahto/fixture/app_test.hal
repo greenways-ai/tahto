@@ -14,7 +14,7 @@
   (test/check
    "the descriptor wire projection is closed and JSON-safe"
    (app/descriptor-wire-value)
-   {"protocol" "tahto.two-device-fixture/1"
+   {"protocol" "tahto.two-device-fixture/0-alpha"
     "node" "node.home"
     "application" "fixture.transfer"
     "namespace" "world.shared"
@@ -36,15 +36,15 @@
    "fixture health names only generic required host services"
    [(app/health-value)
     (app/health-wire-value)]
-   [{:protocol "tahto.two-device-fixture-status/1"
+   [{:protocol "tahto.two-device-fixture-status/0-alpha"
      :status "ready"
      :phase "contract"
-     :fixture-protocol "tahto.two-device-fixture/1"
+     :fixture-protocol "tahto.two-device-fixture/0-alpha"
      :required-services ["hoplite.blob" "hoplite.store"]}
-    {"protocol" "tahto.two-device-fixture-status/1"
+    {"protocol" "tahto.two-device-fixture-status/0-alpha"
      "status" "ready"
      "phase" "contract"
-     "fixture-protocol" "tahto.two-device-fixture/1"
+     "fixture-protocol" "tahto.two-device-fixture/0-alpha"
      "required-services" ["hoplite.blob" "hoplite.store"]}])
 
   (test/check

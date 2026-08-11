@@ -1,8 +1,8 @@
 (ns tahto.protocol.descriptor)
 
-(def protocol "tahto.node/1")
-(def health-protocol "tahto.health/1")
-(def status-protocol "tahto.status/1")
+(def protocol "tahto.node/0-alpha")
+(def health-protocol "tahto.health/0-alpha")
+(def status-protocol "tahto.status/0-alpha")
 
 (defn descriptor
   []
@@ -37,15 +37,15 @@
     "semanticSchemas" "exact-installed-package-roots"}
    "routes"
    {"discovery" "/.well-known/tahto"
-    "health" "/tahto/v1/health"
-    "status" "/tahto/v1/status"
-    "diagnostics" "/tahto/v1/diagnostics"
-    "pairingPrepare" "/tahto/v1/pairing/prepare"
-    "pairingComplete" "/tahto/v1/pairing/complete"}
+    "health" "/tahto/0-alpha/health"
+    "status" "/tahto/0-alpha/status"
+    "diagnostics" "/tahto/0-alpha/diagnostics"
+    "pairingPrepare" "/tahto/0-alpha/pairing/prepare"
+    "pairingComplete" "/tahto/0-alpha/pairing/complete"}
    "components"
    {"controlPlane" "ready"
     "objects" "hara-kernel-ready:TAHTO-3"
-    "objectCapabilityClient" "ready:hoplite.blob-request/1"
+    "objectCapabilityClient" "ready:hoplite.blob-request/0-alpha"
     "objectProviders" "configured:not-probed"
     "uploadOrchestration" "hara-kernel-ready"
     "responseSourceProjection" "hara-kernel-ready"
@@ -58,7 +58,7 @@
     "productionTwoDeviceFixture" "pending"
     "servicesAndJobs" "hara-kernel-ready:TAHTO-6"
     "atomicMetadataPlan" "hara-kernel-ready:TAHTO-7"
-    "metadataCapabilityClient" "ready:hoplite.store-request/1"
+    "metadataCapabilityClient" "ready:hoplite.store-request/0-alpha"
     "sqliteMetadataProvider" "hoplite-generic-provider-ready"
     "metadataNodeService" "not-exposed"
     "semanticFabric" "kernel-ready:service-pending"
@@ -158,7 +158,7 @@
 
 (defn beacon-compatibility
   []
-  {"protocol" "greenways-beacon/1"
+  {"protocol" "greenways-beacon/0-alpha"
    "status" "compatibility-only"
    "canonical" "/.well-known/tahto"
    "replacement" (descriptor)})

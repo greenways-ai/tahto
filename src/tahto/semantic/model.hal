@@ -9,25 +9,25 @@
 ;; executable source, provider selection or host authority.
 
 (def schema-ref-protocol
-  "tahto.schema-ref/1")
+  "tahto.schema-ref/0-alpha")
 
 (def canonical-value-verification-protocol
-  "tahto.canonical-value-verification/1")
+  "tahto.canonical-value-verification/0-alpha")
 
 (def semantic-link-protocol
-  "tahto.semantic-link/1")
+  "tahto.semantic-link/0-alpha")
 
 (def semantic-object-protocol
-  "tahto.semantic-object/1")
+  "tahto.semantic-object/0-alpha")
 
 (def semantic-index-protocol
-  "tahto.semantic-index/1")
+  "tahto.semantic-index/0-alpha")
 
 (def semantic-root-protocol
-  "tahto.semantic-root/1")
+  "tahto.semantic-root/0-alpha")
 
 (def canonical-value-profile
-  "hara.hta/1")
+  "hara.hta/0-alpha")
 
 (def semantic-protocols
   #{schema-ref-protocol

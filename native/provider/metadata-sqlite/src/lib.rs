@@ -1,4 +1,4 @@
-//! SQLite implementation of the `tahto-metadata-store/1` provider contract.
+//! SQLite implementation of the `tahto-metadata-store/0-alpha` provider contract.
 //!
 //! The provider persists opaque canonical HTA state. It does not execute Hara,
 //! interpret application payloads, verify signatures, or own key authority.

@@ -11,18 +11,18 @@
 ;; revision compare-and-swap only. A native ABI or driver identity never enters
 ;; the HAL call plan.
 (def host-service "hoplite.store")
-(def request-protocol "hoplite.store-request/1")
-(def result-protocol "hoplite.store-result/1")
+(def request-protocol "hoplite.store-request/0-alpha")
+(def result-protocol "hoplite.store-result/0-alpha")
 
-(def snapshot-protocol "tahto.metadata-snapshot/1")
+(def snapshot-protocol "tahto.metadata-snapshot/0-alpha")
 (def state-verification-protocol
-  "tahto.state-encoding-verification/1")
+  "tahto.state-encoding-verification/0-alpha")
 (def commit-verification-protocol
-  "tahto.metadata-commit-verification/1")
+  "tahto.metadata-commit-verification/0-alpha")
 (def receipt-payload-protocol
-  "tahto.metadata-receipt-payload/1")
-(def receipt-protocol "tahto.metadata-commit-receipt/1")
-(def mutation-protocol "tahto.metadata-mutation/1")
+  "tahto.metadata-receipt-payload/0-alpha")
+(def receipt-protocol "tahto.metadata-commit-receipt/0-alpha")
+(def mutation-protocol "tahto.metadata-mutation/0-alpha")
 
 (def max-provider-revision 9223372036854775807)
 

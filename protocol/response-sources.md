@@ -13,10 +13,10 @@ The complete path is:
 ```text
 Tahto namespace authority and object metadata
   -> vault/plan-range
-  -> tahto.store.host-effect/1 object/read-range
+  -> tahto.store.host-effect/0-alpha object/read-range
   -> hoplite.blob object/open-source
-  -> validated tahto.store.host-result/1 opened range
-  -> hoplite.response-source/1
+  -> validated tahto.store.host-result/0-alpha opened range
+  -> hoplite.response-source/0-alpha
 ```
 
 Tahto decides whether an application and namespace may read an immutable
@@ -29,7 +29,7 @@ handle.
 projects only:
 
 ```clojure
-{:protocol "hoplite.response-source/1"
+{:protocol "hoplite.response-source/0-alpha"
  :source-handle 31
  :offset 2
  :length 7}
@@ -74,7 +74,7 @@ is unchanged.
   and length and may contain no additional fields.
 - The translated Tahto opened-range result must pass the existing closed host
   result validator.
-- The final value must pass Hoplite's `hoplite.response-source/1` validator, including
+- The final value must pass Hoplite's `hoplite.response-source/0-alpha` validator, including
   positive source handle and length, non-negative offset, safe-integer bounds,
   and a bounded half-open interval.
 - A positive native handle above the portable safe-integer maximum is rejected.

@@ -63,7 +63,7 @@
 
 (defn signature
   [key-id]
-  {:profile "tahto-signature/1"
+  {:profile "tahto-signature/0-alpha"
    :algorithm "ed25519"
    :key-id key-id
    :value "0123456789abcdef"})

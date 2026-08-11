@@ -90,7 +90,7 @@
   (test/check
    "pairing intent JSON is canonical across Hara and Greenways OS"
    (wire/intent-json (wire/intent-value intent-wire))
-   "{\"algorithm\":\"p256-sha256\",\"device\":\"device.browser\",\"expires-at\":\"2026-08-09T05:25:00Z\",\"invitation\":\"invite.live\",\"node\":\"node.home\",\"prepared-at\":\"2026-08-09T05:21:00Z\",\"protocol\":\"tahto.pairing-intent/1\",\"public-key\":\"p256:browser-public-key\"}")
+   "{\"algorithm\":\"p256-sha256\",\"device\":\"device.browser\",\"expires-at\":\"2026-08-09T05:25:00Z\",\"invitation\":\"invite.live\",\"node\":\"node.home\",\"prepared-at\":\"2026-08-09T05:21:00Z\",\"protocol\":\"tahto.pairing-intent/0-alpha\",\"public-key\":\"p256:browser-public-key\"}")
 
   (test/check
    "wire complete projects exact verified P-256 intent evidence"

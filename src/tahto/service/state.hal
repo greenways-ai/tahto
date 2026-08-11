@@ -5,8 +5,8 @@
             [tahto.store.graph :as graph]
             [tahto.store.model :as model]))
 
-(def service-protocol "tahto.service/1")
-(def job-protocol "tahto.job/1")
+(def service-protocol "tahto.service/0-alpha")
+(def job-protocol "tahto.job/0-alpha")
 
 (def default-limits
   {:max-services 4096

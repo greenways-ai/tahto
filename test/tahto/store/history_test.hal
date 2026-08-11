@@ -32,7 +32,7 @@
   "sha256:9999999999999999999999999999999999999999999999999999999999999999")
 
 (def signature
-  {:profile "tahto-signature/1"
+  {:profile "tahto-signature/0-alpha"
    :algorithm "ed25519"
    :key-id "key.device-a"
    :value "0123456789abcdef"})

@@ -4,13 +4,13 @@
             [tahto.protocol.records :as records]
             [tahto.store.model :as model]))
 
-(def verification-request-protocol "tahto.record-verification-request/1")
-(def verification-protocol "tahto.record-verification/1")
-(def restore-manifest-protocol "tahto.restore-manifest/1")
-(def device-enrolment-protocol "tahto.device-enrolment/1")
-(def device-revocation-protocol "tahto.device-revocation/1")
-(def request-verification-protocol "tahto.request-verification/1")
-(def request-context-protocol "tahto.device-request-context/1")
+(def verification-request-protocol "tahto.record-verification-request/0-alpha")
+(def verification-protocol "tahto.record-verification/0-alpha")
+(def restore-manifest-protocol "tahto.restore-manifest/0-alpha")
+(def device-enrolment-protocol "tahto.device-enrolment/0-alpha")
+(def device-revocation-protocol "tahto.device-revocation/0-alpha")
+(def request-verification-protocol "tahto.request-verification/0-alpha")
+(def request-context-protocol "tahto.device-request-context/0-alpha")
 
 (def signature-algorithms
   #{"ed25519" "p256-sha256"})

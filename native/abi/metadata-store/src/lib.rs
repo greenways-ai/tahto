@@ -7,9 +7,9 @@
 use std::fmt;
 
 pub const ABI_ID: &str = "tahto/metadata-store";
-pub const ABI_VERSION: &str = "1.0.0";
+pub const ABI_VERSION: &str = "0.0.0-alpha";
 pub const TRANSPORT: &str = "hta.v1";
-pub const NATIVE_ABI: &str = "tahto-metadata-store/1";
+pub const NATIVE_ABI: &str = "tahto-metadata-store/0-alpha";
 
 pub const MAX_IDENTIFIER_BYTES: usize = 128;
 pub const MAX_CANONICAL_STATE_BYTES: usize = 256 * 1024 * 1024;
@@ -251,10 +251,10 @@ pub fn validate_timestamp(value: &str) -> Result<(), Error> {
 }
 
 pub fn validate_hta(state: &[u8]) -> Result<(), Error> {
-    if state.len() < 4 || state.len() > MAX_CANONICAL_STATE_BYTES || !state.starts_with(b"HTA1") {
+    if state.len() < 4 || state.len() > MAX_CANONICAL_STATE_BYTES || !state.starts_with(b"HTA0") {
         Err(Error::new(
             "state-not-canonical-hta",
-            format!("state must be an HTA1 frame no larger than {MAX_CANONICAL_STATE_BYTES} bytes"),
+            format!("state must be an HTA0 frame no larger than {MAX_CANONICAL_STATE_BYTES} bytes"),
         ))
     } else {
         Ok(())
@@ -300,7 +300,7 @@ mod tests {
             digest('a'),
             digest('b'),
             digest('c'),
-            b"HTA1state".to_vec(),
+            b"HTA0state".to_vec(),
             digest('d'),
             "2026-08-07T12:00:00Z",
         )
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn snapshot_accepts_only_bounded_canonical_hta_evidence() {
-        let snapshot = Snapshot::new(0, b"HTA1state".to_vec(), digest('a')).unwrap();
+        let snapshot = Snapshot::new(0, b"HTA0state".to_vec(), digest('a')).unwrap();
         assert_eq!(snapshot.revision, 0);
         assert_eq!(snapshot.state_digest, digest('a'));
 
@@ -320,7 +320,7 @@ mod tests {
             "state-not-canonical-hta"
         );
         assert_eq!(
-            Snapshot::new(0, b"HTA1state".to_vec(), "sha256:ABC")
+            Snapshot::new(0, b"HTA0state".to_vec(), "sha256:ABC")
                 .unwrap_err()
                 .code,
             "digest-invalid"
@@ -337,7 +337,7 @@ mod tests {
                 digest('a'),
                 digest('b'),
                 digest('c'),
-                b"HTA1state".to_vec(),
+                b"HTA0state".to_vec(),
                 digest('d'),
                 "2026-08-07T12:00:00Z",
             )
@@ -356,7 +356,7 @@ mod tests {
                 digest('a'),
                 digest('b'),
                 digest('c'),
-                b"HTA1state".to_vec(),
+                b"HTA0state".to_vec(),
                 digest('d'),
                 "2026-08-07 12:00:00",
             )
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn public_values_must_be_revalidated_after_mutation() {
-        let mut snapshot = Snapshot::new(0, b"HTA1state".to_vec(), digest('a')).unwrap();
+        let mut snapshot = Snapshot::new(0, b"HTA0state".to_vec(), digest('a')).unwrap();
         snapshot.state = b"json".to_vec();
         assert_eq!(
             snapshot.validate().unwrap_err().code,

@@ -38,7 +38,7 @@
   "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
 
 (def schema-ref
-  {:protocol "tahto.schema-ref/1"
+  {:protocol "tahto.schema-ref/0-alpha"
    :schema "fixture.entity"
    :schema-version 1
    :package "hara:fixture/world-specs"
@@ -48,7 +48,7 @@
 
 (defn signature
   [key-id]
-  {:profile "tahto-signature/1"
+  {:profile "tahto-signature/0-alpha"
    :algorithm "ed25519"
    :key-id key-id
    :value "abcdefghijklmnopqrstuvwxyz0123456789"})
@@ -214,7 +214,7 @@
       (= state (result-state result))
       (read/result? value)])
    [true
-    "tahto.semantic-read-result/1"
+    "tahto.semantic-read-result/0-alpha"
     head-digest
     [commit-left commit-right]
     [commit-left commit-right]

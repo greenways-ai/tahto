@@ -11,13 +11,13 @@
   "semantic.prepare")
 
 (def result-protocol
-  "tahto.semantic-prepare-result/1")
+  "tahto.semantic-prepare-result/0-alpha")
 
 (def commit-intent-protocol
-  "tahto.semantic-commit-intent/1")
+  "tahto.semantic-commit-intent/0-alpha")
 
 (def head-intent-protocol
-  "tahto.semantic-head-intent/1")
+  "tahto.semantic-head-intent/0-alpha")
 
 (def request-fields
   #{:device

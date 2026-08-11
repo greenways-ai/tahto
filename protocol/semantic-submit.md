@@ -4,9 +4,9 @@
 
 ```text
 verified semantic.submit request
-  + tahto.semantic-prepare-result/1
-  + verified tahto.commit/1
-  + verified tahto.head/1
+  + tahto.semantic-prepare-result/0-alpha
+  + verified tahto.commit/0-alpha
+  + verified tahto.head/0-alpha
         ↓
 revalidate current revision and head
   -> accept commit
@@ -75,7 +75,7 @@ The pure transition applies the commit to a candidate state and then applies the
 On success it returns only:
 
 ```clojure
-{:protocol "tahto.semantic-submit-result/1"
+{:protocol "tahto.semantic-submit-result/0-alpha"
  :device "device.a"
  :commit-root "sha256:..."
  :head-digest "sha256:..."

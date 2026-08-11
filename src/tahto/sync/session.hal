@@ -5,9 +5,9 @@
             [tahto.store.model :as model]
             [tahto.store.vault :as vault]))
 
-(def sync-offer-protocol "tahto.sync-offer/1")
-(def sync-ack-protocol "tahto.sync-ack/1")
-(def sync-push-plan-protocol "tahto.sync-push-plan/1")
+(def sync-offer-protocol "tahto.sync-offer/0-alpha")
+(def sync-ack-protocol "tahto.sync-ack/0-alpha")
+(def sync-push-plan-protocol "tahto.sync-push-plan/0-alpha")
 
 (defn limits
   [state]

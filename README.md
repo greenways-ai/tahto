@@ -46,11 +46,11 @@ The current Hara/Hoplite control-plane application exposes:
 
 ```text
 GET  /.well-known/tahto
-GET  /tahto/v1/health
-GET  /tahto/v1/status
-POST /tahto/v1/diagnostics
-POST /tahto/v1/pairing/prepare
-POST /tahto/v1/pairing/complete
+GET  /tahto/0-alpha/health
+GET  /tahto/0-alpha/status
+POST /tahto/0-alpha/diagnostics
+POST /tahto/0-alpha/pairing/prepare
+POST /tahto/0-alpha/pairing/complete
 ```
 
 The loopback operator command `bin/tahto invite` issues a short-lived
@@ -228,7 +228,7 @@ See:
 An authorized object range is projected as one closed portable value:
 
 ```clojure
-{:protocol "hoplite.response-source/1"
+{:protocol "hoplite.response-source/0-alpha"
  :service "hoplite.blob"
  :source-handle 31
  :offset 2
@@ -242,7 +242,7 @@ Tahto namespace authority
   -> vault/plan-range
   -> hoplite.blob object/open-source
   -> exact result validation
-  -> hoplite.response-source/1
+  -> hoplite.response-source/0-alpha
   -> request-scoped Nginx transport
 ```
 
@@ -273,9 +273,9 @@ verified receipt evidence
 Semantic roots enter this unchanged history model:
 
 ```text
-tahto.semantic-root/1
-  -> tahto.commit/1
-  -> tahto.head/1
+tahto.semantic-root/0-alpha
+  -> tahto.commit/0-alpha
+  -> tahto.head/0-alpha
   -> divergence
   -> application-authored merge
   -> metadata CAS
@@ -306,12 +306,12 @@ collections, objects, commits and heads:
 
 ```text
 exact installed specification package
-  -> tahto.schema-ref/1
+  -> tahto.schema-ref/0-alpha
   -> canonical application value root
   -> semantic object + typed links
   -> stable-ID index + complete semantic root
-  -> ordinary tahto.commit/1
-  -> ordinary tahto.head/1
+  -> ordinary tahto.commit/0-alpha
+  -> ordinary tahto.head/0-alpha
 ```
 
 Tahto can already prove that an admitted value root, schema reference, semantic
@@ -407,7 +407,7 @@ Then inspect:
 
 ```sh
 curl http://127.0.0.1:58100/.well-known/tahto
-curl http://127.0.0.1:58100/tahto/v1/status
+curl http://127.0.0.1:58100/tahto/0-alpha/status
 ```
 
 To prove the full health lifecycle against the real SQLite and filesystem

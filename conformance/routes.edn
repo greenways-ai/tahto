@@ -1,8 +1,8 @@
 {:tahto/conformance "bootstrap-routes/1"
  :canonical
  [{:method :get :path "/.well-known/tahto" :handler :descriptor}
-  {:method :get :path "/tahto/v1/health" :handler :health}
-  {:method :get :path "/tahto/v1/status" :handler :status}]
+  {:method :get :path "/tahto/0-alpha/health" :handler :health}
+  {:method :get :path "/tahto/0-alpha/status" :handler :status}]
  :compatibility
  [{:method :get :path "/.well-known/greenways-beacon" :handler :beacon-descriptor}
   {:method :get :path "/beacon/v1/health" :handler :health}

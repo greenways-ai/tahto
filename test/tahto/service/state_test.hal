@@ -112,7 +112,7 @@
    {:protocol service/service-protocol
     :id service-id
     :application application
-    :service-protocol "historia.archive.index/1"
+    :service-protocol "historia.archive.index/0-alpha"
     :worker-version "1.0.0"
     :artifact-digest artifact
     :collections [collection]

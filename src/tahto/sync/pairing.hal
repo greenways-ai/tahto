@@ -4,14 +4,14 @@
             [tahto.store.model :as model]
             [tahto.sync.device :as device]))
 
-(def invitation-protocol "tahto.pairing-invitation/1")
-(def acceptance-protocol "tahto.pairing-acceptance/1")
-(def result-protocol "tahto.pairing-result/1")
-(def prepare-protocol "tahto.pairing-prepare/1")
-(def intent-protocol "tahto.pairing-intent/1")
+(def invitation-protocol "tahto.pairing-invitation/0-alpha")
+(def acceptance-protocol "tahto.pairing-acceptance/0-alpha")
+(def result-protocol "tahto.pairing-result/0-alpha")
+(def prepare-protocol "tahto.pairing-prepare/0-alpha")
+(def intent-protocol "tahto.pairing-intent/0-alpha")
 (def intent-verification-protocol
-  "tahto.pairing-intent-verification/1")
-(def complete-protocol "tahto.pairing-complete/1")
+  "tahto.pairing-intent-verification/0-alpha")
+(def complete-protocol "tahto.pairing-complete/0-alpha")
 
 (defn invitations
   [state]

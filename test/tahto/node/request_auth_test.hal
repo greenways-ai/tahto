@@ -35,7 +35,7 @@
       (get proof :protocol)
       (get proof :operation)
       (get proof :idempotency-key)])
-   [true "tahto.request-verification/1" "sync.pull" "request-00000001"])
+   [true "tahto.request-verification/0-alpha" "sync.pull" "request-00000001"])
 
   (test/check
    "request timestamps are accepted only inside the closed five-minute window"

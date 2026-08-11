@@ -24,7 +24,7 @@ driver.
 The superseded migration identity is:
 
 ```text
-tahto-metadata-store/1
+tahto-metadata-store/0-alpha
 ```
 
 New Tahto HAL code must not refer to this identity or to `tahto.metadata`.

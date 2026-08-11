@@ -34,7 +34,7 @@
  [(test/check
    "an absent metadata snapshot is explicitly not ready"
    (monitor/probe-with (invoke-with nil))
-   {:protocol "tahto.monitor-probe/1"
+   {:protocol "tahto.monitor-probe/0-alpha"
     :state "not-ready"
     :metadata "uninitialized"
     :error nil
@@ -49,7 +49,7 @@
                       :objects {"sha256:a" {}})]
      (monitor/probe-with
       (invoke-with (loaded-result state))))
-   {:protocol "tahto.monitor-probe/1"
+   {:protocol "tahto.monitor-probe/0-alpha"
     :state "ready"
     :metadata "ready"
     :error nil
@@ -66,7 +66,7 @@
         (if (= provider/host-service service)
           (loaded-result state)
           (model/fail {} "hoplite.blob/unavailable")))))
-   {:protocol "tahto.monitor-probe/1"
+   {:protocol "tahto.monitor-probe/0-alpha"
     :state "degraded"
     :metadata "ready"
     :error nil
@@ -79,7 +79,7 @@
    "provider failures remain bounded diagnostic state"
    (monitor/inspect-result
     (model/fail {} "hoplite.store/unavailable" {:secret "not projected"}))
-   {:protocol "tahto.monitor-probe/1"
+   {:protocol "tahto.monitor-probe/0-alpha"
     :state "degraded"
     :metadata "unavailable"
     :error "hoplite.store/unavailable"})
@@ -109,7 +109,7 @@
      :object-error nil
      :counts {:devices 2 :objects 5 :commits 1 :heads 1 :backups 0}}
     "2026-08-09T00:00:00.000Z")
-   {:protocol "tahto.diagnostics/1"
+   {:protocol "tahto.diagnostics/0-alpha"
     :checkedAt "2026-08-09T00:00:00.000Z"
     :state "ready"
     :checks {:metadata {:state "ready" :revision 4 :error nil}

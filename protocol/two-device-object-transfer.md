@@ -21,7 +21,7 @@ device B verified requests
   -> exact acknowledgement
   -> independent authorized range plan
   -> hoplite.blob object/open-source under B's work scope
-  -> hoplite.response-source/1
+  -> hoplite.response-source/0-alpha
 ```
 
 A source handle belongs to one provider-owned request/work scope. It is never
@@ -40,13 +40,13 @@ The fixture:
 3. installs an immutable payload, application-owned signed reference and commit
    object through the existing `tahto.store.upload` boundary;
 4. projects the application reference edge to the payload digest;
-5. accepts an ordinary signed `tahto.commit/1` and `tahto.head/1`;
-6. retains an immutable signed `tahto.receipt/1`;
+5. accepts an ordinary signed `tahto.commit/0-alpha` and `tahto.head/0-alpha`;
+6. retains an immutable signed `tahto.receipt/0-alpha`;
 7. authorizes B's pull request and returns the exact payload/reference/commit
    closure behind the current head;
 8. acknowledges the exact offered digest batch and advances B's cursor;
 9. authorizes B's independent object read and returns one closed
-   `hoplite.response-source/1` descriptor;
+   `hoplite.response-source/0-alpha` descriptor;
 10. proves A's work cannot close B's source while B's exact work can; and
 11. revokes B, rejects a fresh read request and preserves the historical signed
     commit, head and receipt.

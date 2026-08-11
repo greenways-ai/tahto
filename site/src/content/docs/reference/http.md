@@ -7,10 +7,10 @@ description: Current discovery, status, diagnostics, and pairing routes.
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/.well-known/tahto` | Discover the node |
-| `GET` | `/tahto/v1/health` | Read provider health |
-| `GET` | `/tahto/v1/status` | Read installed component status |
-| `POST` | `/tahto/v1/diagnostics` | Return signed aggregate diagnostics |
-| `POST` | `/tahto/v1/pairing/prepare` | Prepare an enrolment intent |
-| `POST` | `/tahto/v1/pairing/complete` | Verify and complete enrolment |
+| `GET` | `/tahto/0-alpha/health` | Read provider health |
+| `GET` | `/tahto/0-alpha/status` | Read installed component status |
+| `POST` | `/tahto/0-alpha/diagnostics` | Return signed aggregate diagnostics |
+| `POST` | `/tahto/0-alpha/pairing/prepare` | Prepare an enrolment intent |
+| `POST` | `/tahto/0-alpha/pairing/complete` | Verify and complete enrolment |
 
 The semantic operation kernels are not yet advertised as installed HTTP routes.

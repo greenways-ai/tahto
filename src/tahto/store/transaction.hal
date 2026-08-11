@@ -4,9 +4,9 @@
             [tahto.store.model :as model]
             [tahto.sync.device :as device]))
 
-(def transaction-protocol "tahto.metadata-transaction/1")
+(def transaction-protocol "tahto.metadata-transaction/0-alpha")
 (def result-verification-protocol
-  "tahto.transaction-result-verification/1")
+  "tahto.transaction-result-verification/0-alpha")
 
 (def result-outcomes
   #{"ok" "error"})

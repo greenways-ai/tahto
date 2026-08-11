@@ -41,7 +41,7 @@ def await_health(expected: str, timeout: float = 10) -> dict[str, object]:
     last_error: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            status, body = request("/tahto/v1/health")
+            status, body = request("/tahto/0-alpha/health")
             if status == 200 and body.get("status") == expected:
                 return body
         except Exception as error:  # The worker may still be starting.
@@ -103,7 +103,7 @@ def main() -> None:
             initial = await_health("not-ready")
             now = datetime.datetime.now(datetime.UTC).replace(microsecond=0)
             invitation = {
-                "protocol": "tahto.pairing-invitation/1",
+                "protocol": "tahto.pairing-invitation/0-alpha",
                 "id": "invite.health-acceptance",
                 "node": "node.health-acceptance",
                 "tokenDigest": "sha256:" + "a" * 64,
@@ -114,7 +114,7 @@ def main() -> None:
                 "expiresSeconds": int(now.timestamp()) + 3600,
                 "status": "open",
             }
-            status, _ = request("/tahto/v1/pairing/invitations", pairing=invitation)
+            status, _ = request("/tahto/0-alpha/pairing/invitations", pairing=invitation)
             if status != 201:
                 raise RuntimeError(f"pairing initialization returned HTTP {status}")
             initialized = await_health("ready")

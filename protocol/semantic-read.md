@@ -26,7 +26,7 @@ The operation consumes a request-local value:
 
 `:id` is optional. `:max-commits` is mandatory, positive and capped at 16. A wider head fails; it is never truncated.
 
-The associated `tahto.device-request-context/1` must:
+The associated `tahto.device-request-context/0-alpha` must:
 
 - use operation `semantic.read`;
 - be pending with no result digest;

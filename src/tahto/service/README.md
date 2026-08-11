@@ -24,6 +24,6 @@ enqueue-job
 transition-job
 ```
 
-Jobs retain an internal application/namespace/collection coordinate while the stable `tahto.job/1` envelope remains application-neutral. Inputs and completed outputs must already be complete, namespace-authorized Tahto object closures. Enqueue requests are idempotent, attempts are monotonic, and completed or cancelled jobs are terminal.
+Jobs retain an internal application/namespace/collection coordinate while the stable `tahto.job/0-alpha` envelope remains application-neutral. Inputs and completed outputs must already be complete, namespace-authorized Tahto object closures. Enqueue requests are idempotent, attempts are monotonic, and completed or cancelled jobs are terminal.
 
 TAHTO-6 does not execute workers or provide persistence. An installed durable metadata provider must atomically commit the returned state transition together with the request nonce/idempotency evidence produced by TAHTO-5.

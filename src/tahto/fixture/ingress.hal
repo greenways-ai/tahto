@@ -11,7 +11,7 @@
 ;; Tahto HAL. Hoplite supplies only generic crypto, clock and transport calls.
 
 (def ingress-profile
-  "hoplite-application-ingress/1")
+  "hoplite-application-ingress/0-alpha")
 
 (def ingress-fields
   #{:profile

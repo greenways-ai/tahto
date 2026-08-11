@@ -8,7 +8,7 @@ model.hal             canonical identities, limits and immutable state
 host.hal              closed Tahto domain effects and result validation
 capability.hal        pure-HAL mapping to generic hoplite.blob calls
 upload.hal            candidate-state upload orchestration and rollback
-response_source.hal   authorized range projection to hoplite.response-source/1
+response_source.hal   authorized range projection to hoplite.response-source/0-alpha
 memory_blob.hal       deterministic pure-HAL hoplite.blob reference provider
 graph.hal             manifests, content graph, closure, roots and dry-run GC
 vault.hal             uploads, installation, references, quotas and ranges
@@ -70,7 +70,7 @@ the original state.
 exact generic source result and projects only:
 
 ```clojure
-{:protocol "hoplite.response-source/1"
+{:protocol "hoplite.response-source/0-alpha"
  :service "hoplite.blob"
  :source-handle 31
  :offset 2

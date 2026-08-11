@@ -33,7 +33,7 @@ fn remove_database_files(path: &Path) {
 }
 
 fn frame(value: &str) -> Vec<u8> {
-    format!("HTA1{value}").into_bytes()
+    format!("HTA0{value}").into_bytes()
 }
 
 fn digest(fill: char) -> String {
@@ -72,7 +72,7 @@ fn opens_and_verifies_the_complete_schema() {
     assert_eq!(store.path(), database.path.as_path());
     store.verify().unwrap();
     assert_eq!(CONTRACT, "tahto/metadata-store");
-    assert_eq!(NATIVE_ABI, "tahto-metadata-store/1");
+    assert_eq!(NATIVE_ABI, "tahto-metadata-store/0-alpha");
 }
 
 #[test]

@@ -5,8 +5,8 @@
 T-SF-02 adds the first pure-HAL state transition for the Semantic Fabric.
 
 The admission law consumes one already-installed semantic-object envelope, one
-decoded `tahto.semantic-object/1` value and one exact
-`tahto.canonical-value-verification/1` proof. It retains only a bounded semantic
+decoded `tahto.semantic-object/0-alpha` value and one exact
+`tahto.canonical-value-verification/0-alpha` proof. It retains only a bounded semantic
 projection and reuses Tahto's existing graph edges.
 
 It does not read bytes, decode HTA, resolve packages, call a validator, dispatch
@@ -18,7 +18,7 @@ Admission keeps the semantic envelope and its application value distinct:
 
 ```text
 semantic-object-root
-  canonical tahto.semantic-object/1 bytes
+  canonical tahto.semantic-object/0-alpha bytes
 
 value-root
   canonical application value bytes
@@ -42,16 +42,16 @@ The pure entry point is:
   :collection "scene"
   :root "sha256:semantic-object..."
   :semantic-object
-  {:protocol "tahto.semantic-object/1"
+  {:protocol "tahto.semantic-object/0-alpha"
    :id "entity/tree-1"
    :schema-ref {...}
    :value-root "sha256:application-value..."
    :value-size 512
    :links [...]}
   :verification
-  {:protocol "tahto.canonical-value-verification/1"
+  {:protocol "tahto.canonical-value-verification/0-alpha"
    :verified true
-   :profile "hara.hta/1"
+   :profile "hara.hta/0-alpha"
    :schema-ref {...}
    :value-root "sha256:application-value..."
    :value-size 512}})
@@ -161,7 +161,7 @@ No production caller supplies a validator function to `admit-projected`.
 
 ## Compatibility
 
-- the `tahto.object-vault-state/1` protocol is unchanged;
+- the `tahto.object-vault-state/0-alpha` protocol is unchanged;
 - ordinary states do not gain an empty semantic table;
 - existing objects and graph edges are unchanged;
 - no object record gains semantic fields;

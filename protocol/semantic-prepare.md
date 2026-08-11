@@ -13,7 +13,7 @@ commit signing intent
 
 ## Why preparation is staged
 
-An exact `tahto.head/1` body must contain the canonical root of the newly signed commit. That root is not available until the client has constructed the commit through the installed canonical signing boundary.
+An exact `tahto.head/0-alpha` body must contain the canonical root of the newly signed commit. That root is not available until the client has constructed the commit through the installed canonical signing boundary.
 
 The first prepare result therefore contains:
 
@@ -46,8 +46,8 @@ Every field is explicit. Prepare does not call a clock, generate randomness, sel
 ## Commit intent
 
 ```clojure
-{:protocol "tahto.semantic-commit-intent/1"
- :record-protocol "tahto.commit/1"
+{:protocol "tahto.semantic-commit-intent/0-alpha"
+ :record-protocol "tahto.commit/0-alpha"
  :application "fixture.world"
  :namespace "world.a"
  :collection "scene"
@@ -66,8 +66,8 @@ The intent deliberately has no `root`, `signature`, key, provider or command. Th
 ## Head continuation intent
 
 ```clojure
-{:protocol "tahto.semantic-head-intent/1"
- :record-protocol "tahto.head/1"
+{:protocol "tahto.semantic-head-intent/0-alpha"
+ :record-protocol "tahto.head/0-alpha"
  :application "fixture.world"
  :namespace "world.a"
  :collection "scene"

@@ -12,18 +12,18 @@ Every core object is a closed record. Unknown top-level fields are rejected. App
 
 | Protocol | Purpose |
 |---|---|
-| `tahto.node/1` | Node identity, endpoints, and advertised fabric features |
-| `tahto.device/1` | Enrolled or revoked device identity at one node |
-| `tahto.application/1` | Installed application identity, publisher, version, and lock digest |
-| `tahto.namespace/1` | Application-owned isolation boundary |
-| `tahto.collection/1` | Named state collection and its storage mode |
-| `tahto.object/1` | Immutable SHA-256-addressed object descriptor |
-| `tahto.commit/1` | Signed transition that references parents, object roots, and tombstones |
-| `tahto.head/1` | Signed named set of current commit roots |
-| `tahto.backup/1` | Immutable pin over a complete verified closure |
-| `tahto.receipt/1` | Node-signed evidence for storage and state operations |
-| `tahto.service/1` | Inert registration for an application-owned worker |
-| `tahto.job/1` | Durable application-worker job state |
+| `tahto.node/0-alpha` | Node identity, endpoints, and advertised fabric features |
+| `tahto.device/0-alpha` | Enrolled or revoked device identity at one node |
+| `tahto.application/0-alpha` | Installed application identity, publisher, version, and lock digest |
+| `tahto.namespace/0-alpha` | Application-owned isolation boundary |
+| `tahto.collection/0-alpha` | Named state collection and its storage mode |
+| `tahto.object/0-alpha` | Immutable SHA-256-addressed object descriptor |
+| `tahto.commit/0-alpha` | Signed transition that references parents, object roots, and tombstones |
+| `tahto.head/0-alpha` | Signed named set of current commit roots |
+| `tahto.backup/0-alpha` | Immutable pin over a complete verified closure |
+| `tahto.receipt/0-alpha` | Node-signed evidence for storage and state operations |
+| `tahto.service/0-alpha` | Inert registration for an application-owned worker |
+| `tahto.job/0-alpha` | Durable application-worker job state |
 
 ## Identifiers and digests
 
@@ -53,7 +53,7 @@ The initial collection-mode vocabulary is closed:
 
 ## Commit contract
 
-A `tahto.commit/1` contains exactly the application-neutral transition fields:
+A `tahto.commit/0-alpha` contains exactly the application-neutral transition fields:
 
 ```text
 application identity
@@ -69,24 +69,24 @@ timestamp
 signature
 ```
 
-The `root` is the SHA-256 digest of the canonical unsigned commit body with `root` and `signature` omitted. The signature signs the context string `tahto.commit/1`, a newline, and that root.
+The `root` is the SHA-256 digest of the canonical unsigned commit body with `root` and `signature` omitted. The signature signs the context string `tahto.commit/0-alpha`, a newline, and that root.
 
 A commit does not state how an application merges or interprets its objects. Tombstones are application-owned references and Tahto does not reinterpret them.
 
 ## Canonical signing profile
 
-Signed records use `tahto-signature/1`:
+Signed records use `tahto-signature/0-alpha`:
 
 ```json
 {
-  "profile": "tahto-signature/1",
+  "profile": "tahto-signature/0-alpha",
   "algorithm": "ed25519",
   "keyId": "device.a",
   "value": "<base64url signature>"
 }
 ```
 
-The canonical JSON profile is `tahto-canonical-json/1`:
+The canonical JSON profile is `tahto-canonical-json/0-alpha`:
 
 - UTF-8 encoding;
 - object keys sorted lexicographically by Unicode code point;
@@ -104,7 +104,7 @@ A head is a signed named set of one or more commit roots. More than one current 
 
 ```json
 {
-  "protocol": "tahto.head/1",
+  "protocol": "tahto.head/0-alpha",
   "kind": "main",
   "name": "main",
   "commits": [
@@ -120,7 +120,7 @@ The optional `expected` field records the roots against which a compare-and-swap
 
 ## Backups
 
-A synchronized head and a backup point are different records. A `tahto.backup/1` is immutable and pins one or more complete verified roots under a retention label. Creation must fail when any referenced closure is incomplete. TAHTO-4 adds receipts and restore manifests around this contract.
+A synchronized head and a backup point are different records. A `tahto.backup/0-alpha` is immutable and pins one or more complete verified roots under a retention label. Creation must fail when any referenced closure is incomplete. TAHTO-4 adds receipts and restore manifests around this contract.
 
 ## Services and jobs
 

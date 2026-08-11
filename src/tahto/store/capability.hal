@@ -10,8 +10,8 @@
 ;; application values. The installed host binds service identity to one trusted
 ;; provider descriptor.
 (def host-service "hoplite.blob")
-(def request-protocol "hoplite.blob-request/1")
-(def result-protocol "hoplite.blob-result/1")
+(def request-protocol "hoplite.blob-request/0-alpha")
+(def result-protocol "hoplite.blob-result/0-alpha")
 
 (def supported-effect-operations
   #{"upload/open"

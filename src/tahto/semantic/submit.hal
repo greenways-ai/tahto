@@ -11,7 +11,7 @@
   "semantic.submit")
 
 (def result-protocol
-  "tahto.semantic-submit-result/1")
+  "tahto.semantic-submit-result/0-alpha")
 
 (def input-fields
   #{:prepared :commit-verification :head-verification})

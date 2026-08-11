@@ -2,14 +2,14 @@
   (:require [std.foundation :refer :all]
             [std.foundation.string :as string]))
 
-(def state-protocol "tahto.object-vault-state/1")
-(def device-protocol "tahto.device/1")
-(def object-protocol "tahto.object/1")
-(def chunk-manifest-protocol "tahto.chunk-manifest/1")
-(def commit-protocol "tahto.commit/1")
-(def head-protocol "tahto.head/1")
-(def backup-protocol "tahto.backup/1")
-(def receipt-protocol "tahto.receipt/1")
+(def state-protocol "tahto.object-vault-state/0-alpha")
+(def device-protocol "tahto.device/0-alpha")
+(def object-protocol "tahto.object/0-alpha")
+(def chunk-manifest-protocol "tahto.chunk-manifest/0-alpha")
+(def commit-protocol "tahto.commit/0-alpha")
+(def head-protocol "tahto.head/0-alpha")
+(def backup-protocol "tahto.backup/0-alpha")
+(def receipt-protocol "tahto.receipt/0-alpha")
 
 (def default-limits
   {:max-object-bytes 1073741824

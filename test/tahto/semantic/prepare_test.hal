@@ -34,7 +34,7 @@
   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
 (def schema-ref
-  {:protocol "tahto.schema-ref/1"
+  {:protocol "tahto.schema-ref/0-alpha"
    :schema "fixture.entity"
    :schema-version 1
    :package "hara:fixture/world-specs"
@@ -44,7 +44,7 @@
 
 (defn signature
   [key-id]
-  {:profile "tahto-signature/1"
+  {:profile "tahto-signature/0-alpha"
    :algorithm "ed25519"
    :key-id key-id
    :value "abcdefghijklmnopqrstuvwxyz0123456789"})
@@ -179,15 +179,15 @@
     true
     true
     true
-    {:protocol "tahto.semantic-prepare-result/1"
+    {:protocol "tahto.semantic-prepare-result/0-alpha"
      :operation "semantic.prepare"
      :device "device.a"
      :request-digest request-digest
      :expected-metadata-revision 4
      :current-head-digest head-digest
      :commit-intent
-     {:protocol "tahto.semantic-commit-intent/1"
-      :record-protocol "tahto.commit/1"
+     {:protocol "tahto.semantic-commit-intent/0-alpha"
+      :record-protocol "tahto.commit/0-alpha"
       :application application
       :namespace namespace
       :collection collection
@@ -200,8 +200,8 @@
       :sequence 2
       :timestamp "2026-08-09T01:10:00Z"}
      :head-intent
-     {:protocol "tahto.semantic-head-intent/1"
-      :record-protocol "tahto.head/1"
+     {:protocol "tahto.semantic-head-intent/0-alpha"
+      :record-protocol "tahto.head/0-alpha"
       :application application
       :namespace namespace
       :collection collection

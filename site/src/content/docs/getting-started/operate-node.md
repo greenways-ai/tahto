@@ -12,11 +12,11 @@ The node exposes discovery, health, status, diagnostics, and pairing operations.
 
 ```text
 GET  /.well-known/tahto
-GET  /tahto/v1/health
-GET  /tahto/v1/status
-POST /tahto/v1/diagnostics
-POST /tahto/v1/pairing/prepare
-POST /tahto/v1/pairing/complete
+GET  /tahto/0-alpha/health
+GET  /tahto/0-alpha/status
+POST /tahto/0-alpha/diagnostics
+POST /tahto/0-alpha/pairing/prepare
+POST /tahto/0-alpha/pairing/complete
 ```
 
 Use `bin/tahto invite` from the loopback operator boundary to create a short-lived pairing invitation. Never log or persist the raw invitation token.

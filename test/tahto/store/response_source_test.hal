@@ -91,7 +91,7 @@
       (portable/response-source? candidate)
       descriptor])
    [true
-    {:protocol "tahto.store.host-result/1"
+    {:protocol "tahto.store.host-result/0-alpha"
      :operation "object/read-range"
      :opened true
      :digest digest
@@ -100,14 +100,14 @@
      :length 7
      :source-handle 31}
     true
-    {:protocol "hoplite.response-source/1"
+    {:protocol "hoplite.response-source/0-alpha"
      :service "hoplite.blob"
      :source-handle 31
      :offset 2
      :length 7}
     true
     true
-    {:protocol "hoplite.response-source/1"
+    {:protocol "hoplite.response-source/0-alpha"
      :service "hoplite.blob"
      :source-handle 31
      :offset 2
@@ -149,7 +149,7 @@
    [true
     nil
     true
-    {:protocol "hoplite.response-source/1"
+    {:protocol "hoplite.response-source/0-alpha"
      :service "hoplite.blob"
      :source-handle 41
      :offset 2

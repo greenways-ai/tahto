@@ -36,12 +36,12 @@ It stores no administrator role, bearer credential, private key, provider creden
 ## One-time pairing ceremony
 
 The CLI stores only a digest of a short-lived invitation token. Pairing prepare
-checks the open invitation and returns a closed `tahto.pairing-intent/1` binding
+checks the open invitation and returns a closed `tahto.pairing-intent/0-alpha` binding
 its node, assigned device ID, exact P-256 public key and expiry. The intent is
 stored with the still-open invitation so a different binding cannot replace it.
 
 Greenways OS signs that exact intent with the browser-held key. The installed
-verifier projects only `tahto.pairing-intent-verification/1` evidence. Pairing
+verifier projects only `tahto.pairing-intent-verification/0-alpha` evidence. Pairing
 complete requires every projected device, key and algorithm field to match the
 intent, then consumes the invitation and enrols the device in one state
 transition.
@@ -58,12 +58,12 @@ key cannot reuse the invitation. The result always contains
 An installed authority provider returns:
 
 ```clojure
-{:protocol "tahto.device-enrolment/1"
+{:protocol "tahto.device-enrolment/0-alpha"
  :authorized true
  :node "node.home"
  :approval-digest "sha256:..."
  :device
- {:protocol "tahto.device/1"
+ {:protocol "tahto.device/0-alpha"
   :id "device.a"
   :node "node.home"
   :public-key "ed25519:..."
@@ -80,7 +80,7 @@ One device ID cannot be rebound to a different key, and one public key cannot be
 Revocation is an explicit, durable authority proof:
 
 ```clojure
-{:protocol "tahto.device-revocation/1"
+{:protocol "tahto.device-revocation/0-alpha"
  :authorized true
  :node "node.home"
  :device "device.a"
@@ -95,7 +95,7 @@ A revoked device cannot authorize new requests. Its public key remains reserved 
 After canonical request verification, freshness checking and application-grant evaluation, the installed verifier returns:
 
 ```clojure
-{:protocol "tahto.request-verification/1"
+{:protocol "tahto.request-verification/0-alpha"
  :verified true
  :device "device.a"
  :public-key "ed25519:..."
@@ -122,7 +122,7 @@ the idempotency key is unused or bound to identical canonical bytes
 table bounds have not been exceeded
 ```
 
-An accepted proof becomes a `tahto.device-request-context/1`. This context is an operation- and coordinate-specific input to later reducers; it is not a reusable principal or credential.
+An accepted proof becomes a `tahto.device-request-context/0-alpha`. This context is an operation- and coordinate-specific input to later reducers; it is not a reusable principal or credential.
 
 ## Nonces and idempotency
 
@@ -154,7 +154,7 @@ A digest is reported present only when it is already reachable from the authoriz
 The plan is inert data:
 
 ```clojure
-{:protocol "tahto.sync-push-plan/1"
+{:protocol "tahto.sync-push-plan/0-alpha"
  :device "device.a"
  :application "app.example"
  :namespace "profile.primary"
@@ -171,7 +171,7 @@ Uploading and installing the missing bytes remains a native Hoplite/Tahto host e
 A pull request supplies a bounded, distinct vector of already-known digests. Tahto gathers current commit roots from every matching device/main head, verifies the complete bounded closure, subtracts known digests and creates one pending offer:
 
 ```clojure
-{:protocol "tahto.sync-offer/1"
+{:protocol "tahto.sync-offer/0-alpha"
  :direction "pull"
  :device "device.a"
  :application "app.example"

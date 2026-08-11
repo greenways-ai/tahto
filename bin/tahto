@@ -46,9 +46,9 @@ case "$ACTION" in
     exec "$HOPLITE" serve "$ACTION" --profile server --mode prod "$ROOT"
     ;;
   doctor)
-    curl --fail --silent --show-error "$ORIGIN/tahto/v1/health"
+    curl --fail --silent --show-error "$ORIGIN/tahto/0-alpha/health"
     printf '\n'
-    curl --fail --silent --show-error "$ORIGIN/tahto/v1/status"
+    curl --fail --silent --show-error "$ORIGIN/tahto/0-alpha/status"
     printf '\n'
     ;;
   invite)
@@ -80,7 +80,7 @@ case "$ACTION" in
     APPROVAL_DIGEST="sha256:$APPROVAL_HEX"
     NODE_ID=${TAHTO_NODE_ID:-node.home}
     ENVELOPE=$(printf \
-      '{"protocol":"tahto.pairing-invitation/1","id":"%s","node":"%s","tokenDigest":"%s","approvalDigest":"%s","createdAt":"%s","expiresAt":"%s","createdSeconds":%s,"expiresSeconds":%s,"status":"open"}' \
+      '{"protocol":"tahto.pairing-invitation/0-alpha","id":"%s","node":"%s","tokenDigest":"%s","approvalDigest":"%s","createdAt":"%s","expiresAt":"%s","createdSeconds":%s,"expiresSeconds":%s,"status":"open"}' \
       "$INVITATION_ID" "$NODE_ID" "$TOKEN_DIGEST" "$APPROVAL_DIGEST" \
       "$CREATED_AT" "$EXPIRES_AT" "$NOW_SECONDS" "$EXPIRES_SECONDS")
     ENCODED=$(printf '%s' "$ENVELOPE" | base64url_text)
@@ -88,7 +88,7 @@ case "$ACTION" in
       -X POST \
       -H 'accept: application/json' \
       -H "x-tahto-pairing: $ENCODED" \
-      "$ORIGIN/tahto/v1/pairing/invitations" >/dev/null
+      "$ORIGIN/tahto/0-alpha/pairing/invitations" >/dev/null
     printf '%s~%s\n' "$INVITATION_ID" "$TOKEN"
     ;;
   open)

@@ -9,7 +9,7 @@
 ;; hoplite.store CAS laws as application transactions without manufacturing an
 ;; application principal.
 
-(def replay-protocol "tahto.metadata-mutation-replay/1")
+(def replay-protocol "tahto.metadata-mutation-replay/0-alpha")
 
 (defn execute
   [state expected-revision operation request-digest

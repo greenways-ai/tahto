@@ -21,8 +21,8 @@ REQUIRED = (
 
 CANONICAL_ROUTES = (
     "/.well-known/tahto",
-    "/tahto/v1/health",
-    "/tahto/v1/status",
+    "/tahto/0-alpha/health",
+    "/tahto/0-alpha/status",
 )
 
 COMPATIBILITY_ROUTES = (

@@ -56,7 +56,7 @@
   "sha256:3456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef012")
 
 (def schema-ref
-  {:protocol "tahto.schema-ref/1"
+  {:protocol "tahto.schema-ref/0-alpha"
    :schema "fixture.entity"
    :schema-version 1
    :package "hara:fixture/world-specs"
@@ -66,7 +66,7 @@
 
 (defn signature
   [key-id]
-  {:profile "tahto-signature/1"
+  {:profile "tahto-signature/0-alpha"
    :algorithm "ed25519"
    :key-id key-id
    :value "abcdefghijklmnopqrstuvwxyz0123456789"})
@@ -398,7 +398,7 @@
       (get-in next-state [:edges commit-new])
       (= 4 (provider/state-revision next-state))])
    [true
-    {:protocol "tahto.semantic-submit-result/1"
+    {:protocol "tahto.semantic-submit-result/0-alpha"
      :device "device.a"
      :commit-root commit-new
      :head-digest head-new-digest

@@ -4,8 +4,8 @@
             [tahto.store.model :as model]
             [tahto.store.provider :as provider]))
 
-(def protocol "tahto.monitor-probe/1")
-(def diagnostics-protocol "tahto.diagnostics/1")
+(def protocol "tahto.monitor-probe/0-alpha")
+(def diagnostics-protocol "tahto.diagnostics/0-alpha")
 (def diagnostics-operation "monitor.diagnostics")
 
 (defn collection-count

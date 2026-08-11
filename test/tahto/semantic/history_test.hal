@@ -55,7 +55,7 @@
 
 (defn signature
   [key-id]
-  {:profile "tahto-signature/1"
+  {:profile "tahto-signature/0-alpha"
    :algorithm "ed25519"
    :key-id key-id
    :value "abcdefghijklmnopqrstuvwxyz0123456789"})
@@ -67,7 +67,7 @@
    :namespace namespace
    :collection collection
    :schema-refs
-   [{:protocol "tahto.schema-ref/1"
+   [{:protocol "tahto.schema-ref/0-alpha"
      :schema "fixture.entity"
      :schema-version 1
      :package "hara:fixture/world-specs"
@@ -263,7 +263,7 @@
       (get-in linear-result [:value :commit :schema-version])
       (model/commit-record (result-state linear-result) commit-left-root)])
    [true true
-    "tahto.commit/1"
+    "tahto.commit/0-alpha"
     "tahto.semantic-root"
     1
     left])
@@ -439,7 +439,7 @@
     true
     "hoplite.store"
     "compare-and-swap"
-    "hoplite.store-request/1"
+    "hoplite.store-request/0-alpha"
     0 1 plan-digest false false])
 
   (test/check

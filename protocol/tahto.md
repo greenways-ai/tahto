@@ -44,8 +44,8 @@ The current control-plane application exposes:
 
 ```text
 GET /.well-known/tahto
-GET /tahto/v1/health
-GET /tahto/v1/status
+GET /tahto/0-alpha/health
+GET /tahto/0-alpha/status
 ```
 
 The descriptor is public local metadata and contains no private key, bearer
@@ -88,7 +88,7 @@ Metadata uses generic `hoplite.store` for opaque canonical values, exact revisio
 CAS and atomic opaque receipts. Large bytes use generic `hoplite.blob` for staged
 upload, digest-verified installation and immutable source opening.
 
-Authorized ranges project only `hoplite.response-source/1`. Host ownership is exact
+Authorized ranges project only `hoplite.response-source/0-alpha`. Host ownership is exact
 request context + work + handle; a copied numeric handle is insufficient
 authority and never enters durable Tahto state.
 
@@ -107,8 +107,8 @@ bounded stable-ID index
 complete semantic collection root
 ```
 
-A semantic root is referenced by an ordinary `tahto.commit/1` and selected by an
-ordinary `tahto.head/1`. Tahto preserves divergent valid roots. An application-
+A semantic root is referenced by an ordinary `tahto.commit/0-alpha` and selected by an
+ordinary `tahto.head/0-alpha`. Tahto preserves divergent valid roots. An application-
 owned merge package may later produce a normal merge commit; Tahto does not
 invent or execute a universal merge.
 

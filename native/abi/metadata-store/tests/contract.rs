@@ -8,7 +8,7 @@ fn digest(fill: char) -> String {
 
 #[test]
 fn downstream_provider_can_construct_and_validate_the_closed_contract() {
-    let snapshot = Snapshot::new(0, b"HTA1state".to_vec(), digest('a')).unwrap();
+    let snapshot = Snapshot::new(0, b"HTA0state".to_vec(), digest('a')).unwrap();
     assert_eq!(snapshot.revision, 0);
 
     let plan = CommitPlan::new(
@@ -17,7 +17,7 @@ fn downstream_provider_can_construct_and_validate_the_closed_contract() {
         digest('b'),
         digest('c'),
         digest('d'),
-        b"HTA1next".to_vec(),
+        b"HTA0next".to_vec(),
         digest('e'),
         "2026-08-07T13:00:00Z",
     )

@@ -4,7 +4,7 @@ The provider is accepted only when the release gate proves all of the following 
 
 ```text
 schema version and STRICT-table verification
-canonical HTA1 snapshot load and restart recovery
+canonical HTA0 snapshot load and restart recovery
 SHA-256 state verification on initialize, commit and load
 one-step expected-revision compare-and-swap
 exact plan-digest replay after later commits

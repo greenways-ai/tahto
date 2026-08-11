@@ -35,8 +35,8 @@ new signed commit or head record.
 A production verifier returns:
 
 ```clojure
-{:protocol "tahto.record-verification/1"
- :record-protocol "tahto.commit/1"
+{:protocol "tahto.record-verification/0-alpha"
+ :record-protocol "tahto.commit/0-alpha"
  :verified true
  :canonical-digest "sha256:..."
  :key-id "key.device-a"
@@ -46,9 +46,9 @@ A production verifier returns:
 The proof means that the provider:
 
 1. decoded the exact bounded record bytes;
-2. applied `tahto-canonical-json/1`;
+2. applied `tahto-canonical-json/0-alpha`;
 3. recomputed the canonical SHA-256 digest;
-4. verified the record's `tahto-signature/1` signature;
+4. verified the record's `tahto-signature/0-alpha` signature;
 5. resolved the signing key and revocation state; and
 6. projected no private key or bearer credential into Hara.
 
@@ -58,14 +58,14 @@ explicit proof fixtures rather than pretending that a structural signature is
 cryptographically verified.
 
 For content-addressed commit, backup and receipt records, Tahto first emits or
-returns a bounded `tahto.record-verification-request/1` for an object already
+returns a bounded `tahto.record-verification-request/0-alpha` for an object already
 authorised in the application namespace. Mutable head records also use the
 same proof profile, but their canonical digest is stored separately from the
 head coordinate.
 
 ## Immutable commits
 
-A `tahto.commit/1` is accepted only when:
+A `tahto.commit/0-alpha` is accepted only when:
 
 - its `root` equals the verifier's canonical digest;
 - application and namespace match the authorised request context;
@@ -94,7 +94,7 @@ different record is a conflict.
 
 ## Signed compare-and-swap heads
 
-A `tahto.head/1` update must include an `expected` commit set. The transition is:
+A `tahto.head/0-alpha` update must include an `expected` commit set. The transition is:
 
 ```text
 read current signed head
@@ -129,7 +129,7 @@ replay of the exact same verified head is idempotent even though its original
 
 ## Immutable backups
 
-A `tahto.backup/1` is a content-addressed signed record whose `id` equals its
+A `tahto.backup/0-alpha` is a content-addressed signed record whose `id` equals its
 canonical verification digest. A backup is accepted only when:
 
 - its object is authorised in the request namespace;
@@ -152,7 +152,7 @@ remains as evidence and may be repinned by accepting the same verified record.
 `restore-plan` walks the exact backup closure and returns:
 
 ```clojure
-{:protocol "tahto.restore-manifest/1"
+{:protocol "tahto.restore-manifest/0-alpha"
  :backup "sha256:..."
  :application "app.example"
  :complete true
@@ -169,7 +169,7 @@ submits explicit signed head changes.
 
 ## Receipts
 
-A verified `tahto.receipt/1` may be stored as immutable evidence for actions such
+A verified `tahto.receipt/0-alpha` may be stored as immutable evidence for actions such
 as `commit.accept`, `head.update`, `backup.pin` and `restore.manifest`. The
 history transition returns receipt action and subject intents, but it does not
 forge a node signature. An authorised node signer must produce the receipt and

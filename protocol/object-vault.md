@@ -34,14 +34,14 @@ tahto.store.graph
 
 Hara compiler metadata is canonical under `:lang/*`; Tahto owns its versioned
 `tahto.*` protocol identifiers without a forwarding language namespace. Tahto's
-wire discriminators remain strings such as `tahto.object/1`.
+wire discriminators remain strings such as `tahto.object/0-alpha`.
 
 ## Immutable reducer state
 
 The kernel state is a small immutable value:
 
 ```clojure
-{:protocol "tahto.object-vault-state/1"
+{:protocol "tahto.object-vault-state/0-alpha"
  :limits {...}
  :objects {digest object-record}
  :uploads {upload-id upload-record}
@@ -55,10 +55,10 @@ The kernel state is a small immutable value:
                   :digests [digest ...]}}}
 ```
 
-The global object records align with the TAHTO-2 `tahto.object/1` envelope:
+The global object records align with the TAHTO-2 `tahto.object/0-alpha` envelope:
 
 ```clojure
-{:protocol "tahto.object/1"
+{:protocol "tahto.object/0-alpha"
  :digest "sha256:..."
  :size 1234
  :encoding "identity"}
@@ -148,8 +148,8 @@ manifest/verify
 object/read-range
 ```
 
-Effects use `tahto.store.host-effect/1`; trusted results use
-`tahto.store.host-result/1`. Records containing `path`, `destination`,
+Effects use `tahto.store.host-effect/0-alpha`; trusted results use
+`tahto.store.host-result/0-alpha`. Records containing `path`, `destination`,
 `upstream`, `url`, raw `bytes`, a raw `body`, `command` or `executable` are
 invalid.
 
@@ -200,7 +200,7 @@ caller that merely guesses another application's digest receives no read plan.
 
 ## Verified chunk manifests
 
-The first manifest profile is `tahto.chunk-manifest/1`. A manifest is itself an
+The first manifest profile is `tahto.chunk-manifest/0-alpha`. A manifest is itself an
 immutable object. Its ordered chunk vector may repeat a digest at multiple
 ordinals; occurrences are not collapsed.
 

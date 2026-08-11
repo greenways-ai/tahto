@@ -8,7 +8,7 @@
 ;; deterministic values and record builders; it performs no host calls and
 ;; holds no request, work, source, path or credential authority.
 
-(def fixture-protocol "tahto.two-device-fixture/1")
+(def fixture-protocol "tahto.two-device-fixture/0-alpha")
 
 (def node "node.home")
 (def application "fixture.transfer")
@@ -45,7 +45,7 @@
 
 (defn signature
   [key-id]
-  {:profile "tahto-signature/1"
+  {:profile "tahto-signature/0-alpha"
    :algorithm "ed25519"
    :key-id key-id
    :value "0123456789abcdef"})

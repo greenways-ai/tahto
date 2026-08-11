@@ -38,7 +38,7 @@ The pure operation consumes:
   :collection "scene"
   :root index-root
   :semantic-index
-  {:protocol "tahto.semantic-index/1"
+  {:protocol "tahto.semantic-index/0-alpha"
    :entries
    [{:id "entity/a" :root semantic-object-a}
     {:id "entity/b" :root semantic-object-b}]}})
@@ -105,7 +105,7 @@ The pure root operation consumes:
   :collection "scene"
   :root semantic-root-root
   :semantic-root
-  {:protocol "tahto.semantic-root/1"
+  {:protocol "tahto.semantic-root/0-alpha"
    :application "fixture.world"
    :namespace "world.a"
    :collection "scene"
@@ -182,12 +182,12 @@ entries.
 
 ## Compatibility
 
-- `tahto.object-vault-state/1` remains unchanged;
+- `tahto.object-vault-state/0-alpha` remains unchanged;
 - semantic tables are absent until first use and accessed with empty defaults;
 - indexes and roots remain ordinary immutable objects;
 - `object-graph/1`, closure, GC, sync, backup and restore remain authoritative;
 - no object, commit or head record gains fields;
-- HPT1 or another scalable index can later use a new profile without rewriting
+- HPT0 or another scalable index can later use a new profile without rewriting
   v1 roots.
 
 ## Security laws

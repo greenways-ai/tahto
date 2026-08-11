@@ -9,7 +9,7 @@
             [tahto.store.model :as model]))
 
 (def operation "semantic.read")
-(def result-protocol "tahto.semantic-read-result/1")
+(def result-protocol "tahto.semantic-read-result/0-alpha")
 (def max-read-commits 16)
 
 (def request-fields

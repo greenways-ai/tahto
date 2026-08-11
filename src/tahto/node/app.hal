@@ -245,37 +245,37 @@
               :handler #'root}
         :options {:name :tahto/discovery-options
                   :handler #'preflight}}]
-      ["/tahto/v1/health"
+      ["/tahto/0-alpha/health"
        {:get {:name :tahto/health
               :summary "Report Tahto control-plane readiness"
               :handler #'health}
         :options {:name :tahto/health-options
                   :handler #'preflight}}]
-      ["/tahto/v1/status"
+      ["/tahto/0-alpha/status"
        {:get {:name :tahto/status
               :summary "Report installed Tahto fabric components"
               :handler #'status}
         :options {:name :tahto/status-options
                   :handler #'preflight}}]
-      ["/tahto/v1/diagnostics"
+      ["/tahto/0-alpha/diagnostics"
        {:post {:name :tahto/diagnostics
                :summary "Report bounded diagnostics to one paired device"
                :handler #'diagnostics}
         :options {:name :tahto/diagnostics-options
                   :handler #'preflight}}]
-      ["/tahto/v1/pairing/prepare"
+      ["/tahto/0-alpha/pairing/prepare"
        {:post {:name :tahto.pairing/prepare
                :summary "Bind an invitation to one browser device key"
                :handler #'pairing-prepare}
         :options {:name :tahto.pairing/prepare-options
                   :handler #'preflight}}]
-      ["/tahto/v1/pairing/invitations"
+      ["/tahto/0-alpha/pairing/invitations"
        {:post {:name :tahto.pairing/issue
                :summary "Mint one loopback-managed pairing invitation"
                :handler #'pairing-issue}
         :options {:name :tahto.pairing/issue-options
                   :handler #'preflight}}]
-      ["/tahto/v1/pairing/complete"
+      ["/tahto/0-alpha/pairing/complete"
        {:post {:name :tahto.pairing/complete
                :summary "Verify and atomically enrol one paired device"
                :handler #'pairing-complete}
