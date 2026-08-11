@@ -3,6 +3,8 @@
 .hoplite/
 target/
 node_modules/
+site/dist/
+site/.astro/
 __pycache__/
 metadata.sqlite
 objects/
