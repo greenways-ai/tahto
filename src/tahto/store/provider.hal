@@ -1,7 +1,5 @@
 (ns tahto.store.provider
   (:require [std.foundation :refer :all]
-            [std.foundation.coroutine :as coroutine]
-            [std.foundation.host :as foundation-host]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
             [tahto.store.transaction :as transaction]))
@@ -523,8 +521,8 @@
     (let [state (get prepared :state)
           call (get prepared :value)
           result
-          (coroutine/await
-           (foundation-host/call
+          (co/await
+           (host/call
             (get call :service)
             (get call :operation)
             (call-request call)))]

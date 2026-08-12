@@ -1,7 +1,7 @@
 (ns tahto.store.memory-blob
   (:require [std.foundation :refer :all]
             [tahto.store.capability :as capability]
-            [tahto.store.host :as host]
+            [tahto.store.host :as store-host]
             [tahto.store.model :as model]))
 
 ;; This is a deterministic reference implementation of the generic `hoplite.blob`
@@ -21,7 +21,7 @@
 (defn source-fixture?
   [value]
   (and
-   (host/exact-keys? value source-fixture-fields)
+   (store-host/exact-keys? value source-fixture-fields)
    (model/identifier? (get value :work-id))
    (model/non-negative-integer? (get value :offset))
    (model/positive-integer? (get value :length))

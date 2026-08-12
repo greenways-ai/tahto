@@ -1,7 +1,5 @@
 (ns tahto.node.pairing-wire
   (:require [std.foundation :refer :all]
-            [std.foundation.json :as json]
-            [std.foundation.string :as string]
             [tahto.node.request-auth :as request-auth]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
@@ -31,7 +29,7 @@
   [value]
   (if
    (string? value)
-   (let [parts (string/split value "~")]
+   (let [parts (str/split value "~")]
      (if
       (and (= 2 (count parts))
            (model/identifier? (first parts))

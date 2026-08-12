@@ -1,7 +1,7 @@
 (ns tahto.store.vault
   (:require [std.foundation :refer :all]
             [tahto.store.graph :as graph]
-            [tahto.store.host :as host]
+            [tahto.store.host :as store-host]
             [tahto.store.model :as model]))
 
 (defn limits
@@ -108,7 +108,7 @@
                     next-state
                     (assoc state :uploads
                            (assoc (get state :uploads) upload-id upload))
-                    effect (host/effect
+                    effect (store-host/effect
                             "upload/open"
                             {:upload-id upload-id
                              :digest digest
@@ -157,7 +157,7 @@
       (let [updated (assoc upload :offset (+ offset length))
             next-state (assoc state :uploads
                               (assoc (get state :uploads) upload-id updated))
-            effect (host/effect
+            effect (store-host/effect
                     "upload/append"
                     {:upload-id upload-id
                      :offset offset
@@ -174,7 +174,7 @@
       (model/ok
        (assoc state :uploads (dissoc (get state :uploads) upload-id))
        upload-id
-       [(host/effect "upload/abort" {:upload-id upload-id})]))))
+       [(store-host/effect "upload/abort" {:upload-id upload-id})]))))
 
 (defn request-install
   [state request]
@@ -196,7 +196,7 @@
       (let [updated (assoc upload :status "verifying")
             next-state (assoc state :uploads
                               (assoc (get state :uploads) upload-id updated))
-            effect (host/effect
+            effect (store-host/effect
                     "upload/verify-install"
                     {:upload-id upload-id
                      :digest (get upload :digest)
@@ -214,7 +214,7 @@
       (not (= "verifying" (get upload :status)))
       (model/fail state "tahto.store/upload-not-verifying" {:upload-id upload-id})
 
-      (not (host/verified-install? host-result upload))
+      (not (store-host/verified-install? host-result upload))
       (model/fail state "tahto.store/install-verification-failed"
                   {:upload-id upload-id})
 
@@ -359,6 +359,6 @@
       (model/ok
        state
        {:digest digest :start start :end end}
-       [(host/effect
+       [(store-host/effect
          "object/read-range"
          {:digest digest :start start :end end})]))))

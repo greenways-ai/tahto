@@ -1,8 +1,7 @@
 (ns tahto.store.upload
   (:require [std.foundation :refer :all]
-            [std.foundation.coroutine :as coroutine]
             [tahto.store.capability :as capability]
-            [tahto.store.host :as host]
+            [tahto.store.host :as store-host]
             [tahto.store.model :as model]
             [tahto.store.vault :as vault]))
 
@@ -18,7 +17,7 @@
 (defn upload-effect?
   [effect]
   (and
-   (host/effect? effect)
+   (store-host/effect? effect)
    (has? upload-effect-operations
          (get effect :operation))))
 
@@ -186,7 +185,7 @@
       (not (upload-effect? effect))
       (model/fail state "tahto.upload/effect-invalid")
       (let [executed
-            (coroutine/await
+            (co/await
              (capability/execute
               (get transition :state)
               effect))]
@@ -194,28 +193,28 @@
 
 (defn ^:async begin
   [state request]
-  (coroutine/await
+  (co/await
    (execute-transition
     state
     (vault/begin-upload state request))))
 
 (defn ^:async append
   [state request]
-  (coroutine/await
+  (co/await
    (execute-transition
     state
     (vault/append-upload state request))))
 
 (defn ^:async abort
   [state request]
-  (coroutine/await
+  (co/await
    (execute-transition
     state
     (vault/abort-upload state request))))
 
 (defn ^:async install
   [state request]
-  (coroutine/await
+  (co/await
    (execute-transition
     state
     (vault/request-install state request))))

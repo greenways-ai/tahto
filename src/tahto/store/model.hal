@@ -1,6 +1,5 @@
 (ns tahto.store.model
-  (:require [std.foundation :refer :all]
-            [std.foundation.string :as string]))
+  (:require [std.foundation :refer :all]))
 
 (def state-protocol "tahto.object-vault-state/0-alpha")
 (def device-protocol "tahto.device/0-alpha")
@@ -69,12 +68,12 @@
    (let [length (count value)]
      (and (> length 0)
           (<= length 128)
-          (has? identifier-start-characters (string/slice value 0 1))
+          (has? identifier-start-characters (str/slice value 0 1))
           (loop [index 1]
             (if (= index length)
               true
               (if (has? identifier-characters
-                        (string/slice value index (inc index)))
+                        (str/slice value index (inc index)))
                 (recur (inc index))
                 false)))))))
 
@@ -82,8 +81,8 @@
   [value]
   (and (non-empty-string? value)
        (<= (count value) 255)
-       (not (string/includes? value "\r"))
-       (not (string/includes? value "\n"))))
+       (not (str/includes? value "\r"))
+       (not (str/includes? value "\n"))))
 
 (defn integer-value?
   [value]
@@ -109,11 +108,11 @@
   (and
    (string? value)
    (= 71 (count value))
-   (= "sha256:" (string/slice value 0 7))
+   (= "sha256:" (str/slice value 0 7))
    (loop [index 7]
      (if (= index 71)
        true
-       (if (has? hex-digits (string/slice value index (inc index)))
+       (if (has? hex-digits (str/slice value index (inc index)))
          (recur (inc index))
          false)))))
 

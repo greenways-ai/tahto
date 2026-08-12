@@ -1,6 +1,5 @@
 (ns tahto.semantic.model
   (:require [std.foundation :refer :all]
-            [std.foundation.string :as string]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]))
 
@@ -141,7 +140,7 @@
        (= index (count value))
        true
        (if
-        (has? allowed (string/slice value index (inc index)))
+        (has? allowed (str/slice value index (inc index)))
         (recur (inc index))
         false))))))
 
@@ -159,12 +158,12 @@
    (and
     (string? value)
     (<= (count value) max-package-coordinate-length)
-    (let [tap-parts (string/split value ":")]
+    (let [tap-parts (str/split value ":")]
       (and
        (= 2 (count tap-parts))
        (package-coordinate-component? (nth tap-parts 0))
        (not (= "official" (nth tap-parts 0)))
-       (let [package-parts (string/split (nth tap-parts 1) "/")]
+       (let [package-parts (str/split (nth tap-parts 1) "/")]
          (and
           (= 2 (count package-parts))
           (package-coordinate-component? (nth package-parts 0))
@@ -178,7 +177,7 @@
     (characters-valid? value decimal-digits)
     (or
      (= 1 (count value))
-     (not (= "0" (string/slice value 0 1)))))))
+     (not (= "0" (str/slice value 0 1)))))))
 
 (defn semver-identifier?
   [value]
@@ -201,7 +200,7 @@
   (truth-value
    (and
     (string? value)
-    (let [parts (string/split value ".")]
+    (let [parts (str/split value ".")]
       (and
        (= 3 (count parts))
        (every? numeric-semver-identifier? parts))))))
@@ -211,19 +210,19 @@
   (truth-value
    (and
     (model/non-empty-string? value)
-    (let [parts (string/split value ".")]
+    (let [parts (str/split value ".")]
       (and
        (> (count parts) 0)
        (every? predicate parts))))))
 
 (defn split-first
   [value separator]
-  (let [index (string/index-of value separator)]
+  (let [index (str/index-of value separator)]
     (if
      (< index 0)
      [value nil]
-     [(string/slice value 0 index)
-      (string/slice value (inc index))])))
+     [(str/slice value 0 index)
+      (str/slice value (inc index))])))
 
 (defn package-version?
   [value]
@@ -232,8 +231,8 @@
     (string? value)
     (> (count value) 0)
     (<= (count value) max-package-version-length)
-    (= (string/index-of value "+")
-       (string/last-index-of value "+"))
+    (= (str/index-of value "+")
+       (str/last-index-of value "+"))
     (let [build-split (split-first value "+")
           version-and-prerelease (nth build-split 0)
           build (nth build-split 1)

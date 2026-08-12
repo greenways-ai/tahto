@@ -1,6 +1,5 @@
 (ns tahto.node.pairing-service
   (:require [std.foundation :refer :all]
-            [std.foundation.coroutine :as coroutine]
             [tahto.store.model :as model]
             [tahto.store.mutation :as mutation]
             [tahto.store.provider :as provider]
@@ -128,7 +127,7 @@
   [timestamp]
   (let [initial (model/empty-state)
         loaded
-        (coroutine/await
+        (co/await
          (provider/execute-prepared
           (provider/prepare-load initial)))]
     (if
@@ -139,7 +138,7 @@
         (map? state)
         (model/ok state state)
         (let [initialized
-              (coroutine/await
+              (co/await
                (provider/execute-prepared
                 (provider/prepare-initialize
                  initial
@@ -158,7 +157,7 @@
     (if
      (nil? transition-fn)
      (model/fail {} "tahto.pairing-service/operation-invalid")
-     (let [loaded (coroutine/await (load-or-initialize timestamp))]
+     (let [loaded (co/await (load-or-initialize timestamp))]
        (if
         (not (get loaded :ok))
         loaded
@@ -196,7 +195,7 @@
                       canonical-digest
                       timestamp)
                      committed
-                     (coroutine/await
+                     (co/await
                       (provider/execute-prepared
                        (mutation/prepare-store-commit
                         changed verification)))]

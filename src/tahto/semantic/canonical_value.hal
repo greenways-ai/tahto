@@ -1,8 +1,6 @@
 (ns tahto.semantic.canonical-value
   (:require [std.foundation :refer :all]
             [hoplite.value :as portable]
-            [std.foundation.coroutine :as coroutine]
-            [std.foundation.host :as foundation-host]
             [tahto.protocol.validate :as validate]
             [tahto.semantic.model :as semantic]
             [tahto.store.graph :as graph]
@@ -219,8 +217,8 @@
      (get prepared :ok)
      (let [call (get prepared :value)
            result
-           (coroutine/await
-            (foundation-host/call
+           (co/await
+            (host/call
              (get call :service)
              (get call :operation)
              (call-request call)))]
@@ -287,7 +285,7 @@
           :root (get input :root)
           :max-bytes (get input :max-bytes)}
          read-result
-         (coroutine/await (read state read-input))]
+         (co/await (read state read-input))]
      (if
       (get read-result :ok)
       (accept-verified

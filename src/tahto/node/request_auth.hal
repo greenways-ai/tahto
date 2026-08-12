@@ -1,7 +1,5 @@
 (ns tahto.node.request-auth
   (:require [std.foundation :refer :all]
-            [std.foundation.json :as json]
-            [std.foundation.string :as string]
             [tahto.protocol.validate :as validate]))
 
 (def request-protocol "tahto.device-request/0-alpha")
@@ -72,12 +70,12 @@
   (if
    (and (string? encoded)
         (> (count encoded) 5)
-        (= "p256:" (string/slice encoded 0 5)))
+        (= "p256:" (str/slice encoded 0 5)))
    (let [jwk-bytes
          (host-call "base64url-decode"
-                    [(string/slice encoded 5 (count encoded))])]
+                    [(str/slice encoded 5 (count encoded))])]
      (host-call "p256-jwk-sec1"
-                [(string/decode-utf8 jwk-bytes)]))
+                [(str/decode-utf8 jwk-bytes)]))
    nil))
 
 (defn digest-bytes
@@ -85,9 +83,9 @@
   (if
    (and (string? value)
         (= 71 (count value))
-        (= "sha256:" (string/slice value 0 7)))
+        (= "sha256:" (str/slice value 0 7)))
    (host-call "hex-decode"
-              [(string/slice value 7 (count value))])
+              [(str/slice value 7 (count value))])
    nil))
 
 (defn unsigned-json
@@ -131,5 +129,5 @@
 (defn decode-envelope
   [encoded]
   (json/read
-   (string/decode-utf8
+   (str/decode-utf8
     (host-call "base64url-decode" [encoded]))))

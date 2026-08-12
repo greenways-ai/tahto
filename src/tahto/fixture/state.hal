@@ -1,6 +1,5 @@
 (ns tahto.fixture.state
   (:require [std.foundation :refer :all]
-            [std.foundation.coroutine :as coroutine]
             [tahto.fixture.two-device :as fixture]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
@@ -177,7 +176,7 @@
      (not (get prepared :ok))
      prepared
      (let [executed
-           (coroutine/await
+           (co/await
             (provider/execute-prepared prepared))]
        (if
         (not (get executed :ok))
@@ -193,7 +192,7 @@
      initial-result
      (let [state (result-state initial-result)
            loaded
-           (coroutine/await
+           (co/await
             (provider/execute-prepared
              (provider/prepare-load state)))]
        (if
@@ -201,5 +200,5 @@
         loaded
         (if
          (nil? (get loaded :value))
-         (coroutine/await (initialize state verification))
+         (co/await (initialize state verification))
          (accept-snapshot state "loaded" (get loaded :value))))))))

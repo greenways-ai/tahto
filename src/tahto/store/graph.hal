@@ -1,6 +1,6 @@
 (ns tahto.store.graph
   (:require [std.foundation :refer :all]
-            [tahto.store.host :as host]
+            [tahto.store.host :as store-host]
             [tahto.store.model :as model]))
 
 (defn limits
@@ -158,7 +158,7 @@
       (model/ok
        state
        {:digest digest}
-       [(host/effect
+       [(store-host/effect
          "manifest/verify"
          {:digest digest
           :max-chunks (get (limits state) :max-manifest-chunks)})]))))
@@ -166,7 +166,7 @@
 (defn chunk-valid?
   [state application namespace chunk]
   (and
-   (host/manifest-chunk? chunk)
+   (store-host/manifest-chunk? chunk)
    (let [digest (get chunk :digest)
          size (get chunk :size)
          object (model/stored-object state digest)]
@@ -207,7 +207,7 @@
       (not (model/identifier? namespace))
       (model/fail state "tahto.store/namespace-invalid")
 
-      (not (host/verified-manifest? host-result digest maximum))
+      (not (store-host/verified-manifest? host-result digest maximum))
       (model/fail state "tahto.store/manifest-verification-failed"
                   {:digest digest})
 

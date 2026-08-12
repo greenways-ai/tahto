@@ -1,9 +1,8 @@
 (ns tahto.store.response-source
   (:require [std.foundation :refer :all]
-            [std.foundation.coroutine :as coroutine]
             [hoplite.response-source :as portable]
             [tahto.store.capability :as capability]
-            [tahto.store.host :as host]
+            [tahto.store.host :as store-host]
             [tahto.store.model :as model]
             [tahto.store.vault :as vault]))
 
@@ -15,7 +14,7 @@
 (defn range-effect?
   [effect]
   (and
-   (host/effect? effect)
+   (store-host/effect? effect)
    (= "object/read-range" (get effect :operation))))
 
 (defn transition-effect
@@ -34,7 +33,7 @@
     (if
      (and
       (range-effect? effect)
-      (host/opened-range?
+      (store-host/opened-range?
        opened
        (get request :digest)
        (get request :start)
@@ -97,7 +96,7 @@
       (not (range-effect? effect))
       (model/fail state "tahto.response-source/effect-invalid")
       (let [executed
-            (coroutine/await
+            (co/await
              (capability/execute
               (get transition :state)
               effect))]
@@ -105,7 +104,7 @@
 
 (defn ^:async open
   [state request]
-  (coroutine/await
+  (co/await
    (execute-transition
     state
     (vault/plan-range state request))))

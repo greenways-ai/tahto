@@ -1,6 +1,5 @@
 (ns tahto.fixture.app
-  (:require [std.foundation.json :as json]
-            [tahto.fixture.two-device :as fixture]))
+  (:require [tahto.fixture.two-device :as fixture]))
 
 ;; Closed HTTP-shaped values and handlers for the release fixture.  This
 ;; namespace remains ordinary Hara so the portable state suite can load it

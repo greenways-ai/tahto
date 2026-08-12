@@ -1,8 +1,6 @@
 (ns tahto.store.capability
   (:require [std.foundation :refer :all]
-            [std.foundation.coroutine :as coroutine]
-            [std.foundation.host :as foundation-host]
-            [tahto.store.host :as host]
+            [tahto.store.host :as store-host]
             [tahto.store.model :as model]))
 
 ;; Tahto owns domain effects. This namespace maps those effects to an
@@ -36,7 +34,7 @@
 
 (defn supported-effect?
   [effect]
-  (and (host/effect? effect)
+  (and (store-host/effect? effect)
        (has? supported-effect-operations
              (get effect :operation))))
 
@@ -53,16 +51,16 @@
 (defn request?
   [value]
   (and
-   (host/record-safe? value)
+   (store-host/record-safe? value)
    (= request-protocol (get value :protocol))
    (capability-operation? (get value :operation))
    (cond
      (= "probe" (get value :operation))
-     (host/exact-keys? value #{:protocol :operation})
+     (store-host/exact-keys? value #{:protocol :operation})
 
      (= "staging/open" (get value :operation))
      (and
-      (host/exact-keys?
+      (store-host/exact-keys?
        value
        #{:protocol :operation :staging-key
          :expected-digest :expected-size :media-type})
@@ -73,7 +71,7 @@
 
      (= "staging/append-from-source" (get value :operation))
      (and
-      (host/exact-keys?
+      (store-host/exact-keys?
        value
        #{:protocol :operation :staging-key
          :offset :length :source-handle})
@@ -84,14 +82,14 @@
 
      (= "staging/abort" (get value :operation))
      (and
-      (host/exact-keys?
+      (store-host/exact-keys?
        value
        #{:protocol :operation :staging-key})
       (model/identifier? (get value :staging-key)))
 
      (= "staging/verify-commit" (get value :operation))
      (and
-      (host/exact-keys?
+      (store-host/exact-keys?
        value
        #{:protocol :operation :staging-key
          :expected-digest :expected-size})
@@ -101,7 +99,7 @@
 
      (= "object/open-source" (get value :operation))
      (and
-      (host/exact-keys?
+      (store-host/exact-keys?
        value
        #{:protocol :operation :digest :offset :length})
       (model/canonical-digest? (get value :digest))
@@ -175,7 +173,7 @@
   (let [arguments (get value :arguments)
         request (call-request value)]
     (and
-     (host/exact-keys? value host-call-fields)
+     (store-host/exact-keys? value host-call-fields)
      (= host-service (get value :service))
      (vector? arguments)
      (= 1 (count arguments))
@@ -193,7 +191,7 @@
 (defn prepare
   [state effect]
   (cond
-    (not (host/effect? effect))
+    (not (store-host/effect? effect))
     (model/fail state "tahto.capability/effect-invalid")
 
     (not (supported-effect? effect))
@@ -212,18 +210,18 @@
 (defn result?
   [value]
   (and
-   (host/record-safe? value)
+   (store-host/record-safe? value)
    (= result-protocol (get value :protocol))
    (capability-operation? (get value :operation))
    (cond
      (= "probe" (get value :operation))
      (and
-      (host/exact-keys? value #{:protocol :operation :ready})
+      (store-host/exact-keys? value #{:protocol :operation :ready})
       (= true (get value :ready)))
 
      (= "staging/open" (get value :operation))
      (and
-      (host/exact-keys?
+      (store-host/exact-keys?
        value
        #{:protocol :operation :staging-key :opened :offset})
       (model/identifier? (get value :staging-key))
@@ -232,7 +230,7 @@
 
      (= "staging/append-from-source" (get value :operation))
      (and
-      (host/exact-keys?
+      (store-host/exact-keys?
        value
        #{:protocol :operation :staging-key :consumed :offset :length})
       (model/identifier? (get value :staging-key))
@@ -242,7 +240,7 @@
 
      (= "staging/abort" (get value :operation))
      (and
-      (host/exact-keys?
+      (store-host/exact-keys?
        value
        #{:protocol :operation :staging-key :aborted})
       (model/identifier? (get value :staging-key))
@@ -250,7 +248,7 @@
 
      (= "staging/verify-commit" (get value :operation))
      (and
-      (host/exact-keys?
+      (store-host/exact-keys?
        value
        #{:protocol :operation :staging-key :verified :committed
          :digest :size})
@@ -262,7 +260,7 @@
 
      (= "object/open-source" (get value :operation))
      (and
-      (host/exact-keys?
+      (store-host/exact-keys?
        value
        #{:protocol :operation :source-handle :digest :offset :length})
       (model/positive-integer? (get value :source-handle))
@@ -359,8 +357,8 @@
   [state]
   (let [call (host-call (probe-request))
         result
-        (coroutine/await
-         (foundation-host/call
+        (co/await
+         (host/call
           (get call :service)
           (get call :operation)
           (call-request call)))]
@@ -381,8 +379,8 @@
      (get prepared :ok)
      (let [call (get prepared :value)
            result
-           (coroutine/await
-            (foundation-host/call
+           (co/await
+            (host/call
              (get call :service)
              (get call :operation)
              (call-request call)))]
@@ -396,7 +394,7 @@
      (and
       (= "upload/verify-install" (get effect :operation))
       (result-matches-call? call result))
-     {:protocol host/result-protocol
+     {:protocol store-host/result-protocol
       :operation "upload/verify-install"
       :verified true
       :installed true
@@ -412,7 +410,7 @@
      (and
       (= "object/read-range" (get effect :operation))
       (result-matches-call? call result))
-     {:protocol host/result-protocol
+     {:protocol store-host/result-protocol
       :operation "object/read-range"
       :opened true
       :digest (get result :digest)
