@@ -1,0 +1,218 @@
+(ns tahto.semantic.route-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.prepare :as semantic-prepare]
+            [tahto.semantic.read :as semantic-read]
+            [tahto.semantic.route :as route]
+            [tahto.semantic.submit :as semantic-submit]
+            [tahto.store.model :as model]))
+
+(def application "fixture.world")
+(def namespace "world.a")
+(def collection "scene")
+(def request-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+(def device
+  {:protocol model/device-protocol
+   :id "device.a"
+   :node "node.home"
+   :public-key "ed25519:device-a-public-key"
+   :status "enrolled"
+   :enrolled-at "2026-08-09T00:00:00Z"})
+
+(defn base-state
+  []
+  (assoc (model/empty-state)
+         :devices {"device.a" device}))
+
+(defn selected-route
+  [operation]
+  {:protocol route/route-protocol
+   :operation operation
+   :application application
+   :namespace namespace
+   :collection collection})
+
+(defn request-context
+  [operation]
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation operation
+   :application application
+   :namespace namespace
+   :collection collection
+   :request-digest request-digest
+   :idempotency-key "semantic-route-idempotency-0001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(defn unchanged?
+  [state result]
+  (= state (get result :state)))
+
+(test/print-results
+ [(test/check
+   "slash operations map to one closed dotted signed-operation vocabulary"
+   [(route/signed-operation route/read-operation)
+    (route/signed-operation route/prepare-operation)
+    (route/signed-operation route/submit-operation)
+    (route/signed-operation "semantic/delete")
+    (route/signed-operation "semantic.read")]
+   [semantic-read/operation
+    semantic-prepare/operation
+    semantic-submit/operation
+    nil
+    nil])
+
+  (test/check
+   "each wrapper delegates without rewriting the underlying result"
+   (let [state (base-state)
+         request {}
+         read-context (request-context semantic-read/operation)
+         prepare-context (request-context semantic-prepare/operation)
+         submit-context (request-context semantic-submit/operation)]
+     [(= (semantic-read/read state read-context request)
+         (route/read state
+                     (selected-route route/read-operation)
+                     read-context
+                     request))
+      (= (semantic-prepare/prepare state prepare-context request)
+         (route/prepare state
+                        (selected-route route/prepare-operation)
+                        prepare-context
+                        request))
+      (= (semantic-submit/submit state submit-context request)
+         (route/submit state
+                       (selected-route route/submit-operation)
+                       submit-context
+                       request))])
+   [true true true])
+
+  (test/check
+   "unknown slash and dotted route operations fail without changing state"
+   (let [state (base-state)
+         context (request-context semantic-read/operation)
+         unknown
+         (route/read state
+                     (selected-route "semantic/delete")
+                     context
+                     {})
+         dotted
+         (route/read state
+                     (selected-route "semantic.read")
+                     context
+                     {})]
+     [(error-code unknown)
+      (error-code dotted)
+      (unchanged? state unknown)
+      (unchanged? state dotted)])
+   ["tahto.semantic/route-operation-unknown"
+    "tahto.semantic/route-operation-unknown"
+    true true])
+
+  (test/check
+   "route and signed request operations cannot be substituted"
+   (let [state (base-state)
+         read-route (selected-route route/read-operation)
+         substituted-handler
+         (route/prepare state
+                        read-route
+                        (request-context semantic-read/operation)
+                        {})
+         substituted-request
+         (route/read state
+                     read-route
+                     (request-context semantic-prepare/operation)
+                     {})]
+     [(error-code substituted-handler)
+      (error-code substituted-request)
+      (unchanged? state substituted-handler)
+      (unchanged? state substituted-request)])
+   ["tahto.semantic/route-operation-substitution"
+    "tahto.semantic/route-request-operation-mismatch"
+    true true])
+
+  (test/check
+   "application namespace and collection coordinates must agree exactly"
+   (let [state (base-state)
+         context (request-context semantic-read/operation)
+         application-result
+         (route/read state
+                     (assoc (selected-route route/read-operation)
+                            :application "fixture.other")
+                     context
+                     {})
+         namespace-result
+         (route/read state
+                     (assoc (selected-route route/read-operation)
+                            :namespace "world.other")
+                     context
+                     {})
+         collection-result
+         (route/read state
+                     (assoc (selected-route route/read-operation)
+                            :collection "other")
+                     context
+                     {})]
+     [(error-code application-result)
+      (error-code namespace-result)
+      (error-code collection-result)
+      (unchanged? state application-result)
+      (unchanged? state namespace-result)
+      (unchanged? state collection-result)])
+   ["tahto.semantic/route-coordinate-mismatch"
+    "tahto.semantic/route-coordinate-mismatch"
+    "tahto.semantic/route-coordinate-mismatch"
+    true true true])
+
+  (test/check
+   "completed replayed and revoked request evidence fails before dispatch"
+   (let [state (base-state)
+         selected (selected-route route/read-operation)
+         context (request-context semantic-read/operation)
+         completed
+         (route/read state
+                     selected
+                     (assoc context
+                            :status "completed"
+                            :result-digest request-digest)
+                     {})
+         replayed
+         (route/read state
+                     selected
+                     (assoc context :replayed true)
+                     {})
+         revoked-state
+         (assoc-in state [:devices "device.a" :status] "revoked")
+         revoked
+         (route/read revoked-state selected context {})]
+     [(error-code completed)
+      (error-code replayed)
+      (error-code revoked)
+      (unchanged? state completed)
+      (unchanged? state replayed)
+      (unchanged? revoked-state revoked)])
+   ["tahto.semantic/route-request-evidence-invalid"
+    "tahto.semantic/route-request-evidence-invalid"
+    "tahto.semantic/route-request-evidence-invalid"
+    true true true])
+
+  (test/check
+   "route records are closed and transport neutral"
+   (let [state (base-state)
+         result
+         (route/read state
+                     (assoc (selected-route route/read-operation)
+                            :provider "forbidden")
+                     (request-context semantic-read/operation)
+                     {})]
+     [(error-code result)
+      (unchanged? state result)])
+   ["tahto.semantic/route-invalid" true])])
