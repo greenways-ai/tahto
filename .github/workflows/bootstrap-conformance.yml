@@ -204,7 +204,7 @@ jobs:
       - name: Stage the Hoplite-owned portable contracts
         run: |
           mkdir -p .conformance-src/hoplite
-          cp .dependencies/technology/hoplite/core/lib/src/hoplite/value.hal .conformance-src/hoplite/value.hal
+          cp .dependencies/technology/hoplite/migration/value/src/hoplite/value.hal .conformance-src/hoplite/value.hal
           cp .dependencies/technology/hoplite/core/lib/src/hoplite/response_source.hal .conformance-src/hoplite/response_source.hal
       - name: Run the Hoplite-backed state conformance suites
         run: |

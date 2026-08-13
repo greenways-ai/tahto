@@ -1,0 +1,139 @@
+(ns tahto.semantic.route
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.prepare :as semantic-prepare]
+            [tahto.semantic.read :as semantic-read]
+            [tahto.semantic.submit :as semantic-submit]
+            [tahto.store.model :as model]))
+
+(def route-protocol
+  "tahto.semantic-route/0-alpha")
+
+(def read-operation
+  "semantic/read")
+
+(def prepare-operation
+  "semantic/prepare")
+
+(def submit-operation
+  "semantic/submit")
+
+(def route-operations
+  {read-operation semantic-read/operation
+   prepare-operation semantic-prepare/operation
+   submit-operation semantic-submit/operation})
+
+(def route-fields
+  #{:protocol :operation :application :namespace :collection})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn signed-operation
+  [route-operation]
+  (get route-operations route-operation))
+
+(defn route-shape?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value route-fields #{})
+    (= route-protocol (get value :protocol))
+    (string? (get value :operation))
+    (model/identifier? (get value :application))
+    (model/identifier? (get value :namespace))
+    (model/identifier? (get value :collection)))))
+
+(defn route?
+  [value]
+  (truth-value
+   (and
+    (route-shape? value)
+    (not (nil? (signed-operation (get value :operation)))))))
+
+(defn route-coordinate
+  [route]
+  [(get route :application)
+   (get route :namespace)
+   (get route :collection)])
+
+(defn context-coordinate
+  [context]
+  [(get context :application)
+   (get context :namespace)
+   (get context :collection)])
+
+(defn request-evidence?
+  [state context]
+  (truth-value
+   (and
+    (validate/device-request-context? context)
+    (= "pending" (get context :status))
+    (= false (get context :replayed))
+    (nil? (get context :result-digest))
+    (model/device-enrolled? state (get context :device)))))
+
+(defn dispatch
+  [expected-operation state route context request]
+  (let [selected-operation (get route :operation)
+        mapped-operation (signed-operation selected-operation)]
+    (cond
+      (not (route-shape? route))
+      (model/fail state
+                  "tahto.semantic/route-invalid")
+
+      (nil? mapped-operation)
+      (model/fail state
+                  "tahto.semantic/route-operation-unknown"
+                  {:operation selected-operation})
+
+      (not (= expected-operation selected-operation))
+      (model/fail state
+                  "tahto.semantic/route-operation-substitution"
+                  {:expected expected-operation
+                   :selected selected-operation})
+
+      (not (request-evidence? state context))
+      (model/fail state
+                  "tahto.semantic/route-request-evidence-invalid")
+
+      (not (= mapped-operation (get context :operation)))
+      (model/fail state
+                  "tahto.semantic/route-request-operation-mismatch"
+                  {:route selected-operation
+                   :mapped mapped-operation
+                   :request (get context :operation)})
+
+      (not (= (route-coordinate route)
+              (context-coordinate context)))
+      (model/fail state
+                  "tahto.semantic/route-coordinate-mismatch"
+                  {:route (route-coordinate route)
+                   :request (context-coordinate context)})
+
+      (= expected-operation read-operation)
+      (semantic-read/read state context request)
+
+      (= expected-operation prepare-operation)
+      (semantic-prepare/prepare state context request)
+
+      (= expected-operation submit-operation)
+      (semantic-submit/submit state context request)
+
+      :else
+      (model/fail state
+                  "tahto.semantic/route-handler-missing"
+                  {:operation expected-operation}))))
+
+(defn read
+  [state route context request]
+  (dispatch read-operation state route context request))
+
+(defn prepare
+  [state route context request]
+  (dispatch prepare-operation state route context request))
+
+(defn submit
+  [state route context request]
+  (dispatch submit-operation state route context request))
