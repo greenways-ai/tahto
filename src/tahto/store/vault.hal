@@ -332,7 +332,7 @@
       (model/fail state "tahto.store/digest-invalid" {:digest digest})
 
       (not (graph/namespace-reachable? state application namespace digest))
-      (model/fail state "tahto.store/object-not-authorized" {:digest digest})
+      (model/fail state "tahto.store/object-out-of-scope" {:digest digest})
 
       (nil? object)
       (model/fail state "tahto.store/object-missing" {:digest digest})

@@ -9,7 +9,7 @@
             [tahto.sync.device :as device]))
 
 (def application "fixture.world")
-(def namespace "world.a")
+(def namespace-id "world.a")
 (def collection "scene")
 
 (def root-genesis
@@ -64,7 +64,7 @@
   [root]
   {:root root
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema-refs
    [{:protocol "tahto.schema-ref/0-alpha"
@@ -86,7 +86,7 @@
         (assoc (get state :objects)
                digest
                (model/object-record digest size))
-        key (model/namespace-key application namespace)
+        key (model/namespace-key application namespace-id)
         references
         (assoc (get state :references)
                key
@@ -127,7 +127,7 @@
   {:protocol model/commit-protocol
    :root root
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema semantic-history/schema
    :schema-version semantic-history/schema-version
@@ -156,7 +156,7 @@
   [commits expected timestamp]
   {:protocol model/head-protocol
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :kind "main"
    :name "primary"
@@ -186,7 +186,7 @@
   [state record]
   (semantic-history/accept-commit
    state
-   {:application application :namespace namespace}
+   {:application application :namespace namespace-id}
    (commit-verification record)))
 
 (defn accepted-history
@@ -203,7 +203,7 @@
    (device/enrol-device
     (base-state)
     {:protocol validate/device-enrolment-protocol
-     :authorized true
+     :approved true
      :node "node.home"
      :approval-digest approval-digest
      :device
@@ -214,7 +214,7 @@
       :status "enrolled"
       :enrolled-at "2026-08-09T00:00:00Z"}})))
 
-(defn request-proof
+(defn request-verification
   [nonce]
   {:protocol validate/request-verification-protocol
    :verified true
@@ -222,14 +222,14 @@
    :public-key "ed25519:device-a-public-key"
    :operation "commit.accept"
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :request-digest request-digest
    :nonce nonce
    :idempotency-key "semantic-history-idempotency-0001"
    :timestamp "2026-08-09T00:01:00Z"})
 
-(defn result-proof
+(defn result-verification
   []
   {:protocol transaction/result-verification-protocol
    :verified true
@@ -238,6 +238,25 @@
    :outcome "ok"
    :result-digest result-digest
    :completed-at "2026-08-09T00:02:00Z"})
+
+(defn request-authority
+  [verification]
+  {:protocol validate/request-authority-protocol
+   :allowed true
+   :device (get verification :device)
+   :operation (get verification :operation)
+   :application (get verification :application)
+   :namespace (get verification :namespace)
+   :collection (get verification :collection)
+   :request-digest (get verification :request-digest)
+   :decision-root approval-digest
+   :observed-at "2026-08-09T00:01:00Z"})
+
+(defn execute-commit
+  [state expected-revision verification record-verification result-verification]
+  (semantic-history/execute-commit
+   state expected-revision verification (request-authority verification)
+   record-verification result-verification))
 
 (defn store-verification
   []
@@ -411,12 +430,12 @@
   (test/check
    "semantic commits compose through TAHTO-7 and the generic hoplite.store plan"
    (let [execution
-         (semantic-history/execute-commit
+         (execute-commit
           (enrolled-state)
           0
-          (request-proof "semantic-history-nonce-0001")
+          (request-verification "semantic-history-nonce-0001")
           (commit-verification genesis)
-          (result-proof))
+          (result-verification))
          prepared
          (semantic-history/prepare-store-commit
           execution
@@ -445,17 +464,17 @@
   (test/check
    "completed semantic transaction replay does not rerun history mutation"
    (let [first
-         (semantic-history/execute-commit
+         (execute-commit
           (enrolled-state)
           0
-          (request-proof "semantic-history-nonce-0001")
+          (request-verification "semantic-history-nonce-0001")
           (commit-verification genesis)
-          (result-proof))
+          (result-verification))
          replay
-         (semantic-history/execute-commit
+         (execute-commit
           (result-state first)
           1
-          (request-proof "semantic-history-nonce-0002")
+          (request-verification "semantic-history-nonce-0002")
           nil
           nil)]
      [(get replay :ok)

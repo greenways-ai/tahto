@@ -1,0 +1,133 @@
+(ns tahto.node.request-verification
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]))
+
+(def request-protocol "tahto.device-request/0-alpha")
+(def signature-protocol "tahto-signature/0-alpha")
+(def maximum-clock-skew-seconds 300)
+
+(def request-fields
+  #{"protocol" "device" "publicKey" "algorithm" "operation"
+    "application" "namespace" "collection" "timestamp"
+    "timestampSeconds" "nonce" "idempotencyKey" "payload"
+    "requestDigest" "signature"})
+
+(def signature-fields
+  #{"profile" "algorithm" "keyId" "value"})
+
+(defn host-call
+  [operation arguments]
+  (std.native.Host/call "hoplite.host" operation arguments))
+
+(defn verification-value
+  [request]
+  {:protocol validate/request-verification-protocol
+   :verified true
+   :device (get request "device")
+   :public-key (get request "publicKey")
+   :operation (get request "operation")
+   :application (get request "application")
+   :namespace (get request "namespace")
+   :collection (get request "collection")
+   :request-digest (get request "requestDigest")
+   :nonce (get request "nonce")
+   :idempotency-key (get request "idempotencyKey")
+   :timestamp (get request "timestamp")})
+
+(defn request-shape?
+  [request]
+  (boolean
+   (and
+    (validate/exact-record? request request-fields #{})
+    (= request-protocol (get request "protocol"))
+    (= "p256-sha256" (get request "algorithm"))
+    (validate/device-request-verification? (verification-value request))
+    (number? (get request "timestampSeconds"))
+    (map? (get request "payload"))
+    (validate/exact-record?
+     (get request "signature")
+     signature-fields
+     #{})
+    (= signature-protocol
+       (get-in request ["signature" "profile"]))
+    (= "p256-sha256"
+       (get-in request ["signature" "algorithm"]))
+    (= (get request "algorithm")
+       (get-in request ["signature" "algorithm"])))))
+
+(defn fresh?
+  [request now-seconds]
+  (let [timestamp-seconds (get request "timestampSeconds")]
+    (and
+     (number? now-seconds)
+     (>= timestamp-seconds
+         (- now-seconds maximum-clock-skew-seconds))
+     (<= timestamp-seconds
+         (+ now-seconds maximum-clock-skew-seconds)))))
+
+(defn p256-public-key-bytes
+  [encoded]
+  (if
+   (and (string? encoded)
+        (> (count encoded) 5)
+        (= "p256:" (str/slice encoded 0 5)))
+   (let [jwk-bytes
+         (host-call "base64url-decode"
+                    [(str/slice encoded 5 (count encoded))])]
+     (host-call "p256-jwk-sec1"
+                [(str/decode-utf8 jwk-bytes)]))
+   nil))
+
+(defn digest-bytes
+  [value]
+  (if
+   (and (string? value)
+        (= 71 (count value))
+        (= "sha256:" (str/slice value 0 7)))
+   (host-call "hex-decode"
+              [(str/slice value 7 (count value))])
+   nil))
+
+(defn unsigned-json
+  [request]
+  (json/write
+   (dissoc
+    (dissoc request "requestDigest")
+    "signature")))
+
+(defn verify
+  [request now-seconds]
+  (if
+   (and (request-shape? request)
+        (fresh? request now-seconds))
+   (let [public-key (p256-public-key-bytes (get request "publicKey"))
+         expected-digest (digest-bytes (get request "requestDigest"))
+         calculated-digest
+         (host-call "hash" ["sha256" (unsigned-json request)])
+         expected-key-id
+         (digest-bytes (get-in request ["signature" "keyId"]))
+         calculated-key-id
+         (host-call "hash" ["sha256" (get request "publicKey")])
+         signature
+         (host-call
+          "base64url-decode"
+          [(get-in request ["signature" "value"])])]
+     (if
+      (and
+       (= expected-digest calculated-digest)
+       (= expected-key-id calculated-key-id)
+       (host-call
+        "verify-signature"
+        ["p256-sha256"
+         public-key
+         (str request-protocol "\n" (get request "requestDigest"))
+         signature]))
+      (verification-value request)
+      nil))
+   nil))
+
+(defn decode-envelope
+  [encoded]
+  (json/read
+   (str/decode-utf8
+    (host-call "base64url-decode" [encoded]))))

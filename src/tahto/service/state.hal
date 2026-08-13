@@ -203,9 +203,9 @@
     (or (= "completed" (get value :state))
         (empty? (get value :output-roots))))))
 
-(defn authorized-context?
+(defn admitted-context?
   [context operation]
-  (and (validate/device-request-context? context)
+  (and (validate/request-context? context)
        (= "pending" (get context :status))
        (= operation (get context :operation))))
 
@@ -246,8 +246,8 @@
         key (service-key application service)
         existing (service-record state application service)]
     (cond
-      (not (authorized-context? context "service.register"))
-      (model/fail state "tahto.service/context-not-authorized")
+      (not (admitted-context? context "service.register"))
+      (model/fail state "tahto.service/context-not-admitted")
 
       (not (service? record))
       (model/fail state "tahto.service/descriptor-invalid")
@@ -298,8 +298,8 @@
         key (service-key application service)
         existing (service-record state application service)]
     (cond
-      (not (authorized-context? context "service.disable"))
-      (model/fail state "tahto.service/context-not-authorized")
+      (not (admitted-context? context "service.disable"))
+      (model/fail state "tahto.service/context-not-admitted")
 
       (not (service-disable-request? request))
       (model/fail state "tahto.service/disable-request-invalid")
@@ -326,7 +326,7 @@
                    (assoc (services state) key updated))]
         (model/ok next-state updated)))))
 
-(defn complete-authorized-closure?
+(defn complete-in-scope-closure?
   [state application namespace roots]
   (let [report (graph/closure-report-value state roots)]
     (and
@@ -353,7 +353,7 @@
        (= job (get stored :job))
        (= coordinate (get stored :coordinate))))
 
-(defn job-service-authorized?
+(defn job-service-eligible?
   [service context]
   (and (not (nil? service))
        (= "registered" (get service :status))
@@ -376,8 +376,8 @@
         maximum-error-message
         (configured-limit state :max-job-error-message-bytes)]
     (cond
-      (not (authorized-context? context "job.enqueue"))
-      (model/fail state "tahto.job/context-not-authorized")
+      (not (admitted-context? context "job.enqueue"))
+      (model/fail state "tahto.job/context-not-admitted")
 
       (not (job? job maximum-error-message))
       (model/fail state "tahto.job/job-invalid")
@@ -388,8 +388,8 @@
       (not (= idempotency-key (get context :idempotency-key)))
       (model/fail state "tahto.job/idempotency-context-mismatch")
 
-      (not (job-service-authorized? service context))
-      (model/fail state "tahto.job/service-not-authorized")
+      (not (job-service-eligible? service context))
+      (model/fail state "tahto.job/service-ineligible")
 
       (not (= "queued" (get job :state)))
       (model/fail state "tahto.job/initial-state-invalid")
@@ -401,10 +401,10 @@
          (configured-limit state :max-job-input-roots))
       (model/fail state "tahto.job/input-roots-too-many")
 
-      (not (complete-authorized-closure?
+      (not (complete-in-scope-closure?
             state application (get context :namespace)
             (get job :input-roots)))
-      (model/fail state "tahto.job/input-closure-not-authorized")
+      (model/fail state "tahto.job/input-closure-out-of-scope")
 
       (not (nil? existing-idempotency))
       (if (same-job-request? existing-idempotency
@@ -497,8 +497,8 @@
         maximum-error-message
         (configured-limit state :max-job-error-message-bytes)]
     (cond
-      (not (authorized-context? context "job.transition"))
-      (model/fail state "tahto.job/context-not-authorized")
+      (not (admitted-context? context "job.transition"))
+      (model/fail state "tahto.job/context-not-admitted")
 
       (not (job? next-job maximum-error-message))
       (model/fail state "tahto.job/job-invalid")
@@ -566,10 +566,10 @@
       (model/fail state "tahto.job/output-roots-too-many")
 
       (and (= "completed" (get next-job :state))
-           (not (complete-authorized-closure?
+           (not (complete-in-scope-closure?
                  state application (get context :namespace)
                  (get next-job :output-roots))))
-      (model/fail state "tahto.job/output-closure-not-authorized")
+      (model/fail state "tahto.job/output-closure-out-of-scope")
 
       :else
       (let [next-state

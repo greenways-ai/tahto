@@ -25,25 +25,43 @@
    :namespace (get record :namespace)
    :collection (get record :collection)
    :request-digest (get record :request-digest)
+   :authority-root (get record :authority-root)
    :idempotency-key (get record :idempotency-key)
    :status (get record :status)
    :replayed replayed
    :result-digest (get record :result-digest)})
 
 (defn same-idempotent-request?
-  [stored proof]
+  [stored verification authority]
   (= [(get stored :device)
       (get stored :operation)
       (get stored :application)
       (get stored :namespace)
       (get stored :collection)
-      (get stored :request-digest)]
-     [(get proof :device)
-      (get proof :operation)
-      (get proof :application)
-      (get proof :namespace)
-      (get proof :collection)
-      (get proof :request-digest)]))
+      (get stored :request-digest)
+      (get stored :authority-root)]
+     [(get verification :device)
+      (get verification :operation)
+      (get verification :application)
+      (get verification :namespace)
+      (get verification :collection)
+      (get verification :request-digest)
+      (get authority :decision-root)]))
+
+(defn authority-matches-verification?
+  [authority verification]
+  (= [(get authority :device)
+      (get authority :operation)
+      (get authority :application)
+      (get authority :namespace)
+      (get authority :collection)
+      (get authority :request-digest)]
+     [(get verification :device)
+      (get verification :operation)
+      (get verification :application)
+      (get verification :namespace)
+      (get verification :collection)
+      (get verification :request-digest)]))
 
 (defn enrol-device
   [state proof]
@@ -122,17 +140,23 @@
                                      device updated))]
         (model/ok next-state updated)))))
 
-(defn authorize-request
-  [state proof]
-  (let [device (get proof :device)
+(defn admit-request
+  [state verification authority]
+  (let [device (get verification :device)
         record (model/device-record state device)
-        nonce (get proof :nonce)
-        idempotency-key (get proof :idempotency-key)
+        nonce (get verification :nonce)
+        idempotency-key (get verification :idempotency-key)
         nonce-record (model/request-nonce state device nonce)
         existing (model/idempotency-record state device idempotency-key)]
     (cond
-      (not (validate/device-request-verification? proof))
-      (model/fail state "tahto.device/request-proof-invalid")
+      (not (validate/device-request-verification? verification))
+      (model/fail state "tahto.device/request-verification-invalid")
+
+      (not (validate/request-authority? authority))
+      (model/fail state "tahto.device/request-authority-invalid")
+
+      (not (authority-matches-verification? authority verification))
+      (model/fail state "tahto.device/request-authority-mismatch")
 
       (nil? record)
       (model/fail state "tahto.device/device-missing" {:device device})
@@ -140,7 +164,7 @@
       (not (= "enrolled" (get record :status)))
       (model/fail state "tahto.device/device-revoked" {:device device})
 
-      (not (= (get proof :public-key) (get record :public-key)))
+      (not (= (get verification :public-key) (get record :public-key)))
       (model/fail state "tahto.device/public-key-mismatch" {:device device})
 
       (not (nil? nonce-record))
@@ -149,7 +173,7 @@
                    :nonce nonce})
 
       (and (not (nil? existing))
-           (not (same-idempotent-request? existing proof)))
+           (not (same-idempotent-request? existing verification authority)))
       (model/fail state "tahto.device/idempotency-conflict"
                   {:device device
                    :idempotency-key idempotency-key})
@@ -168,21 +192,22 @@
       (let [request-record
             (if (nil? existing)
               {:device device
-               :operation (get proof :operation)
-               :application (get proof :application)
-               :namespace (get proof :namespace)
-               :collection (get proof :collection)
-               :request-digest (get proof :request-digest)
+               :operation (get verification :operation)
+               :application (get verification :application)
+               :namespace (get verification :namespace)
+               :collection (get verification :collection)
+               :request-digest (get verification :request-digest)
+               :authority-root (get authority :decision-root)
                :idempotency-key idempotency-key
                :status "pending"
                :result-digest nil
-               :created-at (get proof :timestamp)
+               :created-at (get verification :timestamp)
                :completed-at nil}
               existing)
             nonce-entry
             {:device device
-             :request-digest (get proof :request-digest)
-             :timestamp (get proof :timestamp)}
+             :request-digest (get verification :request-digest)
+             :timestamp (get verification :timestamp)}
             next-state
             (assoc
              (assoc state

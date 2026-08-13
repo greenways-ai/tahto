@@ -9,7 +9,8 @@
 (def device-enrolment-protocol "tahto.device-enrolment/0-alpha")
 (def device-revocation-protocol "tahto.device-revocation/0-alpha")
 (def request-verification-protocol "tahto.request-verification/0-alpha")
-(def request-context-protocol "tahto.device-request-context/0-alpha")
+(def request-authority-protocol "tahto.request-authority/0-alpha")
+(def request-context-protocol "tahto.request-context/0-alpha")
 
 (def signature-algorithms
   #{"ed25519" "p256-sha256"})
@@ -171,10 +172,10 @@
   (and
    (exact-record?
     value
-    #{:protocol :authorized :node :approval-digest :device}
+    #{:protocol :approved :node :approval-digest :device}
     #{})
    (= device-enrolment-protocol (get value :protocol))
-   (= true (get value :authorized))
+   (= true (get value :approved))
    (model/identifier? (get value :node))
    (model/canonical-digest? (get value :approval-digest))
    (device? (get value :device))
@@ -186,10 +187,10 @@
   (and
    (exact-record?
     value
-    #{:protocol :authorized :node :device :revoked-at :approval-digest}
+    #{:protocol :approved :node :device :revoked-at :approval-digest}
     #{})
    (= device-revocation-protocol (get value :protocol))
-   (= true (get value :authorized))
+   (= true (get value :approved))
    (model/identifier? (get value :node))
    (model/identifier? (get value :device))
    (timestamp? (get value :revoked-at))
@@ -217,13 +218,33 @@
    (opaque-token? (get value :idempotency-key))
    (timestamp? (get value :timestamp))))
 
-(defn device-request-context?
+(defn request-authority?
+  [value]
+  (and
+   (exact-record?
+    value
+    #{:protocol :allowed :device :operation :application :namespace
+      :collection :request-digest :decision-root :observed-at}
+    #{})
+   (= request-authority-protocol (get value :protocol))
+   (= true (get value :allowed))
+   (model/identifier? (get value :device))
+   (has? device-operations (get value :operation))
+   (model/identifier? (get value :application))
+   (model/identifier? (get value :namespace))
+   (model/identifier? (get value :collection))
+   (model/canonical-digest? (get value :request-digest))
+   (model/canonical-digest? (get value :decision-root))
+   (timestamp? (get value :observed-at))))
+
+(defn request-context?
   [value]
   (and
    (exact-record?
     value
     #{:protocol :device :operation :application :namespace :collection
-      :request-digest :idempotency-key :status :replayed :result-digest}
+      :request-digest :authority-root :idempotency-key
+      :status :replayed :result-digest}
     #{})
    (= request-context-protocol (get value :protocol))
    (model/identifier? (get value :device))
@@ -232,6 +253,7 @@
    (model/identifier? (get value :namespace))
    (model/identifier? (get value :collection))
    (model/canonical-digest? (get value :request-digest))
+   (model/canonical-digest? (get value :authority-root))
    (opaque-token? (get value :idempotency-key))
    (has? #{"pending" "completed"} (get value :status))
    (model/boolean-value? (get value :replayed))

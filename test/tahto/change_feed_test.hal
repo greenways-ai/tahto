@@ -1,0 +1,246 @@
+(ns tahto.change-feed-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.change-feed :as feed]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
+
+(def app-id "app.example")
+(def namespace-id "profile.primary")
+(def collection-id "archive")
+(def coordinate
+  {:application app-id
+   :namespace namespace-id
+   :collection collection-id})
+(def other-coordinate
+  {:application app-id
+   :namespace namespace-id
+   :collection "other"})
+
+(def commit-left
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def commit-right
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def head-left
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def head-right
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def plan-root
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def request-root
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def result-root
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def state-root
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+
+(def no-head
+  {:state "none" :commits [] :digests []})
+
+(defn head-record
+  [commits]
+  {:application app-id
+   :namespace namespace-id
+   :collection collection-id
+   :commits commits})
+
+(defn committed-state
+  [revision commits digest]
+  (let [state (assoc (model/empty-state) :metadata-revision revision)
+        key (model/head-key app-id namespace-id collection-id "main" "primary")]
+    (assoc
+     (assoc state :heads
+            (assoc (get state :heads) key (head-record commits)))
+     :head-digests
+     (assoc (get state :head-digests) key digest))))
+
+(def state-one (committed-state 1 [commit-left] head-left))
+(def state-two (committed-state 2 [commit-left commit-right] head-right))
+
+(defn receipt
+  [revision]
+  {:protocol provider/receipt-protocol
+   :status "applied"
+   :revision revision
+   :plan-digest plan-root
+   :request-digest request-root
+   :result-digest result-root
+   :state-digest state-root
+   :completed-at "2026-08-14T00:02:00Z"})
+
+(defn context
+  [operation coordinate-value]
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation operation
+   :application (get coordinate-value :application)
+   :namespace (get coordinate-value :namespace)
+   :collection (get coordinate-value :collection)
+   :request-digest request-root
+   :authority-root request-root
+   :idempotency-key "request-00000001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(def published-one
+  (feed/publish (feed/initial-state) state-one (receipt 1) coordinate no-head))
+
+(def single-head
+  (get-in published-one [:value :current-head]))
+
+(def published-two
+  (feed/publish
+   (get published-one :state)
+   state-two
+   (receipt 2)
+   coordinate
+   single-head))
+
+(test/print-results
+ [(test/check
+   "committed single and divergent heads produce canonical events"
+   [(get-in published-one [:value :current-head :state])
+    (get-in published-one [:value :cursor])
+    (get-in published-two [:value :current-head :state])
+    (get-in published-two [:value :current-head :commits])
+    (get-in published-two [:value :metadata-revision])]
+   ["current" 1 "divergent" [commit-left commit-right] 2])
+
+  (test/check
+   "an exact duplicate retains its cursor and changed bytes collide"
+   (let [replay
+         (feed/publish
+          (get published-one :state) state-one (receipt 1) coordinate no-head)
+         collision
+         (feed/publish
+          (get published-one :state) state-one (receipt 1)
+          coordinate single-head)]
+     [(get replay :replayed)
+      (get-in replay [:value :cursor])
+      (get-in collision [:error :code])])
+   [true 1 "tahto.change/revision-collision"])
+
+  (test/check
+   "events cannot precede a matching recoverable provider receipt"
+   [(get-in
+     (feed/publish
+      (feed/initial-state) state-one
+      (assoc (receipt 1) :status "pending")
+      coordinate no-head)
+     [:error :code])
+    (get-in
+     (feed/publish
+      (feed/initial-state) state-two (receipt 1) coordinate no-head)
+     [:error :code])]
+   ["tahto.change/receipt-invalid"
+    "tahto.change/state-not-committed"])
+
+  (test/check
+   "authorized subscriptions receive bounded resumable queues"
+   (let [subscribed
+         (feed/subscribe
+          (get published-one :state)
+          (context "head.read" coordinate)
+          {:subscription "subscription.one"
+           :coordinate coordinate
+           :after-cursor 1
+           :max-queue 2})
+         advanced
+         (feed/publish
+          (get subscribed :state) state-two (receipt 2)
+          coordinate single-head)
+         polled
+         (feed/poll
+          (get advanced :state)
+          (context "head.read" coordinate)
+          "subscription.one")
+         acknowledged
+         (feed/acknowledge
+          (get advanced :state)
+          (context "head.read" coordinate)
+          "subscription.one"
+          2)]
+     [(get-in polled [:value :status])
+      (get-in polled [:value :events 0 :cursor])
+      (get-in acknowledged [:value :acknowledged-cursor])
+      (get-in acknowledged [:value :queue])])
+   ["live" 2 2 []])
+
+  (test/check
+   "slow consumers overflow to resync-required without unbounded queues"
+   (let [subscribed
+         (feed/subscribe
+          (feed/initial-state {:max-queue 1})
+          (context "head.read" coordinate)
+          {:subscription "subscription.slow"
+           :coordinate coordinate
+           :after-cursor 0
+           :max-queue 1})
+         first
+         (feed/publish
+          (get subscribed :state) state-one (receipt 1) coordinate no-head)
+         second
+         (feed/publish
+          (get first :state) state-two (receipt 2) coordinate single-head)
+         polled
+         (feed/poll
+          (get second :state)
+          (context "head.read" coordinate)
+          "subscription.slow")]
+     [(get-in polled [:value :status])
+      (get-in polled [:value :events])])
+   ["resync-required" []])
+
+  (test/check
+   "expired, foreign-coordinate and unauthorized cursors fail closed"
+   (let [expired-feed
+         (feed/publish
+          (get
+           (feed/publish
+            (feed/initial-state {:max-history 1})
+            state-one (receipt 1) coordinate no-head)
+           :state)
+          state-two (receipt 2) coordinate single-head)]
+     [(get-in
+       (feed/subscribe
+        (get expired-feed :state)
+        (context "head.read" coordinate)
+        {:subscription "subscription.expired"
+         :coordinate coordinate
+         :after-cursor 1
+         :max-queue 2})
+       [:error :code])
+      (get-in
+       (feed/subscribe
+        (get published-one :state)
+        (context "head.read" other-coordinate)
+        {:subscription "subscription.foreign"
+         :coordinate other-coordinate
+         :after-cursor 1
+         :max-queue 2})
+       [:error :code])
+      (get-in
+       (feed/subscribe
+        (get published-one :state)
+        (context "sync.pull" coordinate)
+        {:subscription "subscription.denied"
+         :coordinate coordinate
+         :after-cursor 1
+         :max-queue 2})
+       [:error :code])])
+   ["tahto.change/resync-required"
+    "tahto.change/resync-required"
+    "tahto.change/subscription-not-admitted"])
+
+  (test/check
+   "malformed or oversized events fail before entering retained history"
+   [(get-in
+     (feed/publish
+      (feed/initial-state {:max-event-bytes 10})
+      state-one (receipt 1) coordinate no-head)
+     [:error :code])
+    (feed/event?
+     (assoc (get published-one :value) :semantic-value {:private true}))]
+   ["tahto.change/event-invalid-or-oversized" false])])

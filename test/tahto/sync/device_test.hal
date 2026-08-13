@@ -14,6 +14,10 @@
   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 (def approval-b
   "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def authority-a
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def authority-b
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
 (def request-a
   "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
 (def request-b
@@ -43,7 +47,7 @@
 (defn enrolment
   [record approval]
   {:protocol validate/device-enrolment-protocol
-   :authorized true
+   :approved true
    :node node
    :approval-digest approval
    :device record})
@@ -51,7 +55,7 @@
 (defn revocation
   [id]
   {:protocol validate/device-revocation-protocol
-   :authorized true
+   :approved true
    :node node
    :device id
    :revoked-at "2026-08-07T00:10:00Z"
@@ -71,6 +75,26 @@
    :nonce nonce
    :idempotency-key idempotency-key
    :timestamp "2026-08-07T00:01:00Z"})
+
+(defn request-authority
+  [verification decision-root]
+  {:protocol validate/request-authority-protocol
+   :allowed true
+   :device (get verification :device)
+   :operation (get verification :operation)
+   :application (get verification :application)
+   :namespace (get verification :namespace)
+   :collection (get verification :collection)
+   :request-digest (get verification :request-digest)
+   :decision-root decision-root
+   :observed-at "2026-08-07T00:01:00Z"})
+
+(defn admit
+  [state verification]
+  (device/admit-request
+   state
+   verification
+   (request-authority verification authority-a)))
 
 (defn enrolled-state
   []
@@ -143,7 +167,7 @@
   (test/check
    "an enrolled device receives a bounded request context"
    (let [result
-         (device/authorize-request
+         (admit
           (enrolled-state)
           (request-proof device-a
                          public-key-a
@@ -153,12 +177,41 @@
                          "request-authorize-0001"))
          state (result-state result)]
      [(get result :ok)
-      (validate/device-request-context? (get result :value))
+      (validate/request-context? (get result :value))
+      (get-in result [:value :authority-root])
       (get-in result [:value :status])
       (get-in result [:value :replayed])
       (get (model/request-nonce state device-a "nonce-authorize-0001")
            :request-digest)])
-   [true true "pending" false request-a])
+   [true true authority-a "pending" false request-a])
+
+  (test/check
+   "request admission requires a matching authority decision"
+   (let [state (enrolled-state)
+         verification
+         (request-proof device-a
+                        public-key-a
+                        "sync.pull"
+                        request-a
+                        "nonce-authority-0001"
+                        "request-authority-0001")
+         missing
+         (device/admit-request state verification nil)
+         mismatched
+         (device/admit-request
+          state
+          verification
+          (assoc (request-authority verification authority-a)
+                 :collection
+                 "other.collection"))]
+     [(error-code missing)
+      (= state (result-state missing))
+      (error-code mismatched)
+      (= state (result-state mismatched))])
+   ["tahto.device/request-authority-invalid"
+    true
+    "tahto.device/request-authority-mismatch"
+    true])
 
   (test/check
    "a nonce is rejected on its second use even for the same request"
@@ -169,15 +222,15 @@
                         request-a
                         "nonce-replay-0001"
                         "request-replay-0001")
-         first (device/authorize-request (enrolled-state) proof)
-         second (device/authorize-request (result-state first) proof)]
+         first (admit (enrolled-state) proof)
+         second (admit (result-state first) proof)]
      [(get second :ok) (error-code second)])
    [false "tahto.device/nonce-replayed"])
 
   (test/check
    "a fresh nonce may retry the same idempotent request"
    (let [first
-         (device/authorize-request
+         (admit
           (enrolled-state)
           (request-proof device-a
                          public-key-a
@@ -186,7 +239,7 @@
                          "nonce-idempotent-0001"
                          "request-idempotent-0001"))
          second
-         (device/authorize-request
+         (admit
           (result-state first)
           (request-proof device-a
                          public-key-a
@@ -202,7 +255,7 @@
   (test/check
    "an idempotency key cannot be reused for different canonical bytes"
    (let [first
-         (device/authorize-request
+         (admit
           (enrolled-state)
           (request-proof device-a
                          public-key-a
@@ -211,7 +264,7 @@
                          "nonce-conflict-0001"
                          "request-conflict-0001"))
          conflict
-         (device/authorize-request
+         (admit
           (result-state first)
           (request-proof device-a
                          public-key-a
@@ -223,9 +276,38 @@
    [false "tahto.device/idempotency-conflict"])
 
   (test/check
+   "an idempotent retry must retain the admitted authority root"
+   (let [first-verification
+         (request-proof device-a
+                        public-key-a
+                        "sync.pull"
+                        request-a
+                        "nonce-authority-root-0001"
+                        "request-authority-root-0001")
+         first
+         (device/admit-request
+          (enrolled-state)
+          first-verification
+          (request-authority first-verification authority-a))
+         retry-verification
+         (request-proof device-a
+                        public-key-a
+                        "sync.pull"
+                        request-a
+                        "nonce-authority-root-0002"
+                        "request-authority-root-0001")
+         conflict
+         (device/admit-request
+          (result-state first)
+          retry-verification
+          (request-authority retry-verification authority-b))]
+     [(get conflict :ok) (error-code conflict)])
+   [false "tahto.device/idempotency-conflict"])
+
+  (test/check
    "completed idempotent requests return only the stored result digest"
    (let [authorized
-         (device/authorize-request
+         (admit
           (enrolled-state)
           (request-proof device-a
                          public-key-a
@@ -242,7 +324,7 @@
          completed
          (device/complete-request (result-state authorized) completion)
          retried
-         (device/authorize-request
+         (admit
           (result-state completed)
           (request-proof device-a
                          public-key-a
@@ -260,7 +342,7 @@
   (test/check
    "a completed request result cannot be mutated"
    (let [authorized
-         (device/authorize-request
+         (admit
           (enrolled-state)
           (request-proof device-a
                          public-key-a
@@ -291,7 +373,7 @@
    "revocation is durable and blocks subsequent signed requests"
    (let [revoked (device/revoke-device (enrolled-state) (revocation device-a))
          request
-         (device/authorize-request
+         (admit
           (result-state revoked)
           (request-proof device-a
                          public-key-a
@@ -318,7 +400,7 @@
           (result-state first)
           (enrolment (device-record device-b public-key-b) approval-b))
          authorized
-         (device/authorize-request
+         (admit
           (result-state first)
           (request-proof device-a
                          public-key-a
@@ -327,7 +409,7 @@
                          "nonce-limit-0001"
                          "request-limit-0001"))
          nonce-limit
-         (device/authorize-request
+         (admit
           (result-state authorized)
           (request-proof device-a
                          public-key-a

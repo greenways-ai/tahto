@@ -71,7 +71,7 @@
   [state root]
   (not (nil? (model/stored-object state root))))
 
-(defn object-authorized?
+(defn object-reachable?
   [state application namespace root]
   (graph/namespace-reachable? state application namespace root))
 
@@ -89,15 +89,15 @@
    nil
    roots))
 
-(defn first-unauthorized-root
+(defn first-out-of-scope-root
   [state application namespace roots]
   (reduce
-   (fn [unauthorized root]
+   (fn [out-of-scope root]
      (if
-      (not (nil? unauthorized))
-      unauthorized
+      (not (nil? out-of-scope))
+      out-of-scope
       (if
-       (object-authorized? state application namespace root)
+       (object-reachable? state application namespace root)
        nil
        root)))
    nil
@@ -145,8 +145,8 @@
       (not (object-installed? state root))
       (model/fail state "tahto.semantic/envelope-missing" {:root root})
 
-      (not (object-authorized? state application namespace root))
-      (model/fail state "tahto.semantic/envelope-not-authorized"
+      (not (object-reachable? state application namespace root))
+      (model/fail state "tahto.semantic/envelope-out-of-scope"
                   {:root root})
 
       (not (object-installed? state (get semantic-object :value-root)))
@@ -154,13 +154,13 @@
                   "tahto.semantic/value-missing"
                   {:root (get semantic-object :value-root)})
 
-      (not (object-authorized?
+      (not (object-reachable?
             state
             application
             namespace
             (get semantic-object :value-root)))
       (model/fail state
-                  "tahto.semantic/value-not-authorized"
+                  "tahto.semantic/value-out-of-scope"
                   {:root (get semantic-object :value-root)})
 
       (not (= (model/object-size state (get semantic-object :value-root))
@@ -188,8 +188,8 @@
       :else
       (let [targets (target-roots semantic-object)
             missing (first-missing-root state targets)
-            unauthorized
-            (first-unauthorized-root
+            out-of-scope
+            (first-out-of-scope-root
              state application namespace targets)]
         (cond
           (not (nil? missing))
@@ -197,10 +197,10 @@
                       "tahto.semantic/link-target-missing"
                       {:root missing})
 
-          (not (nil? unauthorized))
+          (not (nil? out-of-scope))
           (model/fail state
-                      "tahto.semantic/link-target-not-authorized"
-                      {:root unauthorized})
+                      "tahto.semantic/link-target-out-of-scope"
+                      {:root out-of-scope})
 
           :else
           (let [projection (projection-value root semantic-object)

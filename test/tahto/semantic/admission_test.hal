@@ -4,7 +4,7 @@
             [tahto.semantic.admission :as admission]
             [tahto.semantic.model :as semantic]
             [tahto.store.graph :as graph]
-            [tahto.store.host :as host]
+            [tahto.store.host :as store-host]
             [tahto.store.model :as model]
             [tahto.store.vault :as vault]))
 
@@ -93,7 +93,7 @@
         accepted
         (vault/accept-install
          (result-state requested)
-         {:protocol host/result-protocol
+         {:protocol store-host/result-protocol
           :operation "upload/verify-install"
           :upload-id upload-id
           :digest digest
@@ -288,7 +288,7 @@
       (= unauthorized-state (result-state unauthorized))])
    ["tahto.semantic/envelope-missing"
     true
-    "tahto.semantic/envelope-not-authorized"
+    "tahto.semantic/envelope-out-of-scope"
     true])
 
   (test/check
@@ -357,7 +357,7 @@
     true
     "tahto.semantic/value-size-mismatch"
     true
-    "tahto.semantic/value-not-authorized"
+    "tahto.semantic/value-out-of-scope"
     true])
 
   (test/check
@@ -446,7 +446,7 @@
       (= unauthorized-state (result-state unauthorized))])
    ["tahto.semantic/link-target-missing"
     true
-    "tahto.semantic/link-target-not-authorized"
+    "tahto.semantic/link-target-out-of-scope"
     true])
 
   (test/check

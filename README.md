@@ -319,6 +319,14 @@ object, index, root, commit and head are exact and internally consistent. The
 next value boundary must also prove that the exact locally installed
 specification package accepted the decoded canonical application value.
 
+Request admission is deliberately separate from authorization policy. A
+caller supplies both `tahto.request-verification/0-alpha` and a closed
+`tahto.request-authority/0-alpha` decision produced by Greenways OS after local
+grants and any imported Hestia room authority have been composed. Tahto checks
+the exact coordinate and digest binding, records the decision root in
+`tahto.request-context/0-alpha`, then enforces namespace reachability as resource
+scope. Tahto does not mint user, application, or room grants.
+
 The remaining value/specification sequence is:
 
 ```text

@@ -11,7 +11,7 @@
             [tahto.store.transaction :as transaction]))
 
 (def application "fixture.world")
-(def namespace "world.a")
+(def namespace-id "world.a")
 (def collection "scene")
 
 (def value-candidate
@@ -102,7 +102,7 @@
 (def candidate-root-projection
   {:root root-candidate
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema-refs [schema-ref]
    :index-root index-candidate
@@ -114,7 +114,7 @@
 (def parent-root-projection
   {:root root-parent
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema-refs [schema-ref]
    :index-root index-parent
@@ -127,7 +127,7 @@
   {:protocol model/commit-protocol
    :root commit-parent
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema semantic-history/schema
    :schema-version semantic-history/schema-version
@@ -142,7 +142,7 @@
 (def current-head-record
   {:protocol model/head-protocol
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :kind "main"
    :name "primary"
@@ -155,7 +155,7 @@
   {:protocol model/commit-protocol
    :root commit-new
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema semantic-history/schema
    :schema-version semantic-history/schema-version
@@ -170,7 +170,7 @@
 (def new-head-record
   {:protocol model/head-protocol
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :kind "main"
    :name "primary"
@@ -192,9 +192,10 @@
    :device "device.a"
    :operation prepare/operation
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :request-digest prepare-request-digest
+   :authority-root prepare-request-digest
    :idempotency-key "semantic-prepare-idempotency-0001"
    :status "pending"
    :replayed false
@@ -205,9 +206,10 @@
    :device "device.a"
    :operation submit/operation
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :request-digest submit-request-digest
+   :authority-root submit-request-digest
    :idempotency-key "semantic-submit-idempotency-0001"
    :status "pending"
    :replayed false
@@ -245,13 +247,13 @@
 
 (defn base-state
   []
-  (let [namespace-key (model/namespace-key application namespace)
+  (let [namespace-key (model/namespace-key application namespace-id)
         sequence-key
         (model/sequence-key
-         application namespace collection "device.a")
+         application namespace-id collection "device.a")
         head-key
         (model/head-key
-         application namespace collection "main" "primary")]
+         application namespace-id collection "main" "primary")]
     (assoc
      (model/empty-state)
      :metadata-revision 4
@@ -291,7 +293,7 @@
      :sequences {sequence-key 1}
      :sequence-roots
      {(model/sequence-slot-key
-       application namespace collection "device.a" 1)
+       application namespace-id collection "device.a" 1)
       commit-parent}
      :heads {head-key current-head-record}
      :head-digests {head-key head-current-digest})))
@@ -332,7 +334,7 @@
    :commit-verification (commit-verification)
    :head-verification (head-verification)})
 
-(defn request-proof
+(defn request-verification
   [nonce]
   {:protocol validate/request-verification-protocol
    :verified true
@@ -340,14 +342,14 @@
    :public-key "ed25519:device-a-public-key"
    :operation submit/operation
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :request-digest submit-request-digest
    :nonce nonce
    :idempotency-key "semantic-submit-idempotency-0001"
    :timestamp "2026-08-09T01:12:00Z"})
 
-(defn result-proof
+(defn result-verification
   []
   {:protocol transaction/result-verification-protocol
    :verified true
@@ -356,6 +358,25 @@
    :outcome "ok"
    :result-digest result-digest
    :completed-at "2026-08-09T01:13:00Z"})
+
+(defn request-authority
+  [verification]
+  {:protocol validate/request-authority-protocol
+   :allowed true
+   :device (get verification :device)
+   :operation (get verification :operation)
+   :application (get verification :application)
+   :namespace (get verification :namespace)
+   :collection (get verification :collection)
+   :request-digest (get verification :request-digest)
+   :decision-root approval-digest
+   :observed-at "2026-08-09T01:12:00Z"})
+
+(defn execute
+  [state expected-revision verification input result-verification]
+  (submit/execute
+   state expected-revision verification (request-authority verification)
+   input result-verification))
 
 (defn provider-verification
   [expected revision]
@@ -390,11 +411,11 @@
       (get result :value)
       (model/commit-record next-state commit-new)
       (model/device-sequence
-       next-state application namespace collection "device.a")
+       next-state application namespace-id collection "device.a")
       (model/head-record
-       next-state application namespace collection "main" "primary")
+       next-state application namespace-id collection "main" "primary")
       (model/head-digest
-       next-state application namespace collection "main" "primary")
+       next-state application namespace-id collection "main" "primary")
       (get-in next-state [:edges commit-new])
       (= 4 (provider/state-revision next-state))])
    [true
@@ -493,7 +514,7 @@
       (model/commit-record (result-state result) commit-new)
       (model/device-sequence
        (result-state result)
-       application namespace collection "device.a")
+       application namespace-id collection "device.a")
       (get-in (result-state result) [:edges commit-new])
       (= state (result-state result))])
    [false
@@ -509,12 +530,12 @@
    (let [state (base-state)
          input (submit-input state)
          executed
-         (submit/execute
+         (execute
           state
           4
-          (request-proof "submit-nonce-0001")
+          (request-verification "submit-nonce-0001")
           input
-          (result-proof))
+          (result-verification))
          next-state (result-state executed)]
      [(get executed :ok)
       (provider/state-revision next-state)
@@ -536,17 +557,17 @@
    (let [state (base-state)
          input (submit-input state)
          first
-         (submit/execute
+         (execute
           state
           4
-          (request-proof "submit-replay-nonce-0001")
+          (request-verification "submit-replay-nonce-0001")
           input
-          (result-proof))
+          (result-verification))
          replay
-         (submit/execute
+         (execute
           (result-state first)
           5
-          (request-proof "submit-replay-nonce-0002")
+          (request-verification "submit-replay-nonce-0002")
           input
           nil)
          next-state (result-state replay)]
@@ -555,7 +576,7 @@
       (get-in replay [:value :result-digest])
       (provider/state-revision next-state)
       (model/device-sequence
-       next-state application namespace collection "device.a")
+       next-state application namespace-id collection "device.a")
       (= new-commit-record
          (model/commit-record next-state commit-new))
       (not (nil?
@@ -567,12 +588,12 @@
    "the completed transaction prepares one generic durable compare-and-swap"
    (let [state (base-state)
          executed
-         (submit/execute
+         (execute
           state
           4
-          (request-proof "submit-store-nonce-0001")
+          (request-verification "submit-store-nonce-0001")
           (submit-input state)
-          (result-proof))
+          (result-verification))
          prepared-store
          (submit/prepare-store-commit
           executed
@@ -601,12 +622,12 @@
    "invalid result evidence rolls back authorization and semantic mutation"
    (let [state (base-state)
          result
-         (submit/execute
+         (execute
           state
           4
-          (request-proof "submit-invalid-result-nonce-0001")
+          (request-verification "submit-invalid-result-nonce-0001")
           (submit-input state)
-          (assoc (result-proof) :operation "semantic.prepare"))]
+          (assoc (result-verification) :operation "semantic.prepare"))]
      [(get result :ok)
       (error-code result)
       (= state (result-state result))

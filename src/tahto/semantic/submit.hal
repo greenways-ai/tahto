@@ -43,11 +43,11 @@
      (get value :head-verification)
      model/head-protocol))))
 
-(defn authorized-context?
+(defn admitted-context?
   [state context]
   (truth-value
    (and
-    (validate/device-request-context? context)
+    (validate/request-context? context)
     (= operation (get context :operation))
     (= "pending" (get context :status))
     (nil? (get context :result-digest))
@@ -232,9 +232,9 @@
 (defn submit-transition
   [state context input]
   (cond
-    (not (authorized-context? state context))
+    (not (admitted-context? state context))
     (model/fail state
-                "tahto.semantic/submit-context-not-authorized")
+                "tahto.semantic/submit-context-not-admitted")
 
     (not (input? input))
     (model/fail state
@@ -312,14 +312,16 @@
                         "tahto.semantic/submit-result-invalid")))))))))))))))
 
 (defn execute
-  [state expected-revision proof input result-verification]
+  [state expected-revision request-verification request-authority
+   input result-verification]
   (if
    (not (input? input))
    (model/fail state "tahto.semantic/submit-input-invalid")
    (transaction/execute
     state
     expected-revision
-    proof
+    request-verification
+    request-authority
     submit-transition
     input
     result-verification)))

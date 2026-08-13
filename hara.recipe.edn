@@ -1,0 +1,8 @@
+{:recipe/format "0.0.0-alpha"
+ :recipe/adapter :hal
+ :recipe/toolchain {:hara ">=0.1.0"}
+ :recipe/inputs
+ {:project "project.edn"
+  :sources ["src"]
+  :resources ["protocol" "conformance/fixtures"]}
+ :recipe/outputs ["greenways-tahto.harp"]}

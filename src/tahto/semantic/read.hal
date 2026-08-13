@@ -67,11 +67,11 @@
   [request]
   (if (has? request :id) (get request :id) nil))
 
-(defn authorized-context?
+(defn admitted-context?
   [state context]
   (truth-value
    (and
-    (validate/device-request-context? context)
+    (validate/request-context? context)
     (= operation (get context :operation))
     (= "pending" (get context :status))
     (nil? (get context :result-digest))
@@ -280,8 +280,8 @@
         maximum (get request :max-commits)
         requested (requested-id request)]
     (cond
-      (not (authorized-context? state context))
-      (model/fail state "tahto.semantic/read-context-not-authorized")
+      (not (admitted-context? state context))
+      (model/fail state "tahto.semantic/read-context-not-admitted")
 
       (not (request? request))
       (model/fail state "tahto.semantic/read-request-invalid")

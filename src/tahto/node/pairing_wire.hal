@@ -1,6 +1,6 @@
 (ns tahto.node.pairing-wire
   (:require [std.foundation :refer :all]
-            [tahto.node.request-auth :as request-auth]
+            [tahto.node.request-verification :as request-verification]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
             [tahto.sync.pairing :as pairing]))
@@ -60,9 +60,9 @@
   [value]
   (str
    "sha256:"
-   (request-auth/host-call
+   (request-verification/host-call
     "hex-encode"
-    [(request-auth/host-call "hash" ["sha256" value])])))
+    [(request-verification/host-call "hash" ["sha256" value])])))
 
 (defn token-digest-with
   [invitation digest-fn]
@@ -174,7 +174,7 @@
   [value]
   (and
    (validate/exact-record? value signature-fields #{})
-   (= request-auth/signature-protocol (get value "profile"))
+   (= request-verification/signature-protocol (get value "profile"))
    (= "p256-sha256" (get value "algorithm"))
    (model/canonical-digest? (get value "keyId"))
    (string? (get value "value"))))
@@ -212,11 +212,11 @@
    intent
    signature
    sha256-digest
-   request-auth/p256-public-key-bytes
+   request-verification/p256-public-key-bytes
    (fn [encoded]
-     (request-auth/host-call "base64url-decode" [encoded]))
+     (request-verification/host-call "base64url-decode" [encoded]))
    (fn [public-key message signature-bytes]
-     (request-auth/host-call
+     (request-verification/host-call
       "verify-signature"
       ["p256-sha256" public-key message signature-bytes]))))
 
@@ -250,10 +250,10 @@
    wire
    now-seconds
    sha256-digest
-   request-auth/p256-public-key-bytes
+   request-verification/p256-public-key-bytes
    (fn [encoded]
-     (request-auth/host-call "base64url-decode" [encoded]))
+     (request-verification/host-call "base64url-decode" [encoded]))
    (fn [public-key message signature-bytes]
-     (request-auth/host-call
+     (request-verification/host-call
       "verify-signature"
       ["p256-sha256" public-key message signature-bytes]))))

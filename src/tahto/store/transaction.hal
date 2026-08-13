@@ -51,20 +51,20 @@
   (if (get transition-result :ok) "ok" "error"))
 
 (defn verification-matches?
-  [proof transition-result verification]
+  [request-verification transition-result verification]
   (and
-   (= (get proof :operation)
+   (= (get request-verification :operation)
       (get verification :operation))
-   (= (get proof :request-digest)
+   (= (get request-verification :request-digest)
       (get verification :request-digest))
    (= (expected-outcome transition-result)
       (get verification :outcome))))
 
 (defn completion
-  [proof verification]
-  {:device (get proof :device)
-   :idempotency-key (get proof :idempotency-key)
-   :request-digest (get proof :request-digest)
+  [request-verification verification]
+  {:device (get request-verification :device)
+   :idempotency-key (get request-verification :idempotency-key)
+   :request-digest (get request-verification :request-digest)
    :result-digest (get verification :result-digest)
    :completed-at (get verification :completed-at)})
 
@@ -86,7 +86,8 @@
    (model/fail state code details)))
 
 (defn execute
-  [state expected-revision proof transition input verification]
+  [state expected-revision request-verification request-authority
+   transition input verification]
   (let [revision (current-revision state)]
     (cond
       (not (model/non-negative-integer? revision))
@@ -102,15 +103,16 @@
                       :current revision})
 
       :else
-      (let [authorized (device/authorize-request state proof)]
-        (if (not (get authorized :ok))
-          authorized
-          (let [authorized-state (get authorized :state)
-                context (get authorized :value)
+      (let [admitted (device/admit-request
+             state request-verification request-authority)]
+        (if (not (get admitted :ok))
+          admitted
+          (let [admitted-state (get admitted :state)
+                context (get admitted :value)
                 next-revision (inc expected-revision)]
             (if (= "completed" (get context :status))
               (let [next-state
-                    (assoc authorized-state
+                    (assoc admitted-state
                            :metadata-revision
                            next-revision)]
                 (model/ok
@@ -123,7 +125,7 @@
                   (get context :result-digest)
                   true)))
               (let [transition-result
-                    (transition authorized-state context input)]
+                    (transition admitted-state context input)]
                 (cond
                   (not (transition-result? transition-result))
                   (fail-original state
@@ -139,7 +141,7 @@
                                  "tahto.transaction/result-verification-invalid")
 
                   (not (verification-matches?
-                        proof transition-result verification))
+                        request-verification transition-result verification))
                   (fail-original state
                                  "tahto.transaction/result-verification-mismatch")
 
@@ -147,11 +149,11 @@
                   (let [completion-state
                         (if (get transition-result :ok)
                           (get transition-result :state)
-                          authorized-state)
+                          admitted-state)
                         completed
                         (device/complete-request
                          completion-state
-                         (completion proof verification))]
+                         (completion request-verification verification))]
                     (if (not (get completed :ok))
                       (fail-original state
                                      "tahto.transaction/completion-failed"

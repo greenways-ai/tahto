@@ -2,7 +2,7 @@
   (:require [std.foundation :refer :all]
             [std.lib.test :as test]
             [tahto.node.pairing-wire :as wire]
-            [tahto.node.request-auth :as request-auth]
+            [tahto.node.request-verification :as request-verification]
             [tahto.sync.pairing :as pairing]))
 
 (def digest
@@ -27,7 +27,7 @@
    "expires-at" "2026-08-09T05:25:00Z"})
 
 (def signature
-  {"profile" request-auth/signature-protocol
+  {"profile" request-verification/signature-protocol
    "algorithm" "p256-sha256"
    "keyId" digest
    "value" "browser-signature"})

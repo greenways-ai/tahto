@@ -134,9 +134,9 @@
                      :expected-root (get selected :root)
                      :received-root named-root-value}}
 
-          (not (admission/object-authorized?
+          (not (admission/object-reachable?
                 state application namespace named-root-value))
-          {:code "tahto.semantic/root-entry-not-authorized"
+          {:code "tahto.semantic/root-entry-out-of-scope"
            :details {:name (get named-root :name)
                      :id id
                      :root named-root-value}}
@@ -232,9 +232,9 @@
       (model/fail state "tahto.semantic/root-object-missing"
                   {:root root})
 
-      (not (admission/object-authorized?
+      (not (admission/object-reachable?
             state application namespace root))
-      (model/fail state "tahto.semantic/root-object-not-authorized"
+      (model/fail state "tahto.semantic/root-object-out-of-scope"
                   {:root root})
 
       :else
@@ -250,9 +250,9 @@
           (model/fail state "tahto.semantic/root-index-missing"
                       {:root index-root})
 
-          (not (admission/object-authorized?
+          (not (admission/object-reachable?
                 state application namespace index-root))
-          (model/fail state "tahto.semantic/root-index-not-authorized"
+          (model/fail state "tahto.semantic/root-index-out-of-scope"
                       {:root index-root})
 
           :else

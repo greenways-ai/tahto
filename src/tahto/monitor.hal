@@ -106,7 +106,7 @@
      :error (get inspection :object-error)}}
    :counts (model/value-or inspection :counts {})})
 
-(defn diagnostic-proof?
+(defn diagnostic-verification?
   [state proof]
   (and
    (map? proof)
@@ -126,8 +126,8 @@
       (not (= "ready" (get inspection :state)))
       (model/fail {} "tahto.monitor/provider-not-ready")
 
-      (not (diagnostic-proof? state proof))
-      (model/fail {} "tahto.monitor/device-not-authorized")
+      (not (diagnostic-verification? state proof))
+      (model/fail {} "tahto.monitor/request-verification-invalid")
 
       :else
       (model/ok state (diagnostics inspection checked-at)))))

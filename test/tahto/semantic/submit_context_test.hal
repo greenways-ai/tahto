@@ -16,6 +16,7 @@
    :namespace "world.a"
    :collection "scene"
    :request-digest request-digest
+   :authority-root request-digest
    :idempotency-key "semantic-submit-context-0001"
    :status "pending"
    :replayed false
@@ -45,16 +46,16 @@
 (test/print-results
  [(test/check
    "semantic submit requires a current enrolled device at the context boundary"
-   [(submit/authorized-context? enrolled-state context)
-    (submit/authorized-context? revoked-state context)
-    (submit/authorized-context? (model/empty-state) context)
-    (submit/authorized-context?
+   [(submit/admitted-context? enrolled-state context)
+    (submit/admitted-context? revoked-state context)
+    (submit/admitted-context? (model/empty-state) context)
+    (submit/admitted-context?
      enrolled-state
      (assoc context :operation "semantic.prepare"))
-    (submit/authorized-context?
+    (submit/admitted-context?
      enrolled-state
      (assoc context
             :status "completed"
             :result-digest request-digest))
-    (submit/authorized-context? enrolled-state nil)]
+    (submit/admitted-context? enrolled-state nil)]
    [true false false false false false])])

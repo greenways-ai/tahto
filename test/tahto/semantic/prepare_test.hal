@@ -7,7 +7,7 @@
             [tahto.store.model :as model]))
 
 (def application "fixture.world")
-(def namespace "world.a")
+(def namespace-id "world.a")
 (def collection "scene")
 
 (def candidate-root
@@ -52,7 +52,7 @@
 (def candidate-projection
   {:root candidate-root
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema-refs [schema-ref]
    :index-root candidate-index
@@ -64,7 +64,7 @@
 (def parent-projection
   {:root parent-semantic-root
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema-refs [schema-ref]
    :index-root parent-index
@@ -77,7 +77,7 @@
   {:protocol model/commit-protocol
    :root parent-commit-root
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema semantic-history/schema
    :schema-version semantic-history/schema-version
@@ -92,7 +92,7 @@
 (def head
   {:protocol model/head-protocol
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :kind "main"
    :name "primary"
@@ -114,9 +114,10 @@
    :device "device.a"
    :operation prepare/operation
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :request-digest request-digest
+   :authority-root request-digest
    :idempotency-key "semantic-prepare-idempotency-0001"
    :status "pending"
    :replayed false
@@ -139,10 +140,10 @@
   []
   (let [sequence-key
         (model/sequence-key
-         application namespace collection "device.a")
+         application namespace-id collection "device.a")
         head-key
         (model/head-key
-         application namespace collection "main" "primary")]
+         application namespace-id collection "main" "primary")]
     (assoc
      (model/empty-state)
      :metadata-revision 4
@@ -189,7 +190,7 @@
      {:protocol "tahto.semantic-commit-intent/0-alpha"
       :record-protocol "tahto.commit/0-alpha"
       :application application
-      :namespace namespace
+      :namespace namespace-id
       :collection collection
       :schema "tahto.semantic-root"
       :schema-version 1
@@ -203,7 +204,7 @@
      {:protocol "tahto.semantic-head-intent/0-alpha"
       :record-protocol "tahto.head/0-alpha"
       :application application
-      :namespace namespace
+      :namespace namespace-id
       :collection collection
       :kind "main"
       :name "primary"
@@ -377,10 +378,10 @@
       (= state (result-state wrong-operation))
       (= state (result-state wrong-device))
       (= revoked-state (result-state revoked))])
-   ["tahto.semantic/prepare-context-not-authorized"
-    "tahto.semantic/prepare-context-not-authorized"
+   ["tahto.semantic/prepare-context-not-admitted"
+    "tahto.semantic/prepare-context-not-admitted"
     "tahto.semantic/prepare-device-mismatch"
-    "tahto.semantic/prepare-context-not-authorized"
+    "tahto.semantic/prepare-context-not-admitted"
     true true true true])
 
   (test/check
@@ -400,7 +401,7 @@
       (= state (result-state missing-context))
       (= state (result-state missing-request))
       (= state (result-state incomplete-request))])
-   ["tahto.semantic/prepare-context-not-authorized"
+   ["tahto.semantic/prepare-context-not-admitted"
     "tahto.semantic/prepare-request-invalid"
     "tahto.semantic/prepare-request-invalid"
     true true true])

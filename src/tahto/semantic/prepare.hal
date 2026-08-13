@@ -92,11 +92,11 @@
     (provider/provider-revision?
      (get value :expected-metadata-revision)))))
 
-(defn authorized-context?
+(defn admitted-context?
   [state context]
   (truth-value
    (and
-    (validate/device-request-context? context)
+    (validate/request-context? context)
     (= operation (get context :operation))
     (= "pending" (get context :status))
     (nil? (get context :result-digest))
@@ -389,9 +389,9 @@
 (defn prepare
   [state context request]
   (cond
-    (not (authorized-context? state context))
+    (not (admitted-context? state context))
     (model/fail state
-                "tahto.semantic/prepare-context-not-authorized")
+                "tahto.semantic/prepare-context-not-admitted")
 
     (not (request? request))
     (model/fail state

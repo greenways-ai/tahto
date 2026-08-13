@@ -7,7 +7,7 @@
             [tahto.store.model :as model]))
 
 (def application "fixture.world")
-(def namespace "world.a")
+(def namespace-id "world.a")
 (def collection "scene")
 
 (def value-left
@@ -80,7 +80,7 @@
 (def root-left-projection
   {:root root-left
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema-refs [schema-ref]
    :index-root index-left
@@ -92,7 +92,7 @@
 (def root-right-projection
   {:root root-right
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema-refs [schema-ref]
    :index-root index-right
@@ -106,7 +106,7 @@
   {:protocol model/commit-protocol
    :root root
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema semantic-history/schema
    :schema-version semantic-history/schema-version
@@ -127,7 +127,7 @@
 (def head
   {:protocol model/head-protocol
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :kind "main"
    :name "primary"
@@ -149,9 +149,10 @@
    :device "device.a"
    :operation read/operation
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :request-digest request-digest
+   :authority-root request-digest
    :idempotency-key "semantic-read-idempotency-0001"
    :status "pending"
    :replayed false
@@ -165,7 +166,7 @@
 (defn base-state
   []
   (let [head-key
-        (model/head-key application namespace collection "main" "primary")]
+        (model/head-key application namespace-id collection "main" "primary")]
     (assoc
      (model/empty-state)
      :devices {"device.a" device}
@@ -303,9 +304,9 @@
       (= state (result-state completed))
       (= state (result-state wrong-operation))
       (= revoked-state (result-state revoked))])
-   ["tahto.semantic/read-context-not-authorized"
-    "tahto.semantic/read-context-not-authorized"
-    "tahto.semantic/read-context-not-authorized"
+   ["tahto.semantic/read-context-not-admitted"
+    "tahto.semantic/read-context-not-admitted"
+    "tahto.semantic/read-context-not-admitted"
     true true true])
 
   (test/check

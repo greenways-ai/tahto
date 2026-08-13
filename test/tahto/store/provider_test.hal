@@ -26,6 +26,7 @@
    :namespace "profile.primary"
    :collection "archive"
    :request-digest request-digest
+   :authority-root request-digest
    :idempotency-key "request-idempotency-0001"
    :status "completed"
    :replayed false
@@ -131,8 +132,7 @@
    "provider revisions fit a signed 64-bit storage column"
    [(provider/provider-revision? 0)
     (provider/provider-revision? provider/max-provider-revision)
-    (provider/provider-revision?
-     (inc provider/max-provider-revision))]
+    (provider/provider-revision? -1)]
    [true true false])
 
   (test/check

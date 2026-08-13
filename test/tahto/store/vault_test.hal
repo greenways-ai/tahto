@@ -2,7 +2,7 @@
   (:require [std.foundation :refer :all]
             [std.lib.test :as test]
             [tahto.store.graph :as graph]
-            [tahto.store.host :as host]
+            [tahto.store.host :as store-host]
             [tahto.store.model :as model]
             [tahto.store.vault :as vault]))
 
@@ -44,7 +44,7 @@
                    {:upload-id upload-id})]
     (vault/accept-install
      (result-state requested)
-     {:protocol host/result-protocol
+     {:protocol store-host/result-protocol
       :operation "upload/verify-install"
       :upload-id upload-id
       :digest digest
@@ -73,23 +73,23 @@
 
   (test/check
    "the host boundary rejects paths, raw bytes and non-numeric handles"
-   [(host/effect?
-     (host/effect
+   [(store-host/effect?
+     (store-host/effect
       "upload/open"
       {:upload-id "upload-1"
        :digest digest-a
        :size 8
        :media-type "application/octet-stream"}))
-    (host/effect?
-     (host/effect
+    (store-host/effect?
+     (store-host/effect
       "upload/open"
       {:upload-id "upload-1"
        :digest digest-a
        :size 8
        :media-type "application/octet-stream"
        :path "/tmp/a"}))
-    (host/effect?
-     (host/effect
+    (store-host/effect?
+     (store-host/effect
       "upload/append"
       {:upload-id "upload-1"
        :offset 0
@@ -176,7 +176,7 @@
      [(get-in effect [:request :body-handle])
       (has? (get effect :request) :bytes)
       (has? (get effect :request) :path)
-      (host/effect? effect)])
+      (store-host/effect? effect)])
    [42 false false true])
 
   (test/check
@@ -202,7 +202,7 @@
          rejected
          (vault/accept-install
           (result-state requested)
-          {:protocol host/result-protocol
+          {:protocol store-host/result-protocol
            :operation "upload/verify-install"
            :upload-id "upload-1"
            :digest digest-b
@@ -244,7 +244,7 @@
      [(model/namespace-reservations
        (result-state aborted) "app" "ns")
       (get-in aborted [:effects 0 :operation])
-      (host/effect? (first (get aborted :effects)))])
+      (store-host/effect? (first (get aborted :effects)))])
    [0 "upload/abort" true])
 
   (test/check
@@ -368,6 +368,6 @@
       (error-code too-large)])
    [true
     {:digest digest-a :start 2 :end 6}
-    "tahto.store/object-not-authorized"
-    "tahto.store/object-not-authorized"
+    "tahto.store/object-out-of-scope"
+    "tahto.store/object-out-of-scope"
     "tahto.store/range-too-large"])])

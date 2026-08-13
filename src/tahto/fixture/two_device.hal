@@ -62,7 +62,7 @@
 (defn enrolment
   [record approval]
   {:protocol validate/device-enrolment-protocol
-   :authorized true
+   :approved true
    :node node
    :approval-digest approval
    :device record})
@@ -70,7 +70,7 @@
 (defn revocation
   [id revoked-at approval]
   {:protocol validate/device-revocation-protocol
-   :authorized true
+   :approved true
    :node node
    :device id
    :revoked-at revoked-at

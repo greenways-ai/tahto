@@ -13,9 +13,9 @@
   [state]
   (get state :limits))
 
-(defn authorized-context?
+(defn admitted-context?
   [context operation]
-  (and (validate/device-request-context? context)
+  (and (validate/request-context? context)
        (= "pending" (get context :status))
        (= operation (get context :operation))))
 
@@ -83,8 +83,8 @@
                   state device application namespace collection)
         known-maximum (get (limits state) :max-sync-known-digests)]
     (cond
-      (not (authorized-context? context "sync.pull"))
-      (model/fail state "tahto.sync/context-not-authorized")
+      (not (admitted-context? context "sync.pull"))
+      (model/fail state "tahto.sync/context-not-admitted")
 
       (not (pull-request? request known-maximum))
       (model/fail state "tahto.sync/pull-request-invalid")
@@ -162,8 +162,8 @@
         offer (model/sync-offer
                state device application namespace collection)]
     (cond
-      (not (authorized-context? context "sync.ack"))
-      (model/fail state "tahto.sync/context-not-authorized")
+      (not (admitted-context? context "sync.ack"))
+      (model/fail state "tahto.sync/context-not-admitted")
 
       (not (ack-request? request))
       (model/fail state "tahto.sync/ack-request-invalid")
@@ -222,8 +222,8 @@
 (defn plan-push
   [state context request]
   (cond
-    (not (authorized-context? context "sync.push"))
-    (model/fail state "tahto.sync/context-not-authorized")
+    (not (admitted-context? context "sync.push"))
+    (model/fail state "tahto.sync/context-not-admitted")
 
     (not (push-request? request
                         (get (limits state) :max-negotiate-digests)))

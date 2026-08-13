@@ -83,9 +83,9 @@
                      :projection-id (get projection :id)
                      :root entry-root}}
 
-          (not (admission/object-authorized?
+          (not (admission/object-reachable?
                 state application namespace entry-root))
-          {:code "tahto.semantic/index-entry-not-authorized"
+          {:code "tahto.semantic/index-entry-out-of-scope"
            :details {:id (get entry :id)
                      :root entry-root}}
 
@@ -200,9 +200,9 @@
       (model/fail state "tahto.semantic/index-object-missing"
                   {:root root})
 
-      (not (admission/object-authorized?
+      (not (admission/object-reachable?
             state application namespace root))
-      (model/fail state "tahto.semantic/index-object-not-authorized"
+      (model/fail state "tahto.semantic/index-object-out-of-scope"
                   {:root root})
 
       :else

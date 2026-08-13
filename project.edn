@@ -7,8 +7,12 @@
  :project/extension-paths []
  :project/capabilities #{:host/nginx}
  :project/dependencies
- {"gh:greenways-ai/hoplite" {:version "^0.1.0"}}
+ {"gh:greenways-ai/hoplite" {:version "0.2.0"}}
  :project/main tahto.node.app
+ :project/recipe "hara.recipe.edn"
+ :tahto/exports
+ {:tahto/client {:export/namespace tahto.client}
+  :tahto/change-feed {:export/namespace tahto.change-feed}}
  :project/default-profile :server
  :project/profiles
  {:server

@@ -161,11 +161,13 @@
   (update-head-with-context state context verification))
 
 (defn execute-commit
-  [state expected-revision proof verification result-verification]
+  [state expected-revision request-verification request-authority
+   verification result-verification]
   (transaction/execute
    state
    expected-revision
-   proof
+   request-verification
+   request-authority
    commit-transition
    verification
    result-verification))
@@ -175,7 +177,8 @@
   (transaction/execute
    state
    expected-revision
-   proof
+   request-verification
+   request-authority
    head-transition
    verification
    result-verification))

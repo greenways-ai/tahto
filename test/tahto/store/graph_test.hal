@@ -2,7 +2,7 @@
   (:require [std.foundation :refer :all]
             [std.lib.test :as test]
             [tahto.store.graph :as graph]
-            [tahto.store.host :as host]
+            [tahto.store.host :as store-host]
             [tahto.store.model :as model]
             [tahto.store.vault :as vault]))
 
@@ -57,7 +57,7 @@
   (graph/accept-manifest
    state
    {:application "app" :namespace "ns" :digest digest-c}
-   {:protocol host/result-protocol
+   {:protocol store-host/result-protocol
     :operation "manifest/verify"
     :verified true
     :digest digest-c
@@ -76,7 +76,7 @@
      [(get effect :operation)
       (get-in effect [:request :max-chunks])
       (has? (get effect :request) :bytes)
-      (host/effect? effect)])
+      (store-host/effect? effect)])
    ["manifest/verify" 16384 false true])
 
   (test/check
@@ -94,8 +94,8 @@
       (error-code absent)
       (get present-elsewhere :effects)
       (get absent :effects)])
-   ["tahto.store/object-not-authorized"
-    "tahto.store/object-not-authorized"
+   ["tahto.store/object-out-of-scope"
+    "tahto.store/object-out-of-scope"
     [] []])
 
   (test/check
@@ -104,7 +104,7 @@
          (graph/accept-manifest
           (fixture-state)
           {:application "app" :namespace "ns" :digest digest-c}
-          {:protocol host/result-protocol
+          {:protocol store-host/result-protocol
            :operation "manifest/verify"
            :verified true
            :digest digest-c
@@ -122,7 +122,7 @@
          (graph/accept-manifest
           (fixture-state)
           {:application "app" :namespace "ns" :digest digest-c}
-          {:protocol host/result-protocol
+          {:protocol store-host/result-protocol
            :operation "manifest/verify"
            :verified true
            :digest digest-d

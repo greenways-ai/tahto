@@ -52,6 +52,7 @@
    :namespace "profile.primary"
    :collection "archive"
    :request-digest request-digest
+   :authority-root request-digest
    :idempotency-key "request-idempotency-0001"
    :status "completed"
    :replayed false
@@ -92,6 +93,7 @@
    :namespace "profile.primary"
    :collection "archive"
    :request-digest alternate-request-digest
+   :authority-root alternate-request-digest
    :idempotency-key "request-idempotency-0002"
    :status "completed"
    :replayed false

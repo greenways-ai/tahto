@@ -1,0 +1,174 @@
+(ns tahto.client-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.client :as client]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.read :as semantic-read]
+            [tahto.store.model :as model]))
+
+(def app-id "app.example")
+(def namespace-id "profile.primary")
+(def collection-id "archive")
+(def package-root
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def request-root
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def head-root
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def commit-left
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def commit-right
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+(def coordinate
+  {:application app-id
+   :namespace namespace-id
+   :collection collection-id})
+
+(defn context
+  [operation]
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation operation
+   :application app-id
+   :namespace namespace-id
+   :collection collection-id
+   :request-digest request-root
+   :authority-root request-root
+   :idempotency-key "request-00000001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(defn request
+  [operation payload]
+  {:protocol client/request-protocol
+   :operation operation
+   :coordinate coordinate
+   :payload payload
+   :package-revision package-root
+   :provider-revision 0})
+
+(def device
+  {:protocol model/device-protocol
+   :id "device.a"
+   :node "node.home"
+   :public-key "ed25519:device-a-public-key"
+   :status "enrolled"
+   :enrolled-at "2026-08-14T00:00:00Z"})
+
+(defn signature
+  [key-id]
+  {:profile "tahto-signature/0-alpha"
+   :algorithm "ed25519"
+   :key-id key-id
+   :value "abcdefghijklmnopqrstuvwxyz0123456789"})
+
+(def head
+  {:protocol model/head-protocol
+   :application app-id
+   :namespace namespace-id
+   :collection collection-id
+   :kind "main"
+   :name "primary"
+   :commits [commit-left commit-right]
+   :expected []
+   :updated-at "2026-08-14T00:01:00Z"
+   :signature (signature "head.key")})
+
+(def base-state
+  (assoc-in (model/empty-state) [:devices "device.a"] device))
+
+(def head-state
+  (let [key
+        (model/head-key
+         app-id namespace-id collection-id "main" "primary")]
+    (assoc
+     (assoc base-state :heads (assoc (get base-state :heads) key head))
+     :head-digests
+     (assoc (get base-state :head-digests) key head-root))))
+
+(def semantic-request
+  (request
+   "tahto.semantic/read"
+   {:kind "main" :name "missing" :max-commits 4}))
+
+(def head-request
+  (request "tahto.head/read" {:kind "main" :name "primary"}))
+
+(test/print-results
+ [(test/check
+   "the facade publishes the closed embedding surface"
+   [client/operations
+    (client/request? semantic-request)
+    (client/request? (assoc semantic-request :provider-path "/tmp/db"))]
+   [["tahto.semantic/read" "tahto.semantic/prepare"
+     "tahto.semantic/submit" "tahto.head/read" "tahto.sync/plan"
+     "tahto.sync/push" "tahto.sync/pull" "tahto.sync/ack"]
+    true false])
+
+  (test/check
+   "semantic reads delegate to the existing authorized kernel"
+   (let [direct
+         (semantic-read/read
+          base-state (context "semantic.read")
+          (get semantic-request :payload))
+         facade
+         (client/dispatch
+          base-state (context "semantic.read") package-root semantic-request)]
+     [(get-in direct [:error :code])
+      (get-in facade [:error :code])
+      (= base-state (get facade :state))])
+   ["tahto.semantic/read-head-missing"
+    "tahto.semantic/read-head-missing"
+    true])
+
+  (test/check
+   "head reads retain every divergent current head"
+   (let [result
+         (client/dispatch
+          head-state (context "head.read") package-root head-request)]
+     [(get result :ok)
+      (get-in result [:value :protocol])
+      (get-in result [:value :value :head :commits])
+      (get-in result [:value :value :head-digest])])
+   [true client/result-protocol [commit-left commit-right] head-root])
+
+  (test/check
+   "sync plan delegates to the existing bounded pull planner"
+   (let [plan-request
+         (request "tahto.sync/plan"
+                  {:direction "pull" :request {:known-digests []}})
+         result
+         (client/dispatch
+          base-state (context "sync.pull") package-root plan-request)]
+     [(get result :ok)
+      (get-in result [:value :value :direction])
+      (get-in result [:value :value :heads])
+      (get-in result [:value :value :missing])])
+   [true "pull" [] []])
+
+  (test/check
+   "package, provider, operation and coordinate substitutions fail closed"
+   [(get-in
+     (client/dispatch
+      base-state (context "semantic.read") head-root semantic-request)
+     [:error :code])
+    (get-in
+     (client/dispatch
+      base-state (context "semantic.read") package-root
+      (assoc semantic-request :provider-revision 1))
+     [:error :code])
+    (get-in
+     (client/dispatch
+      base-state (context "head.read") package-root semantic-request)
+     [:error :code])
+    (get-in
+     (client/dispatch
+      base-state (context "semantic.read") package-root
+      (assoc-in semantic-request [:coordinate :collection] "other"))
+     [:error :code])]
+   ["tahto.client/package-revision-mismatch"
+    "tahto.client/provider-revision-mismatch"
+    "tahto.client/context-not-admitted"
+    "tahto.client/context-not-admitted"])])

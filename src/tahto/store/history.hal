@@ -48,10 +48,10 @@
       (model/fail state "tahto.history/digest-invalid" {:digest digest})
 
       (not (graph/namespace-reachable? state application namespace digest))
-      (model/fail state "tahto.history/record-not-authorized" {:digest digest})
+      (model/fail state "tahto.history/record-out-of-scope" {:digest digest})
 
       (nil? object)
-      (model/fail state "tahto.history/record-not-authorized" {:digest digest})
+      (model/fail state "tahto.history/record-out-of-scope" {:digest digest})
 
       (> (get object :size) maximum)
       (model/fail state "tahto.history/record-too-large"
@@ -137,7 +137,7 @@
                        (conj commits root)
                        missing)))))))))
 
-(defn namespace-authorization-value
+(defn namespace-scope-report-value
   [state application namespace]
   (let [report (graph/namespace-closure-report-value
                 state application namespace)]
@@ -171,7 +171,7 @@
       (model/fail state "tahto.history/namespace-mismatch")
 
       (not (graph/namespace-reachable? state application namespace digest))
-      (model/fail state "tahto.history/record-not-authorized" {:digest digest})
+      (model/fail state "tahto.history/record-out-of-scope" {:digest digest})
 
       (> (model/object-size state digest)
          (get (limits state) :max-record-bytes))
@@ -234,24 +234,24 @@
                        :existing sequence-root})
 
           :else
-          (let [authorization
-                (namespace-authorization-value state application namespace)
+          (let [scope-report
+                (namespace-scope-report-value state application namespace)
                 object-roots (get record :objects)
-                authorized?
+                in-scope?
                 (every? (fn [root]
-                          (has? (get authorization :reachable) root))
+                          (has? (get scope-report :reachable) root))
                         object-roots)
                 object-report (graph/closure-report-value state object-roots)]
             (cond
-              (get authorization :overflow)
+              (get scope-report :overflow)
               (model/fail state "tahto.history/namespace-closure-overflow")
 
-              (not (get authorization :complete))
+              (not (get scope-report :complete))
               (model/fail state "tahto.history/namespace-closure-incomplete"
-                          {:missing (get authorization :missing)})
+                          {:missing (get scope-report :missing)})
 
-              (not authorized?)
-              (model/fail state "tahto.history/object-not-authorized")
+              (not in-scope?)
+              (model/fail state "tahto.history/object-out-of-scope")
 
               (get object-report :overflow)
               (model/fail state "tahto.history/object-closure-overflow")
@@ -436,7 +436,7 @@
       (model/fail state "tahto.history/namespace-invalid")
 
       (not (graph/namespace-reachable? state application namespace digest))
-      (model/fail state "tahto.history/record-not-authorized" {:digest digest})
+      (model/fail state "tahto.history/record-out-of-scope" {:digest digest})
 
       (> (model/object-size state digest)
          (get (limits state) :max-record-bytes))
@@ -513,7 +513,7 @@
       (model/fail state "tahto.history/backup-missing" {:id backup-id})
 
       (not (= application (get backup :application)))
-      (model/fail state "tahto.history/backup-not-authorized" {:id backup-id})
+      (model/fail state "tahto.history/backup-out-of-scope" {:id backup-id})
 
       :else
       (let [closure (graph/closure-report-value state [backup-id])
@@ -547,7 +547,7 @@
       (model/fail state "tahto.history/backup-missing" {:id backup-id})
 
       (not (= application (get backup :application)))
-      (model/fail state "tahto.history/backup-not-authorized" {:id backup-id})
+      (model/fail state "tahto.history/backup-out-of-scope" {:id backup-id})
 
       :else
       (model/ok

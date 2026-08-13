@@ -149,7 +149,7 @@
       (model/fail state "tahto.store/digest-invalid" {:digest digest})
 
       (not (namespace-reachable? state application namespace digest))
-      (model/fail state "tahto.store/object-not-authorized" {:digest digest})
+      (model/fail state "tahto.store/object-out-of-scope" {:digest digest})
 
       (nil? object)
       (model/fail state "tahto.store/manifest-object-missing" {:digest digest})
@@ -216,7 +216,7 @@
                   {:digest digest})
 
       (not (namespace-reachable? state application namespace digest))
-      (model/fail state "tahto.store/object-not-authorized" {:digest digest})
+      (model/fail state "tahto.store/object-out-of-scope" {:digest digest})
 
       (> (count chunks) maximum)
       (model/fail state "tahto.store/manifest-too-wide"
@@ -327,7 +327,7 @@
       (not (every? (fn [digest]
                      (namespace-reachable? state application namespace digest))
                    digests))
-      (model/fail state "tahto.store/object-not-authorized")
+      (model/fail state "tahto.store/object-out-of-scope")
 
       :else
       (let [roots (vec (distinct digests))
@@ -358,10 +358,10 @@
       (model/fail state "tahto.store/root-missing" {:root-id root-id})
 
       (not (= application (get root :application)))
-      (model/fail state "tahto.store/root-not-authorized" {:root-id root-id})
+      (model/fail state "tahto.store/root-out-of-scope" {:root-id root-id})
 
       (not (= namespace (get root :namespace)))
-      (model/fail state "tahto.store/root-not-authorized" {:root-id root-id})
+      (model/fail state "tahto.store/root-out-of-scope" {:root-id root-id})
 
       :else
       (model/ok

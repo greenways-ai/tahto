@@ -7,7 +7,7 @@
             [tahto.sync.device :as device]))
 
 (def application "app.example")
-(def namespace "profile.primary")
+(def namespace-id "profile.primary")
 (def collection "archive")
 (def device-id "device.a")
 (def public-key "ed25519:device-a-public-key")
@@ -35,7 +35,7 @@
    (device/enrol-device
     (model/empty-state)
     {:protocol validate/device-enrolment-protocol
-     :authorized true
+     :approved true
      :node "node.home"
      :approval-digest approval-digest
      :device
@@ -46,7 +46,7 @@
       :status "enrolled"
       :enrolled-at "2026-08-07T00:00:00Z"}})))
 
-(defn proof
+(defn request-verification
   [nonce idempotency-key]
   {:protocol validate/request-verification-protocol
    :verified true
@@ -54,14 +54,14 @@
    :public-key public-key
    :operation "service.register"
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :request-digest request-digest
    :nonce nonce
    :idempotency-key idempotency-key
    :timestamp "2026-08-07T00:01:00Z"})
 
-(defn result-proof
+(defn result-verification
   [outcome digest]
   {:protocol transaction/result-verification-protocol
    :verified true
@@ -70,6 +70,30 @@
    :outcome outcome
    :result-digest digest
    :completed-at "2026-08-07T00:02:00Z"})
+
+(defn request-authority
+  [verification]
+  {:protocol validate/request-authority-protocol
+   :allowed true
+   :device (get verification :device)
+   :operation (get verification :operation)
+   :application (get verification :application)
+   :namespace (get verification :namespace)
+   :collection (get verification :collection)
+   :request-digest (get verification :request-digest)
+   :decision-root approval-digest
+   :observed-at "2026-08-07T00:01:00Z"})
+
+(defn execute
+  [state expected-revision verification transition input result-verification]
+  (transaction/execute
+   state
+   expected-revision
+   verification
+   (request-authority verification)
+   transition
+   input
+   result-verification))
 
 (defn mark-transition
   [state context input]
@@ -109,15 +133,15 @@
 (test/print-results
  [(test/check
    "a successful transition commits nonce mutation completion and revision together"
-   (let [request (proof "nonce-success-0001" "idempotency-success-0001")
+   (let [request (request-verification "nonce-success-0001" "idempotency-success-0001")
          result
-         (transaction/execute
+         (execute
           (fixture-state)
           0
           request
           mark-transition
           "stored"
-          (result-proof "ok" result-digest))
+          (result-verification "ok" result-digest))
          state (result-state result)]
      [(get result :ok)
       (get state :transaction-marker)
@@ -134,19 +158,19 @@
   (test/check
    "a completed idempotent replay records the new nonce without rerunning the transition"
    (let [first-request
-         (proof "nonce-replay-0001" "idempotency-replay-0001")
+         (request-verification "nonce-replay-0001" "idempotency-replay-0001")
          first
-         (transaction/execute
+         (execute
           (fixture-state)
           0
           first-request
           mark-transition
           "first"
-          (result-proof "ok" result-digest))
+          (result-verification "ok" result-digest))
          second-request
-         (proof "nonce-replay-0002" "idempotency-replay-0001")
+         (request-verification "nonce-replay-0002" "idempotency-replay-0001")
          replay
-         (transaction/execute
+         (execute
           (result-state first)
           1
           second-request
@@ -168,13 +192,13 @@
    "a stale expected revision fails before consuming a nonce"
    (let [state (fixture-state)
          result
-         (transaction/execute
+         (execute
           state
           1
-          (proof "nonce-stale-0001" "idempotency-stale-0001")
+          (request-verification "nonce-stale-0001" "idempotency-stale-0001")
           mark-transition
           "stale"
-          (result-proof "ok" result-digest))]
+          (result-verification "ok" result-digest))]
      [(get result :ok)
       (error-code result)
       (= state (result-state result))
@@ -186,10 +210,10 @@
    "an invalid result proof rolls back authorization and domain mutation"
    (let [state (fixture-state)
          result
-         (transaction/execute
+         (execute
           state
           0
-          (proof "nonce-invalid-proof-0001"
+          (request-verification "nonce-invalid-proof-0001"
                  "idempotency-invalid-proof-0001")
           mark-transition
           "must-rollback"
@@ -206,13 +230,13 @@
    "a mismatched result proof cannot complete another operation"
    (let [state (fixture-state)
          verification
-         (assoc (result-proof "ok" result-digest)
+         (assoc (result-verification "ok" result-digest)
                 :operation "job.enqueue")
          result
-         (transaction/execute
+         (execute
           state
           0
-          (proof "nonce-mismatch-0001" "idempotency-mismatch-0001")
+          (request-verification "nonce-mismatch-0001" "idempotency-mismatch-0001")
           mark-transition
           "must-rollback"
           verification)]
@@ -225,13 +249,13 @@
    "effectful transitions cannot masquerade as one atomic metadata commit"
    (let [state (fixture-state)
          result
-         (transaction/execute
+         (execute
           state
           0
-          (proof "nonce-effects-0001" "idempotency-effects-0001")
+          (request-verification "nonce-effects-0001" "idempotency-effects-0001")
           effectful-transition
           "must-rollback"
-          (result-proof "ok" result-digest))]
+          (result-verification "ok" result-digest))]
      [(get result :ok)
       (error-code result)
       (= state (result-state result))
@@ -241,15 +265,15 @@
   (test/check
    "a rejected domain transition is completed idempotently without partial mutation"
    (let [request
-         (proof "nonce-error-0001" "idempotency-error-0001")
+         (request-verification "nonce-error-0001" "idempotency-error-0001")
          result
-         (transaction/execute
+         (execute
           (fixture-state)
           0
           request
           rejected-transition
           "partial"
-          (result-proof "error" error-digest))
+          (result-verification "error" error-digest))
          state (result-state result)]
      [(get result :ok)
       (error-code result)
@@ -265,17 +289,17 @@
   (test/check
    "the same signed nonce is still rejected after an atomic completion"
    (let [request
-         (proof "nonce-repeat-0001" "idempotency-repeat-0001")
+         (request-verification "nonce-repeat-0001" "idempotency-repeat-0001")
          first
-         (transaction/execute
+         (execute
           (fixture-state)
           0
           request
           mark-transition
           "first"
-          (result-proof "ok" result-digest))
+          (result-verification "ok" result-digest))
          repeated
-         (transaction/execute
+         (execute
           (result-state first)
           1
           request
@@ -292,19 +316,21 @@
    "a legacy pending idempotency record can finish through the atomic coordinator"
    (let [state (fixture-state)
          first-request
-         (proof "nonce-pending-0001" "idempotency-pending-0001")
-         authorized (device/authorize-request state first-request)
-         pending-state (result-state authorized)
+         (request-verification "nonce-pending-0001" "idempotency-pending-0001")
+         admitted
+         (device/admit-request
+          state first-request (request-authority first-request))
+         pending-state (result-state admitted)
          retry-request
-         (proof "nonce-pending-0002" "idempotency-pending-0001")
+         (request-verification "nonce-pending-0002" "idempotency-pending-0001")
          result
-         (transaction/execute
+         (execute
           pending-state
           0
           retry-request
           mark-transition
           "recovered"
-          (result-proof "ok" result-digest))
+          (result-verification "ok" result-digest))
          next-state (result-state result)]
      [(get result :ok)
       (get next-state :transaction-marker)
@@ -322,13 +348,13 @@
    "unknown result-proof fields fail closed and roll back"
    (let [state (fixture-state)
          verification
-         (assoc (result-proof "ok" result-digest)
+         (assoc (result-verification "ok" result-digest)
                 :unreviewed-authority true)
          result
-         (transaction/execute
+         (execute
           state
           0
-          (proof "nonce-closed-proof-0001"
+          (request-verification "nonce-closed-proof-0001"
                  "idempotency-closed-proof-0001")
           mark-transition
           "must-rollback"
@@ -342,13 +368,13 @@
    "invalid transition result shapes never reach the provider commit plan"
    (let [state (fixture-state)
          result
-         (transaction/execute
+         (execute
           state
           0
-          (proof "nonce-shape-0001" "idempotency-shape-0001")
+          (request-verification "nonce-shape-0001" "idempotency-shape-0001")
           invalid-transition
           "must-rollback"
-          (result-proof "ok" result-digest))]
+          (result-verification "ok" result-digest))]
      [(get result :ok)
       (error-code result)
       (= state (result-state result))])

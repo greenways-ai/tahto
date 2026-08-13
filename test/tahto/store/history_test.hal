@@ -7,7 +7,7 @@
             [tahto.store.model :as model]))
 
 (def app "app.example")
-(def namespace "profile.primary")
+(def namespace-id "profile.primary")
 (def collection "memory")
 
 (def object-a
@@ -64,13 +64,13 @@
    (fixture-state {}))
   ([limits]
    (let [initial (model/empty-state limits)
-         with-object-a (add-object initial app namespace object-a 4)
-         with-object-b (add-object with-object-a app namespace object-b 7)
-         with-commit-a (add-object with-object-b app namespace commit-a 512)
-         with-commit-b (add-object with-commit-a app namespace commit-b 512)
-         with-commit-c (add-object with-commit-b app namespace commit-c 512)
-         with-backup (add-object with-commit-c app namespace backup-a 512)]
-     (add-object with-backup app namespace receipt-a 256))))
+         with-object-a (add-object initial app namespace-id object-a 4)
+         with-object-b (add-object with-object-a app namespace-id object-b 7)
+         with-commit-a (add-object with-object-b app namespace-id commit-a 512)
+         with-commit-b (add-object with-commit-a app namespace-id commit-b 512)
+         with-commit-c (add-object with-commit-b app namespace-id commit-c 512)
+         with-backup (add-object with-commit-c app namespace-id backup-a 512)]
+     (add-object with-backup app namespace-id receipt-a 256))))
 
 (defn proof
   [record-protocol digest record]
@@ -86,7 +86,7 @@
   {:protocol model/commit-protocol
    :root root
    :application app
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema "app.memory"
    :schema-version 1
@@ -102,7 +102,7 @@
   [state record]
   (history/accept-commit
    state
-   {:application app :namespace namespace}
+   {:application app :namespace namespace-id}
    (proof model/commit-protocol (get record :root) record)))
 
 (defn state-with-three-commits
@@ -119,7 +119,7 @@
   [commits expected timestamp]
   {:protocol model/head-protocol
    :application app
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :kind "main"
    :name "primary"
@@ -145,7 +145,7 @@
    (let [requested
          (history/request-commit
           (fixture-state)
-          {:application app :namespace namespace :digest commit-a})]
+          {:application app :namespace namespace-id :digest commit-a})]
      [(get requested :ok)
       (get-in requested [:value :protocol])
       (get-in requested [:value :record-protocol])
@@ -165,9 +165,9 @@
          result
          (history/request-commit
           state
-          {:application app :namespace namespace :digest commit-a})]
+          {:application app :namespace namespace-id :digest commit-a})]
      [(get result :ok) (error-code result)])
-   [false "tahto.history/record-not-authorized"])
+   [false "tahto.history/record-out-of-scope"])
 
   (test/check
    "accepted commits bind signature proof, device sequence and object edges"
@@ -176,8 +176,8 @@
          state (result-state result)]
      [(get result :ok)
       (get (model/commit-record state commit-a) :root)
-      (model/device-sequence state app namespace collection "device-a")
-      (model/sequence-root state app namespace collection "device-a" 1)
+      (model/device-sequence state app namespace-id collection "device-a")
+      (model/sequence-root state app namespace-id collection "device-a" 1)
       (graph/child-digests state commit-a)
       (get-in result [:value :receipt-action])])
    [true commit-a 1 commit-a [object-a] "commit.accept"])
@@ -212,12 +212,12 @@
   (test/check
    "commit payload roots require namespace authority and complete closure"
    (let [initial (model/empty-state)
-         with-commit (add-object initial app namespace commit-a 512)
+         with-commit (add-object initial app namespace-id commit-a 512)
          state (add-object with-commit app "other" object-a 4)
          record (commit-record commit-a "device-a" 1 [] [object-a])
          result (accept-commit state record)]
      [(get result :ok) (error-code result)])
-   [false "tahto.history/object-not-authorized"])
+   [false "tahto.history/object-out-of-scope"])
 
   (test/check
    "a verification key must match the signed record key"
@@ -232,7 +232,7 @@
          result
          (history/accept-commit
           (fixture-state)
-          {:application app :namespace namespace}
+          {:application app :namespace namespace-id}
           invalid)]
      [(get result :ok) (error-code result)])
    [false "tahto.history/verification-invalid"])
@@ -278,7 +278,7 @@
           (proof model/head-protocol head-b record))
          next-state (result-state result)
          stored (model/head-record next-state
-                                   app namespace collection "main" "primary")
+                                   app namespace-id collection "main" "primary")
          root-id (history/internal-head-root-id record)]
      [(get stored :commits)
       (get-in next-state [:roots root-id :digests])])
@@ -315,7 +315,7 @@
          result
          (history/accept-backup
           state
-          {:application app :namespace namespace}
+          {:application app :namespace namespace-id}
           (proof model/backup-protocol backup-a record))
          next-state (result-state result)
          root-id (history/internal-backup-root-id backup-a)
@@ -338,13 +338,13 @@
          first
          (history/accept-backup
           state
-          {:application app :namespace namespace}
+          {:application app :namespace namespace-id}
           (proof model/backup-protocol backup-a first-record))
          changed-record (backup-record [commit-b] "forever")
          changed
          (history/accept-backup
           (result-state first)
-          {:application app :namespace namespace}
+          {:application app :namespace namespace-id}
           (proof model/backup-protocol backup-a changed-record))]
      [(get changed :ok) (error-code changed)])
    [false "tahto.history/backup-conflict"])
@@ -356,7 +356,7 @@
          accepted
          (history/accept-backup
           state
-          {:application app :namespace namespace}
+          {:application app :namespace namespace-id}
           (proof model/backup-protocol backup-a record))
          released
          (history/release-backup

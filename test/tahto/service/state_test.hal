@@ -7,7 +7,7 @@
             [tahto.sync.device :as device]))
 
 (def application "app.example")
-(def namespace "profile.primary")
+(def namespace-id "profile.primary")
 (def other-namespace "profile.other")
 (def collection "archive")
 (def service-id "service.archive.index")
@@ -66,7 +66,7 @@
          (device/enrol-device
           (model/empty-state limits)
           {:protocol validate/device-enrolment-protocol
-           :authorized true
+           :approved true
            :node "node.home"
            :approval-digest approval
            :device
@@ -78,13 +78,13 @@
             :enrolled-at "2026-08-07T00:00:00Z"}})
          with-input
          (add-object (result-state enrolled)
-                     application namespace object-a 4)
+                     application namespace-id object-a 4)
          with-output
-         (add-object with-input application namespace object-b 8)]
+         (add-object with-input application namespace-id object-b 8)]
      (add-object with-output
                  application other-namespace hidden-object 16))))
 
-(defn proof
+(defn request-verification
   [operation digest nonce idempotency-key]
   {:protocol validate/request-verification-protocol
    :verified true
@@ -92,18 +92,32 @@
    :public-key public-key
    :operation operation
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :request-digest digest
    :nonce nonce
    :idempotency-key idempotency-key
    :timestamp "2026-08-07T00:01:00Z"})
 
-(defn authorize
+(defn request-authority
+  [verification]
+  {:protocol validate/request-authority-protocol
+   :allowed true
+   :device (get verification :device)
+   :operation (get verification :operation)
+   :application (get verification :application)
+   :namespace (get verification :namespace)
+   :collection (get verification :collection)
+   :request-digest (get verification :request-digest)
+   :decision-root approval
+   :observed-at "2026-08-07T00:01:00Z"})
+
+(defn admit
   [state operation digest nonce idempotency-key]
-  (device/authorize-request
-   state
-   (proof operation digest nonce idempotency-key)))
+  (let [verification
+        (request-verification operation digest nonce idempotency-key)]
+    (device/admit-request
+     state verification (request-authority verification))))
 
 (defn descriptor
   ([]
@@ -125,13 +139,13 @@
 
 (defn register
   [state digest nonce idempotency-key record]
-  (let [authorized
-        (authorize state
+  (let [admitted
+        (admit state
                    "service.register"
                    digest nonce idempotency-key)]
     (service/register-service
-     (result-state authorized)
-     (get authorized :value)
+     (result-state admitted)
+     (get admitted :value)
      record)))
 
 (defn registered-state
@@ -163,24 +177,24 @@
 
 (defn enqueue
   [state digest nonce job]
-  (let [authorized
-        (authorize state
+  (let [admitted
+        (admit state
                    "job.enqueue"
                    digest nonce (get job :idempotency-key))]
     (service/enqueue-job
-     (result-state authorized)
-     (get authorized :value)
+     (result-state admitted)
+     (get admitted :value)
      job)))
 
 (defn transition
   [state digest nonce idempotency-key job]
-  (let [authorized
-        (authorize state
+  (let [admitted
+        (admit state
                    "job.transition"
                    digest nonce idempotency-key)]
     (service/transition-job
-     (result-state authorized)
-     (get authorized :value)
+     (result-state admitted)
+     (get admitted :value)
      job)))
 
 (defn running-job
@@ -225,19 +239,19 @@
 
   (test/check
    "a context for another operation cannot register a service"
-   (let [authorized
-         (authorize (fixture-state)
+   (let [admitted
+         (admit (fixture-state)
                     "sync.pull"
                     request-a
                     "nonce-wrong-context-0001"
                     "request-wrong-context-0001")
          result
          (service/register-service
-          (result-state authorized)
-          (get authorized :value)
+          (result-state admitted)
+          (get admitted :value)
           (descriptor))]
      [(get result :ok) (error-code result)])
-   [false "tahto.service/context-not-authorized"])
+   [false "tahto.service/context-not-admitted"])
 
   (test/check
    "a service id cannot be rebound to a different artifact"
@@ -259,16 +273,16 @@
   (test/check
    "disabling a service prevents it from accepting new jobs"
    (let [state (registered-state)
-         disable-authorized
-         (authorize state
+         disable-admitted
+         (admit state
                     "service.disable"
                     request-b
                     "nonce-disable-0001"
                     "request-disable-0001")
          disabled
          (service/disable-service
-          (result-state disable-authorized)
-          (get disable-authorized :value)
+          (result-state disable-admitted)
+          (get disable-admitted :value)
           {:service service-id
            :artifact-digest artifact-a})
          queued (queued-job)
@@ -280,7 +294,7 @@
      [(get-in disabled [:value :status])
       (get attempted :ok)
       (error-code attempted)])
-   ["disabled" false "tahto.job/service-not-authorized"])
+   ["disabled" false "tahto.job/service-ineligible"])
 
   (test/check
    "enqueue is durable and idempotent for the exact signed request"
@@ -321,7 +335,7 @@
    [false "tahto.job/idempotency-conflict"])
 
   (test/check
-   "job inputs cannot cross their authorized namespace"
+   "job inputs cannot cross their admitted namespace"
    (let [job
          (queued-job "job.hidden"
                      "job-idempotency-hidden"
@@ -332,7 +346,7 @@
                   "nonce-hidden-input-0001"
                   job)]
      [(get result :ok) (error-code result)])
-   [false "tahto.job/input-closure-not-authorized"])
+   [false "tahto.job/input-closure-out-of-scope"])
 
   (test/check
    "claiming queued work increments the durable attempt exactly once"
@@ -374,7 +388,7 @@
    [false "tahto.job/attempt-invalid"])
 
   (test/check
-   "completed outputs must be a complete authorized closure"
+   "completed outputs must be a complete admitted closure"
    (let [queued (queued-job)
          enqueued
          (enqueue (registered-state)
@@ -421,7 +435,7 @@
                      "request-hidden-output-0003"
                      (completed-job running [hidden-object]))]
      [(get result :ok) (error-code result)])
-   [false "tahto.job/output-closure-not-authorized"])
+   [false "tahto.job/output-closure-out-of-scope"])
 
   (test/check
    "completed and cancelled jobs are terminal"
@@ -474,16 +488,16 @@
                      "nonce-settle-0002"
                      "request-settle-0002"
                      running)
-         disable-authorized
-         (authorize (result-state claimed)
+         disable-admitted
+         (admit (result-state claimed)
                     "service.disable"
                     request-d
                     "nonce-settle-0003"
                     "request-settle-0003")
          disabled
          (service/disable-service
-          (result-state disable-authorized)
-          (get disable-authorized :value)
+          (result-state disable-admitted)
+          (get disable-admitted :value)
           {:service service-id
            :artifact-digest artifact-a})
          completed

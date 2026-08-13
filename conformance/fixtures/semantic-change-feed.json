@@ -1,0 +1,20 @@
+{
+  "protocol": "tahto.semantic-change-conformance/0-alpha",
+  "coordinate": {
+    "application": "app.example",
+    "namespace": "profile.primary",
+    "collection": "archive"
+  },
+  "fixtures": [
+    {"id": "single-head", "previousHead": {"state": "none", "commits": [], "digests": []}, "currentState": "current", "metadataRevision": 1, "cursor": 1},
+    {"id": "divergent-head", "previousState": "current", "currentState": "divergent", "metadataRevision": 2, "cursor": 2},
+    {"id": "exact-duplicate", "metadataRevision": 1, "cursor": 1, "replayed": true},
+    {"id": "revision-collision", "metadataRevision": 1, "changedCurrentHead": true, "error": "tahto.change/revision-collision"},
+    {"id": "uncommitted-state", "receiptRevision": 1, "stateRevision": 2, "error": "tahto.change/state-not-committed"},
+    {"id": "queue-overflow", "maxQueue": 1, "events": 2, "status": "resync-required"},
+    {"id": "expired-cursor", "maxHistory": 1, "afterCursor": 1, "latestCursor": 2, "error": "tahto.change/resync-required"},
+    {"id": "foreign-coordinate-cursor", "afterCursor": 1, "coordinateOverride": {"collection": "other"}, "error": "tahto.change/resync-required"},
+    {"id": "unauthorized-subscription", "contextOverride": {"operation": "sync.pull"}, "error": "tahto.change/subscription-not-authorized"},
+    {"id": "oversized-event", "maxEventBytes": 10, "error": "tahto.change/event-invalid-or-oversized"}
+  ]
+}

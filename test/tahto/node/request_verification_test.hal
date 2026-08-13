@@ -1,0 +1,60 @@
+(ns tahto.node.request-verification-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.node.request-verification :as verification]))
+
+(def request
+  {"protocol" verification/request-protocol
+   "device" "device.browser"
+   "publicKey" "p256:browser-public-key"
+   "algorithm" "p256-sha256"
+   "operation" "sync.pull"
+   "application" "app.example"
+   "namespace" "profile.primary"
+   "collection" "archive"
+   "timestamp" "2026-08-09T00:00:00Z"
+   "timestampSeconds" 1786233600
+   "nonce" "nonce-00000001"
+   "idempotencyKey" "request-00000001"
+   "payload" {"known" []}
+   "requestDigest"
+   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   "signature"
+   {"profile" verification/signature-protocol
+    "algorithm" "p256-sha256"
+    "keyId"
+    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    "value" "aaaaaaaaaaaaaaaa"}})
+
+(test/print-results
+ [(test/check
+   "the signed request wire shape maps to the existing verification proof"
+   (let [proof (verification/verification-value request)]
+     [(verification/request-shape? request)
+      (get proof :protocol)
+      (get proof :operation)
+      (get proof :idempotency-key)])
+   [true "tahto.request-verification/0-alpha" "sync.pull" "request-00000001"])
+
+  (test/check
+   "request timestamps are accepted only inside the closed five-minute window"
+   [(verification/fresh? request 1786233300)
+    (verification/fresh? request 1786233900)
+    (verification/fresh? request 1786233299)
+    (verification/fresh? request 1786233901)]
+   [true true false false])
+
+  (test/check
+   "the digest covers canonical unsigned request bytes only"
+   (let [unsigned (verification/unsigned-json request)]
+     [(str/includes? unsigned "\"nonce\"")
+      (str/includes? unsigned "\"requestDigest\"")
+      (str/includes? unsigned "\"signature\"")])
+   [true false false])
+
+  (test/check
+   "unknown or missing envelope fields fail closed"
+   [(verification/request-shape? (assoc request "remoteCode" "no"))
+    (verification/request-shape? (dissoc request "nonce"))
+    (verification/request-shape? (assoc request "algorithm" "ed25519"))]
+   [false false false])])

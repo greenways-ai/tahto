@@ -9,7 +9,7 @@
             [tahto.store.model :as model]))
 
 (def application "fixture.world")
-(def namespace "world.a")
+(def namespace-id "world.a")
 (def collection "scene")
 
 (def package-root-a
@@ -99,7 +99,7 @@
 (def semantic-root
   {:protocol semantic/semantic-root-protocol
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :schema-refs [schema-a schema-b]
    :index-root index-root
@@ -117,7 +117,7 @@
 
 (defn install-object
   ([state digest size]
-   (install-object state application namespace digest size))
+   (install-object state application namespace-id digest size))
   ([state application-value namespace-value digest size]
    (let [objects
          (assoc (get state :objects)
@@ -161,7 +161,7 @@
 (defn object-input
   [root semantic-object]
   {:application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :root root
    :semantic-object semantic-object
@@ -189,7 +189,7 @@
    (index-input index-root value))
   ([root value]
    {:application application
-    :namespace namespace
+    :namespace namespace-id
     :collection collection
     :root root
     :semantic-index value}))
@@ -199,7 +199,7 @@
    (root-input semantic-root-root value))
   ([root value]
    {:application application
-    :namespace namespace
+    :namespace namespace-id
     :collection collection
     :root root
     :semantic-root value}))
@@ -299,7 +299,7 @@
          (assoc state :objects (dissoc (get state :objects) index-root))
          missing
          (index/admit-projected missing-state (index-input semantic-index))
-         key (model/namespace-key application namespace)
+         key (model/namespace-key application namespace-id)
          unauthorized-state
          (assoc state
                 :references
@@ -322,7 +322,7 @@
       (= state (result-state dual-use))])
    ["tahto.semantic/index-object-missing"
     true
-    "tahto.semantic/index-object-not-authorized"
+    "tahto.semantic/index-object-out-of-scope"
     true
     "tahto.semantic/index-root-dual-use"
     true])
@@ -396,7 +396,7 @@
    [true
     {:root semantic-root-root
      :application application
-     :namespace namespace
+     :namespace namespace-id
      :collection collection
      :schema-refs [schema-a schema-b]
      :index-root index-root
@@ -412,7 +412,7 @@
          not-admitted
          (root/admit-projected not-admitted-state (root-input semantic-root))
          state (indexed-state)
-         key (model/namespace-key application namespace)
+         key (model/namespace-key application namespace-id)
          unauthorized-state
          (assoc state
                 :references
@@ -429,7 +429,7 @@
       (= unauthorized-state (result-state unauthorized))])
    ["tahto.semantic/root-index-not-admitted"
     true
-    "tahto.semantic/root-index-not-authorized"
+    "tahto.semantic/root-index-out-of-scope"
     true])
 
   (test/check

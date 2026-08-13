@@ -143,4 +143,4 @@
         (assoc proof :application "attacker.app")
         "2026-08-09T00:00:00.000Z")
        [:error :code])])
-   [true "tahto.monitor/device-not-authorized"])])
+   [true "tahto.monitor/request-verification-invalid"])])

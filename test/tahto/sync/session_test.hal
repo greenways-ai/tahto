@@ -7,7 +7,7 @@
             [tahto.sync.session :as session]))
 
 (def app "app.example")
-(def namespace "profile.primary")
+(def namespace-id "profile.primary")
 (def collection "archive")
 (def device-a "device.a")
 (def public-key-a "ed25519:device-a-public-key")
@@ -61,7 +61,7 @@
          (device/enrol-device
           initial
           {:protocol validate/device-enrolment-protocol
-           :authorized true
+           :approved true
            :node "node.home"
            :approval-digest approval
            :device
@@ -72,18 +72,18 @@
             :status "enrolled"
             :enrolled-at "2026-08-07T00:00:00Z"}})
          with-object
-         (add-object (result-state enrolled) app namespace object-a 4)
+         (add-object (result-state enrolled) app namespace-id object-a 4)
          with-commit
-         (add-object with-object app namespace commit-a 512)
+         (add-object with-object app namespace-id commit-a 512)
          with-hidden
          (add-object with-commit app "profile.other" hidden-object 9)
          head-key
-         (model/head-key app namespace collection "main" "primary")
+         (model/head-key app namespace-id collection "main" "primary")
          commit-record
          {:protocol model/commit-protocol
           :root commit-a
           :application app
-          :namespace namespace
+          :namespace namespace-id
           :collection collection
           :device device-a
           :parents []
@@ -100,13 +100,13 @@
              head-key
              {:protocol model/head-protocol
               :application app
-              :namespace namespace
+              :namespace namespace-id
               :collection collection
               :kind "main"
               :name "primary"
               :commits [commit-a]})))))
 
-(defn proof
+(defn request-verification
   [operation digest nonce idempotency-key]
   {:protocol validate/request-verification-protocol
    :verified true
@@ -114,26 +114,40 @@
    :public-key public-key-a
    :operation operation
    :application app
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :request-digest digest
    :nonce nonce
    :idempotency-key idempotency-key
    :timestamp "2026-08-07T00:01:00Z"})
 
-(defn authorize
+(defn request-authority
+  [verification]
+  {:protocol validate/request-authority-protocol
+   :allowed true
+   :device (get verification :device)
+   :operation (get verification :operation)
+   :application (get verification :application)
+   :namespace (get verification :namespace)
+   :collection (get verification :collection)
+   :request-digest (get verification :request-digest)
+   :decision-root approval
+   :observed-at "2026-08-07T00:01:00Z"})
+
+(defn admit
   [state operation digest nonce idempotency-key]
-  (device/authorize-request
-   state
-   (proof operation digest nonce idempotency-key)))
+  (let [verification
+        (request-verification operation digest nonce idempotency-key)]
+    (device/admit-request
+     state verification (request-authority verification))))
 
 (defn pull-plan
   [state digest nonce idempotency-key known]
-  (let [authorized
-        (authorize state "sync.pull" digest nonce idempotency-key)]
+  (let [admitted
+        (admit state "sync.pull" digest nonce idempotency-key)]
     (session/plan-pull
-     (result-state authorized)
-     (get authorized :value)
+     (result-state admitted)
+     (get admitted :value)
      {:known-digests known})))
 
 (test/print-results
@@ -172,7 +186,7 @@
   (test/check
    "the same signed request receives the same pending offer"
    (let [first-auth
-         (authorize (fixture-state)
+         (admit (fixture-state)
                     "sync.pull"
                     request-a
                     "nonce-repeat-0001"
@@ -183,7 +197,7 @@
           (get first-auth :value)
           {:known-digests []})
          retry-auth
-         (authorize (result-state first-plan)
+         (admit (result-state first-plan)
                     "sync.pull"
                     request-a
                     "nonce-repeat-0002"
@@ -206,7 +220,7 @@
                     "request-pending-0001"
                     [])
          second-auth
-         (authorize (result-state first)
+         (admit (result-state first)
                     "sync.pull"
                     request-b
                     "nonce-pending-0002"
@@ -228,7 +242,7 @@
                     "request-ack-invalid-0001"
                     [])
          ack-auth
-         (authorize (result-state plan)
+         (admit (result-state plan)
                     "sync.ack"
                     request-b
                     "nonce-ack-invalid-0002"
@@ -252,7 +266,7 @@
                     "request-ack-0001"
                     [])
          ack-auth
-         (authorize (result-state plan)
+         (admit (result-state plan)
                     "sync.ack"
                     request-b
                     "nonce-ack-0002"
@@ -267,8 +281,8 @@
          state (result-state ack)]
      [(get ack :ok)
       (get-in ack [:value :protocol])
-      (model/sync-cursor state device-a app namespace collection)
-      (nil? (model/sync-offer state device-a app namespace collection))])
+      (model/sync-cursor state device-a app namespace-id collection)
+      (nil? (model/sync-offer state device-a app namespace-id collection))])
    [true session/sync-ack-protocol 1 true])
 
   (test/check
@@ -280,7 +294,7 @@
                     "request-round-0001"
                     [])
          ack-auth
-         (authorize (result-state first)
+         (admit (result-state first)
                     "sync.ack"
                     request-b
                     "nonce-round-0002"
@@ -332,16 +346,16 @@
 
   (test/check
    "push negotiation does not disclose a digest stored only for another namespace"
-   (let [authorized
-         (authorize (fixture-state)
+   (let [admitted
+         (admit (fixture-state)
                     "sync.push"
                     request-a
                     "nonce-push-0001"
                     "request-push-0001")
          plan
          (session/plan-push
-          (result-state authorized)
-          (get authorized :value)
+          (result-state admitted)
+          (get admitted :value)
           {:digests [object-a hidden-object object-b]})]
      [(get plan :ok)
       (get-in plan [:value :present])
@@ -350,16 +364,16 @@
 
   (test/check
    "a context for another operation cannot be reused as sync authority"
-   (let [authorized
-         (authorize (fixture-state)
+   (let [admitted
+         (admit (fixture-state)
                     "object.read"
                     request-a
                     "nonce-context-0001"
                     "request-context-0001")
          plan
          (session/plan-pull
-          (result-state authorized)
-          (get authorized :value)
+          (result-state admitted)
+          (get admitted :value)
           {:known-digests []})]
      [(get plan :ok) (error-code plan)])
-   [false "tahto.sync/context-not-authorized"])] )
+   [false "tahto.sync/context-not-admitted"])] )

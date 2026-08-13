@@ -1,0 +1,375 @@
+(ns tahto.change-feed
+  (:require [std.foundation :refer :all]
+            [tahto.client :as client]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
+
+(def protocol "tahto.semantic-change-feed/0-alpha")
+(def event-protocol "tahto.semantic-change/0-alpha")
+(def subscription-protocol "tahto.semantic-change-subscription/0-alpha")
+(def poll-protocol "tahto.semantic-change-poll/0-alpha")
+
+(def default-limits
+  {:max-subscriptions 128
+   :max-queue 64
+   :max-history 1024
+   :max-event-bytes 8192})
+
+(def event-fields
+  #{:protocol :coordinate :previous-head :current-head
+    :metadata-revision :cursor})
+
+(def head-fields
+  #{:state :commits :digests})
+
+(def subscription-request-fields
+  #{:subscription :coordinate :after-cursor :max-queue})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn exact-fields?
+  [value fields]
+  (validate/exact-record? value fields #{}))
+
+(defn initial-state
+  ([]
+   (initial-state default-limits))
+  ([limits]
+   {:feed/protocol protocol
+    :feed/limits (merge default-limits limits)
+    :feed/next-cursor 1
+    :feed/latest-revision 0
+    :feed/events []
+    :feed/subscriptions {}}))
+
+(defn head-state
+  [commits]
+  (cond
+    (= 0 (count commits)) "none"
+    (= 1 (count commits)) "current"
+    :else "divergent"))
+
+(defn head?
+  [value]
+  (truth-value
+   (and (exact-fields? value head-fields)
+        (has? #{"none" "current" "divergent"} (get value :state))
+        (validate/digest-vector? (get value :commits))
+        (validate/digest-vector? (get value :digests))
+        (= (get value :state) (head-state (get value :commits)))
+        (if (= "none" (get value :state))
+          (= [] (get value :digests))
+          (> (count (get value :digests)) 0)))))
+
+(defn event?
+  [value]
+  (truth-value
+   (and (exact-fields? value event-fields)
+        (= event-protocol (get value :protocol))
+        (client/coordinate? (get value :coordinate))
+        (head? (get value :previous-head))
+        (head? (get value :current-head))
+        (provider/provider-revision? (get value :metadata-revision))
+        (> (get value :metadata-revision) 0)
+        (model/positive-integer? (get value :cursor)))))
+
+(defn coordinate-matches?
+  [coordinate record]
+  (= (client/coordinate-vector coordinate)
+     [(get record :application)
+      (get record :namespace)
+      (get record :collection)]))
+
+(defn current-head-report
+  [state coordinate]
+  (reduce
+   (fn [report entry]
+     (let [record (val entry)]
+       (if (coordinate-matches? coordinate record)
+         (let [digest (get (get state :head-digests) (key entry))]
+           (if (model/canonical-digest? digest)
+             {:valid (get report :valid)
+              :commits (into (get report :commits) (get record :commits))
+              :digests (conj (get report :digests) digest)}
+             (assoc report :valid false)))
+         report)))
+   {:valid true :commits [] :digests []}
+   (get state :heads)))
+
+(defn current-head
+  [state coordinate]
+  (let [report (current-head-report state coordinate)
+        commits (vec (sort (distinct (get report :commits))))
+        digests (vec (sort (distinct (get report :digests))))]
+    (if (get report :valid)
+      {:state (head-state commits)
+       :commits commits
+       :digests digests}
+      nil)))
+
+(defn feed-ok
+  [state value]
+  {:ok true :state state :value value :effects []})
+
+(defn feed-fail
+  ([state code]
+   (feed-fail state code {}))
+  ([state code details]
+   {:ok false
+    :state state
+    :error {:code code :details details}
+    :effects []}))
+
+(defn find-event
+  [events predicate]
+  (reduce
+   (fn [found event]
+     (if (and (nil? found) (predicate event)) event found))
+   nil
+   events))
+
+(defn same-change?
+  [event coordinate previous current revision]
+  (= [(get event :coordinate)
+      (get event :previous-head)
+      (get event :current-head)
+      (get event :metadata-revision)]
+     [coordinate previous current revision]))
+
+(defn bounded-tail
+  [values maximum]
+  (loop [remaining values]
+    (if (<= (count remaining) maximum)
+      remaining
+      (recur (vec (rest remaining))))))
+
+(defn enqueue
+  [feed event]
+  (assoc
+   feed
+   :feed/subscriptions
+   (reduce
+    (fn [subscriptions entry]
+      (let [id (key entry)
+            subscription (val entry)]
+        (if (or (not (= "live" (get subscription :status)))
+                (not (= (get event :coordinate)
+                        (get subscription :coordinate))))
+          subscriptions
+          (let [queue (get subscription :queue)
+                maximum (get subscription :max-queue)]
+            (if (>= (count queue) maximum)
+              (assoc subscriptions id
+                     (assoc subscription
+                            :status "resync-required"
+                            :queue []))
+              (assoc subscriptions id
+                     (assoc subscription
+                            :queue (conj queue event))))))))
+    {}
+    (get feed :feed/subscriptions))))
+
+(defn publish
+  [feed committed-state receipt coordinate previous]
+  (let [revision (get receipt :revision)
+        current (current-head committed-state coordinate)
+        existing
+        (find-event
+         (get feed :feed/events)
+         (fn [event]
+           (and (= revision (get event :metadata-revision))
+                (= coordinate (get event :coordinate)))))]
+    (cond
+      (not (provider/receipt? receipt))
+      (feed-fail feed "tahto.change/receipt-invalid")
+
+      (not (= revision (provider/state-revision committed-state)))
+      (feed-fail feed "tahto.change/state-not-committed")
+
+      (not (client/coordinate? coordinate))
+      (feed-fail feed "tahto.change/coordinate-invalid")
+
+      (not (head? previous))
+      (feed-fail feed "tahto.change/previous-head-invalid")
+
+      (nil? current)
+      (feed-fail feed "tahto.change/current-head-invalid")
+
+      (< revision (get feed :feed/latest-revision))
+      (feed-fail feed "tahto.change/revision-stale")
+
+      (not (nil? existing))
+      (if (same-change? existing coordinate previous current revision)
+        (assoc (feed-ok feed existing) :replayed true)
+        (feed-fail feed "tahto.change/revision-collision"))
+
+      :else
+      (let [event
+            {:protocol event-protocol
+             :coordinate coordinate
+             :previous-head previous
+             :current-head current
+             :metadata-revision revision
+             :cursor (get feed :feed/next-cursor)}
+            maximum-bytes (get-in feed [:feed/limits :max-event-bytes])]
+        (if (or (not (event? event))
+                (> (count (str event)) maximum-bytes))
+          (feed-fail feed "tahto.change/event-invalid-or-oversized")
+          (let [next
+                (assoc feed
+                       :feed/next-cursor (inc (get event :cursor))
+                       :feed/latest-revision revision
+                       :feed/events
+                       (bounded-tail
+                        (conj (get feed :feed/events) event)
+                        (get-in feed [:feed/limits :max-history])))]
+            (feed-ok (enqueue next event) event)))))))
+
+(defn subscription-key
+  [context request]
+  (str (get context :device) ":" (get request :subscription)))
+
+(defn subscription-admitted?
+  [context coordinate]
+  (and (validate/request-context? context)
+       (= "pending" (get context :status))
+       (= "head.read" (get context :operation))
+       (= (client/coordinate-vector coordinate)
+          (client/context-coordinate context))))
+
+(defn cursor-event
+  [feed cursor]
+  (find-event
+   (get feed :feed/events)
+   (fn [event] (= cursor (get event :cursor)))))
+
+(defn events-after
+  [feed coordinate cursor]
+  (reduce
+   (fn [events event]
+     (if (and (> (get event :cursor) cursor)
+              (= coordinate (get event :coordinate)))
+       (conj events event)
+       events))
+   []
+   (get feed :feed/events)))
+
+(defn subscription-request?
+  [value feed]
+  (truth-value
+   (and (exact-fields? value subscription-request-fields)
+        (model/identifier? (get value :subscription))
+        (client/coordinate? (get value :coordinate))
+        (model/non-negative-integer? (get value :after-cursor))
+        (model/positive-integer? (get value :max-queue))
+        (<= (get value :max-queue)
+            (get-in feed [:feed/limits :max-queue])))))
+
+(defn subscribe
+  [feed context request]
+  (let [cursor (get request :after-cursor)
+        coordinate (get request :coordinate)
+        boundary (if (= cursor 0) nil (cursor-event feed cursor))
+        queued (events-after feed coordinate cursor)
+        id (subscription-key context request)
+        existing (get-in feed [:feed/subscriptions id])
+        candidate
+        {:protocol subscription-protocol
+         :id id
+         :device (get context :device)
+         :coordinate coordinate
+         :acknowledged-cursor cursor
+         :max-queue (get request :max-queue)
+         :queue queued
+         :status "live"}]
+    (cond
+      (not (subscription-request? request feed))
+      (feed-fail feed "tahto.change/subscription-invalid")
+
+      (not (subscription-admitted? context coordinate))
+      (feed-fail feed "tahto.change/subscription-not-admitted")
+
+      (and (> cursor 0)
+           (or (nil? boundary)
+               (not (= coordinate (get boundary :coordinate)))))
+      (feed-fail feed "tahto.change/resync-required")
+
+      (> (count queued) (get request :max-queue))
+      (feed-fail feed "tahto.change/resync-required")
+
+      (not (nil? existing))
+      (if (= existing candidate)
+        (assoc (feed-ok feed existing) :replayed true)
+        (feed-fail feed "tahto.change/subscription-collision"))
+
+      (>= (count (get feed :feed/subscriptions))
+          (get-in feed [:feed/limits :max-subscriptions]))
+      (feed-fail feed "tahto.change/subscription-limit")
+
+      :else
+      (feed-ok
+       (assoc-in feed [:feed/subscriptions id] candidate)
+       candidate))))
+
+(defn poll
+  [feed context subscription]
+  (let [id (str (get context :device) ":" subscription)
+        item (get-in feed [:feed/subscriptions id])]
+    (cond
+      (nil? item)
+      (feed-fail feed "tahto.change/subscription-missing")
+
+      (not (subscription-admitted? context (get item :coordinate)))
+      (feed-fail feed "tahto.change/subscription-not-admitted")
+
+      :else
+      (feed-ok
+       feed
+       {:protocol poll-protocol
+        :subscription id
+        :status (get item :status)
+        :events (get item :queue)}))))
+
+(defn acknowledge
+  [feed context subscription cursor]
+  (let [id (str (get context :device) ":" subscription)
+        item (get-in feed [:feed/subscriptions id])
+        event
+        (if (nil? item)
+          nil
+          (find-event
+           (get item :queue)
+           (fn [candidate]
+             (= cursor (get candidate :cursor)))))]
+    (cond
+      (nil? item)
+      (feed-fail feed "tahto.change/subscription-missing")
+
+      (not (subscription-admitted? context (get item :coordinate)))
+      (feed-fail feed "tahto.change/subscription-not-admitted")
+
+      (not (= "live" (get item :status)))
+      (feed-fail feed "tahto.change/resync-required")
+
+      (nil? event)
+      (feed-fail feed "tahto.change/cursor-invalid")
+
+      :else
+      (let [remaining
+            (reduce
+             (fn [events queued]
+               (if (> (get queued :cursor) cursor)
+                 (conj events queued)
+                 events))
+             []
+             (get item :queue))
+            next-item
+            (assoc item
+                   :acknowledged-cursor cursor
+                   :queue remaining)]
+        (feed-ok
+         (assoc-in feed [:feed/subscriptions id] next-item)
+         next-item)))))

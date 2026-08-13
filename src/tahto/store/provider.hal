@@ -100,7 +100,7 @@
    (state-revision-valid? state (get value :revision))
    (model/canonical-digest? (get value :request-digest))
    (model/canonical-digest? (get value :result-digest))
-   (validate/device-request-context? (get value :context))
+   (validate/request-context? (get value :context))
    (= "completed" (get-in value [:context :status]))
    (= (get value :request-digest)
       (get-in value [:context :request-digest]))

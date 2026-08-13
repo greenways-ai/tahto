@@ -206,7 +206,7 @@
             (device/enrol-device
              state
              {:protocol validate/device-enrolment-protocol
-              :authorized true
+              :approved true
               :node (get entry :node)
               :approval-digest (get entry :approval-digest)
               :device (get acceptance :device)})]

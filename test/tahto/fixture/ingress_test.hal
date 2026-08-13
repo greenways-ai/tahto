@@ -79,7 +79,7 @@
           "applied"
           "object.upload")
          result
-         (ingress/authorize state value accepted-at)
+         (ingress/admit state value accepted-at)
          next-state (get result :state)
          context (get result :value)
          stored
@@ -90,10 +90,11 @@
           next-state fixture/device-a request-a)]
      [(ingress/identity? value)
       (get result :ok)
-      (validate/device-request-context? context)
+      (validate/request-context? context)
       (get context :device)
       (get context :operation)
       (get context :request-digest)
+      (get context :authority-root)
       (get context :idempotency-key)
       (get context :status)
       (get context :replayed)
@@ -106,6 +107,7 @@
     "device.a"
     "object.upload"
     request-a
+    lock-digest
     request-a
     "pending"
     false
@@ -117,7 +119,7 @@
    "an exact Hoplite replay returns the prior request without mutation"
    (let [initial (fixture-state/initial-state)
          applied
-         (ingress/authorize
+         (ingress/admit
           initial
           (fixture-identity
            fixture/device-a
@@ -127,7 +129,7 @@
           accepted-at)
          before (get applied :state)
          replayed
-         (ingress/authorize
+         (ingress/admit
           before
           (fixture-identity
            fixture/device-a
@@ -139,7 +141,7 @@
      [(get applied :ok)
       (get replayed :ok)
       (= before (get replayed :state))
-      (validate/device-request-context? context)
+      (validate/request-context? context)
       (get context :request-digest)
       (get context :replayed)])
    [true true true true request-a true])
@@ -148,7 +150,7 @@
    "replay fails closed when only half of the Tahto ledger remains"
    (let [initial (fixture-state/initial-state)
          applied
-         (ingress/authorize
+         (ingress/admit
           initial
           (fixture-identity
            fixture/device-a
@@ -163,7 +165,7 @@
           dissoc
           (model/nonce-key fixture/device-a request-a))
          replayed
-         (ingress/authorize
+         (ingress/admit
           damaged
           (fixture-identity
            fixture/device-a
@@ -182,7 +184,7 @@
    "a replay can recover when Hoplite admitted before Tahto state was written"
    (let [initial (fixture-state/initial-state)
          replayed
-         (ingress/authorize
+         (ingress/admit
           initial
           (fixture-identity
            fixture/device-a
@@ -209,7 +211,7 @@
    "a fingerprint cannot be replayed for another operation"
    (let [initial (fixture-state/initial-state)
          applied
-         (ingress/authorize
+         (ingress/admit
           initial
           (fixture-identity
            fixture/device-a
@@ -218,7 +220,7 @@
            "object.upload")
           accepted-at)
          result
-         (ingress/authorize
+         (ingress/admit
           (get applied :state)
           (fixture-identity
            fixture/device-a
@@ -248,7 +250,7 @@
            :status "revoked"
            :revoked-at accepted-at))
          result
-         (ingress/authorize
+         (ingress/admit
           state
           (fixture-identity
            fixture/device-b
@@ -302,7 +304,7 @@
           request-a
           "applied"
           "object.upload")
-         proof (ingress/request-proof value accepted-at)]
+         proof (ingress/request-verification value accepted-at)]
      [(validate/device-request-verification? proof)
       (get proof :device)
       (get proof :public-key)

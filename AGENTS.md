@@ -5,6 +5,9 @@ Tahto is application-neutral infrastructure authored as Hara programs.
 Before changing core code, preserve these laws:
 
 - Greenways OS owns installation, consent, private keys, credentials, and grants.
+- Greenways OS composes local grants with any imported Hestia room decision and
+  passes Tahto one closed `tahto.request-authority/0-alpha` decision. Tahto
+  admits the exact verified request; it does not make the grant decision.
 - Greenways OS owns device identity, pairing, key custody, installation,
   credentials, consent, grants, host-provider selection and backup policy.
 - Tahto owns semantic collections, stable logical IDs, typed links, exact roots,

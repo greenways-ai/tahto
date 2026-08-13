@@ -1,0 +1,29 @@
+{
+  "protocol": "tahto.client-conformance/0-alpha",
+  "operations": [
+    "tahto.semantic/read",
+    "tahto.semantic/prepare",
+    "tahto.semantic/submit",
+    "tahto.head/read",
+    "tahto.sync/plan",
+    "tahto.sync/push",
+    "tahto.sync/pull",
+    "tahto.sync/ack"
+  ],
+  "coordinate": {
+    "application": "app.example",
+    "namespace": "profile.primary",
+    "collection": "archive"
+  },
+  "packageRevision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "providerRevision": 7,
+  "fixtures": [
+    {"id": "read-current", "operation": "tahto.semantic/read", "outcome": "ok"},
+    {"id": "read-divergent", "operation": "tahto.head/read", "commits": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "outcome": "ok"},
+    {"id": "wrong-operation", "contextOverride": {"operation": "head.read"}, "error": "tahto.client/context-not-authorized"},
+    {"id": "wrong-coordinate", "coordinateOverride": {"collection": "other"}, "error": "tahto.client/context-not-authorized"},
+    {"id": "wrong-package-revision", "packageRevision": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "error": "tahto.client/package-revision-mismatch"},
+    {"id": "wrong-provider-revision", "providerRevision": 8, "error": "tahto.client/provider-revision-mismatch"},
+    {"id": "unknown-provider-field", "extra": {"providerPath": "/forbidden"}, "error": "tahto.client/request-invalid"}
+  ]
+}

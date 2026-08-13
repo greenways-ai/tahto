@@ -1,0 +1,36 @@
+{
+  "protocol": "tahto.import/0-alpha",
+  "package": "hara:greenways/tahto",
+  "version": "0.1.0-dev",
+  "contentRevision": "sha256:38392caad213e31f32409989c8f4d19c9f84e5867c170f195c8e9c9fe9db2716",
+  "dependencies": {
+    "gh:greenways-ai/hoplite": "0.1.0"
+  },
+  "exports": {
+    "tahto/client": "tahto.client",
+    "tahto/change-feed": "tahto.change-feed"
+  },
+  "modules": [
+    {"namespace": "tahto.client", "sha256": "4fa46cac4b2fd77166e7b81b3c25a92a242857a006912ab8210b7c775a01fba4", "requires": ["tahto.protocol.validate", "tahto.semantic.prepare", "tahto.semantic.read", "tahto.semantic.submit", "tahto.store.model", "tahto.store.provider", "tahto.sync.session"]},
+    {"namespace": "tahto.change-feed", "sha256": "acb89f7bbfd10646db6031b046748cc5df53d0e6f65c075972db7a25d79407a5", "requires": ["tahto.client", "tahto.protocol.validate", "tahto.store.model", "tahto.store.provider"]},
+    {"namespace": "tahto.protocol.descriptor", "sha256": "cafd9a7766969e9678ba175ecacffdfa13650ef3c647cb263a37219c0bf8a491", "requires": []}
+  ],
+  "artifacts": [
+    {"path": "protocol/client-facade.md", "sha256": "a9dead8a6f110658fb3bddd4e04ed151aeecba7b3acf7b2fd4e7ab6a74057633"},
+    {"path": "protocol/semantic-change-feed.md", "sha256": "d41693601f00028590af509a83ea7df6a0e6921c3c294fe8f6e5dc14535c7a9f"},
+    {"path": "conformance/fixtures/client-facade.json", "sha256": "0e62cc31c984994ea3969e2b003881398bd63ad9b1cede3703928be1bd7a3c85"},
+    {"path": "conformance/fixtures/semantic-change-feed.json", "sha256": "6c1a501c8b9f74a673fc86a90535b78bd163720b9b6a51b57e06b115f68e53e3"},
+    {"path": "project.edn", "sha256": "f50a06701230891b1cf87aac174a6c63ffaa8c9fc72a0326230651a5bff2e3cf"},
+    {"path": "hara.recipe.edn", "sha256": "158b1baae08cd2ba2cbd4886b7d514ba7d4bc0c2336b8188aebe6ba9f97d3f26"}
+  ],
+  "laws": {
+    "verifiedDeviceContextRequired": true,
+    "preserveDivergentHeads": true,
+    "providerRevisionPrecondition": true,
+    "packageRevisionPrecondition": true,
+    "feedRequiresCommittedReceipt": true,
+    "boundedFeed": true,
+    "remoteSourceEvaluation": false,
+    "automaticMerge": false
+  }
+}
