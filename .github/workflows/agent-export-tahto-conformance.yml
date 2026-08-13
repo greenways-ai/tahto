@@ -1,0 +1,26 @@
+name: Export Tahto conformance sources
+
+on:
+  push:
+    branches:
+      - agent/semantic-route-dispatch-65
+    paths:
+      - .github/workflows/agent-export-tahto-conformance.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/semantic-route-dispatch-65
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tahto-conformance-sources
+          path: |
+            .github/workflows/bootstrap-conformance.yml
+            packaging
+          if-no-files-found: error
