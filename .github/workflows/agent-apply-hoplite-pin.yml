@@ -1,0 +1,41 @@
+name: Apply reviewed Hoplite conformance pin
+
+on:
+  push:
+    branches:
+      - agent/semantic-route-dispatch-65
+    paths:
+      - scripts/agent-pin-hoplite-conformance.py
+      - .github/workflows/agent-apply-hoplite-pin.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/semantic-route-dispatch-65
+          fetch-depth: 0
+      - name: Apply the immutable dependency pin
+        run: python3 scripts/agent-pin-hoplite-conformance.py
+      - name: Verify the closed pin and source path
+        run: |
+          grep -F 'HOPLITE_REVISION: d51c5954e427ea84439477135b970a3e1145c190' .github/workflows/bootstrap-conformance.yml
+          grep -F 'ref: ${{ env.HOPLITE_REVISION }}' .github/workflows/bootstrap-conformance.yml
+          grep -F '.dependencies/technology/hoplite/core/lib/src/hoplite/value.hal' .github/workflows/bootstrap-conformance.yml
+          test "$(tr -d '\n' < packaging/hoplite-revision)" = 'd51c5954e427ea84439477135b970a3e1145c190'
+          ! grep -F 'migration/value/src/hoplite/value.hal' .github/workflows/bootstrap-conformance.yml
+      - name: Publish the clean pin
+        run: |
+          rm -f scripts/agent-pin-hoplite-conformance.py
+          rm -f .github/workflows/agent-apply-hoplite-pin.yml
+          rm -f .github/workflows/agent-export-tahto-conformance.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Pin the reviewed Hoplite conformance revision"
+          git push origin HEAD:agent/semantic-route-dispatch-65
