@@ -74,7 +74,7 @@
     (nil? (get context :result-digest))
     (model/device-enrolled? state (get context :device)))))
 
-(defn- dispatch
+(defn dispatch
   [expected-operation state route context request]
   (let [selected-operation (get route :operation)
         mapped-operation (signed-operation selected-operation)]
