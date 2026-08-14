@@ -264,7 +264,11 @@
     31
     [["hoplite.blob"
       "object/open-source"
-      {:digest value-left :offset 8 :length 16}]]
+      {:protocol "hoplite.blob-request/0-alpha"
+       :operation "object/open-source"
+       :digest value-left
+       :offset 8
+       :length 16}]]
     true])
 
   (test/check

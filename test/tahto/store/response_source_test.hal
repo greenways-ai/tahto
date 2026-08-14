@@ -173,7 +173,7 @@
      [(get denied :ok)
       (error-code denied)
       (get denied :effects)])
-   [false "tahto.store/object-not-authorized" []])
+   [false "tahto.store/object-out-of-scope" []])
 
   (test/check
    "provider mismatches and extra authority remain capability failures"
