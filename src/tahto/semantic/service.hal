@@ -1,0 +1,343 @@
+(ns tahto.semantic.service
+  (:require [std.foundation :refer :all]
+            [tahto.node.request-verification :as request-verification]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.route :as route]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]
+            [tahto.store.transaction :as transaction]
+            [tahto.sync.device :as device]))
+
+(def protocol
+  "tahto.semantic-service/0-alpha")
+
+(def request-protocol
+  "tahto.semantic-service-request/0-alpha")
+
+(def result-record-protocol
+  "tahto.semantic-service-result-record/0-alpha")
+
+(def result-state-key
+  :semantic-service-results)
+
+(def request-fields
+  #{:protocol :route :wire :authority :result-verification})
+
+(def signed-payload-fields
+  #{"expected-revision" "request"})
+
+(def result-record-fields
+  #{:protocol :device :idempotency-key :nonce :request-digest
+    :result-digest :route :ok :completed-at :plan})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn json-value?
+  [value]
+  (truth-value
+   (cond
+     (map? value)
+     (every?
+      (fn [entry]
+        (and (string? (key entry))
+             (json-value? (val entry))))
+      value)
+
+     (vector? value)
+     (every? json-value? value)
+
+     :else
+     (or (nil? value)
+         (string? value)
+         (number? value)
+         (= true value)
+         (= false value)))))
+
+(defn json->hara
+  [value]
+  (cond
+    (map? value)
+    (reduce
+     (fn [output entry]
+       (assoc output
+              (keyword (key entry))
+              (json->hara (val entry))))
+     {}
+     value)
+
+    (vector? value)
+    (vec (map json->hara value))
+
+    :else value))
+
+(defn signed-payload
+  [request]
+  (get-in request [:wire "payload"]))
+
+(defn signed-request
+  [request]
+  (get (signed-payload request) "request"))
+
+(defn expected-revision
+  [request]
+  (get (signed-payload request) "expected-revision"))
+
+(defn request?
+  [value]
+  (let [payload (signed-payload value)
+        result-verification (get value :result-verification)]
+    (truth-value
+     (and
+      (validate/exact-record? value request-fields #{})
+      (= request-protocol (get value :protocol))
+      (route/route? (get value :route))
+      (request-verification/request-shape? (get value :wire))
+      (validate/request-authority? (get value :authority))
+      (or (nil? result-verification)
+          (transaction/result-verification? result-verification))
+      (validate/exact-record? payload signed-payload-fields #{})
+      (provider/provider-revision? (expected-revision value))
+      (map? (signed-request value))
+      (json-value? (signed-request value)))))))
+
+(defn route-wire-matches?
+  [selected wire]
+  (= [(route/signed-operation (get selected :operation))
+      (get selected :application)
+      (get selected :namespace)
+      (get selected :collection)]
+     [(get wire "operation")
+      (get wire "application")
+      (get wire "namespace")
+      (get wire "collection")]))
+
+(defn verification-matches-wire?
+  [verification wire]
+  (= verification
+     (request-verification/verification-value wire)))
+
+(defn result-map
+  [state]
+  (model/value-or state result-state-key {}))
+
+(defn result-key
+  [verification]
+  (model/idempotency-key
+   (get verification :device)
+   (get verification :idempotency-key)))
+
+(defn result-record
+  [state verification]
+  (model/value-or
+   (result-map state)
+   (result-key verification)
+   nil))
+
+(defn result-record?
+  [value]
+  (let [plan (get value :plan)
+        context (get plan :context)
+        selected (get value :route)]
+    (truth-value
+     (and
+      (validate/exact-record? value result-record-fields #{})
+      (= result-record-protocol (get value :protocol))
+      (model/identifier? (get value :device))
+      (validate/opaque-token? (get value :idempotency-key))
+      (validate/opaque-token? (get value :nonce))
+      (model/canonical-digest? (get value :request-digest))
+      (model/canonical-digest? (get value :result-digest))
+      (route/route? selected)
+      (model/boolean-value? (get value :ok))
+      (validate/timestamp? (get value :completed-at))
+      (provider/transaction-plan?
+       plan
+       {:metadata-revision (get plan :revision)})
+      (= (get value :device) (get context :device))
+      (= (get value :idempotency-key)
+         (get context :idempotency-key))
+      (= (get value :request-digest)
+         (get plan :request-digest))
+      (= (get value :result-digest)
+         (get plan :result-digest))
+      (= [(route/signed-operation (get selected :operation))
+          (get selected :application)
+          (get selected :namespace)
+          (get selected :collection)]
+         [(get context :operation)
+          (get context :application)
+          (get context :namespace)
+          (get context :collection)])))))
+
+(defn transaction-record
+  [request verification transaction-result]
+  (let [plan (provider/transaction-plan transaction-result)
+        result-verification (get request :result-verification)]
+    (if (or (nil? plan) (nil? result-verification))
+      nil
+      {:protocol result-record-protocol
+       :device (get verification :device)
+       :idempotency-key (get verification :idempotency-key)
+       :nonce (get verification :nonce)
+       :request-digest (get verification :request-digest)
+       :result-digest (get plan :result-digest)
+       :route (get request :route)
+       :ok (get transaction-result :ok)
+       :completed-at (get result-verification :completed-at)
+       :plan plan})))
+
+(defn retain-transaction-result
+  [original-state request verification transaction-result]
+  (let [record (transaction-record request verification transaction-result)]
+    (if
+     (nil? record)
+     transaction-result
+     (let [state (get transaction-result :state)
+           key (result-key verification)
+           existing (model/value-or (result-map state) key nil)
+           next-state
+           (assoc state
+                  result-state-key
+                  (assoc (result-map state) key record))]
+       (cond
+         (not (result-record? record))
+         (model/fail original-state
+                     "tahto.semantic/service-result-record-invalid")
+
+         (and (not (nil? existing))
+              (not (= existing record)))
+         (model/fail original-state
+                     "tahto.semantic/service-result-collision")
+
+         :else
+         (assoc transaction-result
+                :state next-state
+                :service-replayed false))))))
+
+(defn exact-completed-replay?
+  [state request verification]
+  (let [authority (get request :authority)
+        stored
+        (model/idempotency-record
+         state
+         (get verification :device)
+         (get verification :idempotency-key))
+        nonce
+        (model/request-nonce
+         state
+         (get verification :device)
+         (get verification :nonce))
+        record (result-record state verification)]
+    (truth-value
+     (and
+      (not (nil? stored))
+      (= "completed" (get stored :status))
+      (device/same-idempotent-request?
+       stored verification authority)
+      (not (nil? nonce))
+      (= (get nonce :request-digest)
+         (get verification :request-digest))
+      (= (get nonce :timestamp)
+         (get verification :timestamp))
+      (result-record? record)
+      (= (get record :nonce) (get verification :nonce))
+      (= (get record :request-digest)
+         (get verification :request-digest))
+      (= (get record :result-digest)
+         (get stored :result-digest))
+      (= (get record :route) (get request :route))))))
+
+(defn replay-result
+  [state verification]
+  (let [record (result-record state verification)
+        plan (assoc (get record :plan) :replayed true)]
+    (if
+     (get record :ok)
+     (assoc (model/ok state plan)
+            :service-replayed true)
+     (let [error (get plan :result)]
+       (assoc
+        (model/fail state
+                    (get error :code)
+                    (model/value-or error :details {}))
+        :transaction plan
+        :service-replayed true)))))
+
+(defn dispatch-route
+  [state selected context request]
+  (let [operation (get selected :operation)]
+    (cond
+      (= operation route/read-operation)
+      (route/read state selected context request)
+
+      (= operation route/prepare-operation)
+      (route/prepare state selected context request)
+
+      (= operation route/submit-operation)
+      (route/submit state selected context request)
+
+      :else
+      (model/fail state
+                  "tahto.semantic/service-route-operation-unsupported"))))
+
+(defn dispatch-verified
+  "Trusted test/host seam after the exact wire signature has been verified."
+  [state request verification]
+  (let [wire (get request :wire)
+        authority (get request :authority)
+        selected (get request :route)]
+    (cond
+      (not (request? request))
+      (model/fail state "tahto.semantic/service-request-invalid")
+
+      (not (validate/device-request-verification? verification))
+      (model/fail state "tahto.semantic/service-verification-invalid")
+
+      (not (verification-matches-wire? verification wire))
+      (model/fail state "tahto.semantic/service-verification-mismatch")
+
+      (not (route-wire-matches? selected wire))
+      (model/fail state "tahto.semantic/service-route-request-mismatch")
+
+      (not (device/authority-matches-verification?
+            authority verification))
+      (model/fail state "tahto.semantic/service-authority-mismatch")
+
+      (exact-completed-replay? state request verification)
+      (replay-result state verification)
+
+      (nil? (get request :result-verification))
+      (model/fail state
+                  "tahto.semantic/service-result-verification-missing")
+
+      :else
+      (let [semantic-request
+            (json->hara (signed-request request))
+            transaction-result
+            (transaction/execute
+             state
+             (expected-revision request)
+             verification
+             authority
+             (fn [current context input]
+               (dispatch-route current selected context input))
+             semantic-request
+             (get request :result-verification))]
+        (retain-transaction-result
+         state request verification transaction-result)))))
+
+(defn dispatch
+  [state request now-seconds]
+  (if
+   (not (request? request))
+   (model/fail state "tahto.semantic/service-request-invalid")
+   (let [verification
+         (request-verification/verify
+          (get request :wire)
+          now-seconds)]
+     (if
+      (nil? verification)
+      (model/fail state "tahto.semantic/service-signature-invalid")
+      (dispatch-verified state request verification)))))
