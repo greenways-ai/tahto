@@ -1,5 +1,6 @@
 (ns tahto.fixture.state
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.fixture.two-device :as fixture]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]

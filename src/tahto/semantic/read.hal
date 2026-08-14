@@ -1,5 +1,6 @@
 (ns tahto.semantic.read
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]
             [tahto.semantic.admission :as admission]
             [tahto.semantic.history :as semantic-history]

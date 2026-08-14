@@ -1,5 +1,6 @@
 (ns tahto.semantic.index
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]
             [tahto.semantic.admission :as admission]
             [tahto.semantic.model :as semantic]

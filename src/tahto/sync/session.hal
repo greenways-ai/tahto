@@ -1,5 +1,6 @@
 (ns tahto.sync.session
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]
             [tahto.store.graph :as graph]
             [tahto.store.model :as model]

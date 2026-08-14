@@ -1,5 +1,6 @@
 (ns tahto.protocol.validate
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.protocol.records :as records]
             [tahto.store.model :as model]))
 

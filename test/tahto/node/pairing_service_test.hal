@@ -1,6 +1,6 @@
 (ns tahto.node.pairing-service-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.node.pairing-service :as service]
             [tahto.store.memory-store :as memory-store]
             [tahto.store.provider :as provider]
@@ -73,8 +73,7 @@
       (has? value :metadata-revision) state-digest
       :else digest)))
 
-(test/print-results
- [(test/check
+[(test-check
    "issue prepare and complete survive reload and replay through hoplite.store"
    (let [memory (memory-store/create)
          invoke (executor memory)
@@ -112,4 +111,4 @@
       (provider/state-revision (get snapshot :value))
       (get-in snapshot [:value :pairing-invitations "invite.live" :status])
       (get-in snapshot [:value :devices "device.browser" :status])])
-   [true true true nil true nil true true false [] 3 3 "consumed" "enrolled"])])
+   [true true true nil true nil true true false [] 3 3 "consumed" "enrolled"])]

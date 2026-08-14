@@ -1,5 +1,6 @@
 (ns tahto.store.vault
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.store.graph :as graph]
             [tahto.store.host :as store-host]
             [tahto.store.model :as model]))

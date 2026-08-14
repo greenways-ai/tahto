@@ -1,17 +1,16 @@
 (ns tahto.fixture.app-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.fixture.app :as app]
             [tahto.fixture.two-device :as fixture]))
 
-(test/print-results
- [(test/check
+[(test-check
    "the fixture contract returns the exact reusable descriptor"
    [(app/descriptor-value)
     (fixture/descriptor? (app/descriptor-value))]
    [(fixture/descriptor) true])
 
-  (test/check
+  (test-check
    "the descriptor wire projection is closed and JSON-safe"
    (app/descriptor-wire-value)
    {"protocol" "tahto.two-device-fixture/0-alpha"
@@ -32,7 +31,7 @@
      "media-type" "application/octet-stream"}
     "range" {"start" 4096 "end" 69632}})
 
-  (test/check
+  (test-check
    "fixture health names only generic required host services"
    [(app/health-value)
     (app/health-wire-value)]
@@ -47,7 +46,7 @@
      "fixture-protocol" "tahto.two-device-fixture/0-alpha"
      "required-services" ["hoplite.blob" "hoplite.store"]}])
 
-  (test/check
+  (test-check
    "fixture handlers retain closed JSON and preflight responses"
    (let [descriptor-response (app/descriptor {})
          health-response (app/health {})
@@ -65,4 +64,4 @@
     200
     true
     204
-    ""])])
+    ""])]

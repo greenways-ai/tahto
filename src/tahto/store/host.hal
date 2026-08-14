@@ -1,5 +1,6 @@
 (ns tahto.store.host
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.store.model :as model]))
 
 (def effect-protocol "tahto.store.host-effect/0-alpha")

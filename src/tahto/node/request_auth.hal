@@ -1,5 +1,6 @@
 (ns tahto.node.request-auth
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]))
 
 (def request-protocol "tahto.device-request/0-alpha")
@@ -90,7 +91,7 @@
 
 (defn unsigned-json
   [request]
-  (json/write
+  (Json/write
    (dissoc
     (dissoc request "requestDigest")
     "signature")))
@@ -128,6 +129,6 @@
 
 (defn decode-envelope
   [encoded]
-  (json/read
+  (Json/read
    (str/decode-utf8
     (host-call "base64url-decode" [encoded]))))

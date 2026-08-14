@@ -1,6 +1,6 @@
 (ns tahto.store.vault-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.store.graph :as graph]
             [tahto.store.host :as store-host]
             [tahto.store.model :as model]
@@ -52,8 +52,7 @@
       :verified true
       :installed true})))
 
-(test/print-results
- [(test/check
+[(test-check
    "canonical digests are lower-case sha256 identifiers"
    [(model/canonical-digest? digest-a)
     (model/canonical-digest?
@@ -61,7 +60,7 @@
     (model/canonical-digest? "../objects/a")]
    [true false false])
 
-  (test/check
+  (test-check
    "application-facing identifiers follow the TAHTO-2 core vocabulary"
    [(model/identifier? "app.example")
     (model/identifier? "profile/primary")
@@ -71,7 +70,7 @@
      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
    [true true false false false])
 
-  (test/check
+  (test-check
    "the host boundary rejects paths, raw bytes and non-numeric handles"
    [(store-host/effect?
      (store-host/effect
@@ -97,7 +96,7 @@
        :body-handle "body-42"}))]
    [true false false])
 
-  (test/check
+  (test-check
    "an upload reserves its full logical namespace quota"
    (let [state (model/empty-state {:default-namespace-quota-bytes 10})
          first-result
@@ -123,7 +122,7 @@
       (error-code second-result)])
    [true false "tahto.store/quota-exceeded"])
 
-  (test/check
+  (test-check
    "empty immutable objects can complete without an append"
    (let [installed (upload-object (model/empty-state)
                                   "upload-empty" "app" "ns" digest-a 0)]
@@ -131,7 +130,7 @@
       (get (model/stored-object (result-state installed) digest-a) :size)])
    [true 0])
 
-  (test/check
+  (test-check
    "append rejects stale offsets before issuing a host write"
    (let [begun
          (vault/begin-upload
@@ -154,7 +153,7 @@
       (get stale :effects)])
    [false "tahto.store/stale-upload-offset" []])
 
-  (test/check
+  (test-check
    "large object bytes stay behind an opaque Hoplite resource handle"
    (let [begun
          (vault/begin-upload
@@ -179,7 +178,7 @@
       (store-host/effect? effect)])
    [42 false false true])
 
-  (test/check
+  (test-check
    "installation is authoritative only after a matching host proof"
    (let [begun
          (vault/begin-upload
@@ -214,7 +213,7 @@
       (nil? (model/stored-object (result-state rejected) digest-a))])
    [false "tahto.store/install-verification-failed" true])
 
-  (test/check
+  (test-check
    "verified installation creates an object and namespace reference"
    (let [installed (upload-object (model/empty-state)
                                   "upload-1" "app" "ns" digest-a 8)
@@ -228,7 +227,7 @@
       (nil? (model/upload state "upload-1"))])
    [true model/object-protocol 8 "identity" false true true])
 
-  (test/check
+  (test-check
    "aborting an upload releases its reservation and emits bounded cleanup"
    (let [begun
          (vault/begin-upload
@@ -247,7 +246,7 @@
       (store-host/effect? (first (get aborted :effects)))])
    [0 "upload/abort" true])
 
-  (test/check
+  (test-check
    "existence negotiation preserves order for one authorized namespace"
    (let [installed-a (upload-object (model/empty-state)
                                     "upload-a" "app" "ns" digest-a 8)
@@ -263,7 +262,7 @@
    {:present [digest-b digest-a]
     :missing [digest-c]})
 
-  (test/check
+  (test-check
    "existence negotiation is bounded before digest traversal"
    (let [result
          (vault/negotiate
@@ -274,7 +273,7 @@
      [(get result :ok) (error-code result) (get result :effects)])
    [false "tahto.store/digest-list-too-large" []])
 
-  (test/check
+  (test-check
    "object presence is not disclosed across namespaces or applications"
    (let [installed (upload-object (model/empty-state)
                                   "upload-a" "app-a" "ns-a" digest-a 8)
@@ -296,7 +295,7 @@
    [{:present [] :missing [digest-a]}
     {:present [] :missing [digest-a]}])
 
-  (test/check
+  (test-check
    "another application gains authority only after a full verified upload"
    (let [installed (upload-object (model/empty-state)
                                   "upload-a" "app-a" "ns-a" digest-a 8)
@@ -310,7 +309,7 @@
       (count (get state :objects))])
    [true true true 1])
 
-  (test/check
+  (test-check
    "global deduplication cannot bypass logical namespace quota"
    (let [installed (upload-object (model/empty-state)
                                   "upload-a" "app-a" "ns-a" digest-a 8)
@@ -335,7 +334,7 @@
               [:value :bytes])])
    [false "tahto.store/quota-exceeded" [] 0])
 
-  (test/check
+  (test-check
    "range plans enforce namespace authority and bounded half-open offsets"
    (let [installed (upload-object
                     (model/empty-state {:max-range-bytes 4})
@@ -370,4 +369,4 @@
     {:digest digest-a :start 2 :end 6}
     "tahto.store/object-out-of-scope"
     "tahto.store/object-out-of-scope"
-    "tahto.store/range-too-large"])])
+    "tahto.store/range-too-large"])]

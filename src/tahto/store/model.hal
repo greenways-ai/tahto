@@ -1,5 +1,5 @@
 (ns tahto.store.model
-  (:require [std.foundation :refer :all]))
+  (:config {}))
 
 (def state-protocol "tahto.object-vault-state/0-alpha")
 (def device-protocol "tahto.device/0-alpha")

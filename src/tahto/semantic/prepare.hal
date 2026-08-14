@@ -1,5 +1,6 @@
 (ns tahto.semantic.prepare
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]
             [tahto.semantic.history :as semantic-history]
             [tahto.semantic.root :as semantic-root]

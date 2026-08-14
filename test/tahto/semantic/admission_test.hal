@@ -1,6 +1,6 @@
 (ns tahto.semantic.admission-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.semantic.admission :as admission]
             [tahto.semantic.model :as semantic]
             [tahto.store.graph :as graph]
@@ -150,8 +150,7 @@
    :semantic-object semantic-object
    :verification verification})
 
-(test/print-results
- [(test/check
+[(test-check
    "semantic projection state is additive and absent before first admission"
    (let [state (model/empty-state)]
      [(has? state :semantic-objects)
@@ -159,7 +158,7 @@
       (admission/semantic-object-projection state envelope-a)])
    [false {} nil])
 
-  (test/check
+  (test-check
    "valid zero-link and multi-link envelopes retain bounded projections and edges"
    (let [state (base-state)
          zero
@@ -205,7 +204,7 @@
     true
     true])
 
-  (test/check
+  (test-check
    "exact replay is idempotent while another projection for one root conflicts"
    (let [state (base-state)
          input
@@ -234,7 +233,7 @@
       (= (result-state first) (result-state conflict))])
    [true true true false "tahto.semantic/projection-conflict" true])
 
-  (test/check
+  (test-check
    "an existing non-semantic edge cannot be overwritten by admission"
    (let [state (base-state)
          occupied
@@ -255,7 +254,7 @@
       (= occupied (result-state result))])
    [false "tahto.semantic/edge-conflict" true])
 
-  (test/check
+  (test-check
    "missing and unauthorized envelope roots fail before projection"
    (let [missing-state
          (install-specs
@@ -291,7 +290,7 @@
     "tahto.semantic/envelope-out-of-scope"
     true])
 
-  (test/check
+  (test-check
    "the semantic envelope and application value roots remain distinct"
    (let [state
          (install-specs
@@ -315,7 +314,7 @@
       (= state (result-state result))])
    [false "tahto.semantic/value-root-not-distinct" true])
 
-  (test/check
+  (test-check
    "value roots must be installed authorized and size-exact"
    (let [missing-state
          (install-specs
@@ -360,7 +359,7 @@
     "tahto.semantic/value-out-of-scope"
     true])
 
-  (test/check
+  (test-check
    "verification evidence must match schema root and size exactly"
    (let [state (base-state)
          proof (verification-for object-zero)
@@ -410,7 +409,7 @@
     "tahto.semantic/verification-invalid"
     true true true true])
 
-  (test/check
+  (test-check
    "link targets must be installed and namespace-authorized"
    (let [missing-state
          (install-specs
@@ -449,7 +448,7 @@
     "tahto.semantic/link-target-out-of-scope"
     true])
 
-  (test/check
+  (test-check
    "installed targets need not be semantically admitted yet"
    (let [state (base-state)
          result
@@ -467,7 +466,7 @@
          (get-in next-state [:edges envelope-a]))])
    [true true true true])
 
-  (test/check
+  (test-check
    "bounded cyclic semantic graphs can be admitted in either order"
    (let [link-a
          {:protocol semantic/semantic-link-protocol
@@ -537,7 +536,7 @@
       (get report-b :overflow)])
    [true true true true true false true false])
 
-  (test/check
+  (test-check
    "two immutable versions may share one stable logical ID"
    (let [object-a
          (assoc object-zero :id "entity/shared")
@@ -573,7 +572,7 @@
       (= "entity/shared" (get-in projections [envelope-b :id]))])
    [true true true true true])
 
-  (test/check
+  (test-check
    "admission inputs are closed and durable projections contain no host authority"
    (let [state (base-state)
          input
@@ -600,4 +599,4 @@
    ["tahto.semantic/admission-input-invalid"
     true
     true
-    false false false false false false false])])
+    false false false false false false false])]

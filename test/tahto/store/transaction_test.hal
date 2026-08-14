@@ -1,6 +1,6 @@
 (ns tahto.store.transaction-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
             [tahto.store.transaction :as transaction]
@@ -130,8 +130,7 @@
    "test/should-not-run"
    {:application (get context :application)}))
 
-(test/print-results
- [(test/check
+[(test-check
    "a successful transition commits nonce mutation completion and revision together"
    (let [request (request-verification "nonce-success-0001" "idempotency-success-0001")
          result
@@ -155,7 +154,7 @@
       (get-in result [:value :context :result-digest])])
    [true "stored" 1 true "completed" result-digest result-digest])
 
-  (test/check
+  (test-check
    "a completed idempotent replay records the new nonce without rerunning the transition"
    (let [first-request
          (request-verification "nonce-replay-0001" "idempotency-replay-0001")
@@ -188,7 +187,7 @@
                   state device-id "nonce-replay-0002")))])
    [true true result-digest "first" nil 2 true])
 
-  (test/check
+  (test-check
    "a stale expected revision fails before consuming a nonce"
    (let [state (fixture-state)
          result
@@ -206,7 +205,7 @@
        (result-state result) device-id "nonce-stale-0001")])
    [false "tahto.transaction/revision-conflict" true nil])
 
-  (test/check
+  (test-check
    "an invalid result proof rolls back authorization and domain mutation"
    (let [state (fixture-state)
          result
@@ -226,7 +225,7 @@
        (result-state result) device-id "nonce-invalid-proof-0001")])
    [false "tahto.transaction/result-verification-invalid" true nil nil])
 
-  (test/check
+  (test-check
    "a mismatched result proof cannot complete another operation"
    (let [state (fixture-state)
          verification
@@ -245,7 +244,7 @@
       (= state (result-state result))])
    [false "tahto.transaction/result-verification-mismatch" true])
 
-  (test/check
+  (test-check
    "effectful transitions cannot masquerade as one atomic metadata commit"
    (let [state (fixture-state)
          result
@@ -262,7 +261,7 @@
       (get (result-state result) :transaction-marker)])
    [false "tahto.transaction/effects-not-atomic" true nil])
 
-  (test/check
+  (test-check
    "a rejected domain transition is completed idempotently without partial mutation"
    (let [request
          (request-verification "nonce-error-0001" "idempotency-error-0001")
@@ -286,7 +285,7 @@
       (get-in result [:transaction :result-digest])])
    [false "test/rejected" nil 1 "completed" "test/rejected" error-digest])
 
-  (test/check
+  (test-check
    "the same signed nonce is still rejected after an atomic completion"
    (let [request
          (request-verification "nonce-repeat-0001" "idempotency-repeat-0001")
@@ -312,7 +311,7 @@
       (transaction/current-revision (result-state repeated))])
    [false "tahto.device/nonce-replayed" true 1])
 
-  (test/check
+  (test-check
    "a legacy pending idempotency record can finish through the atomic coordinator"
    (let [state (fixture-state)
          first-request
@@ -344,7 +343,7 @@
                   next-state device-id "nonce-pending-0002")))])
    [true "recovered" "completed" 1 true true])
 
-  (test/check
+  (test-check
    "unknown result-proof fields fail closed and roll back"
    (let [state (fixture-state)
          verification
@@ -364,7 +363,7 @@
       (= state (result-state result))])
    [false "tahto.transaction/result-verification-invalid" true])
 
-  (test/check
+  (test-check
    "invalid transition result shapes never reach the provider commit plan"
    (let [state (fixture-state)
          result
@@ -378,4 +377,4 @@
      [(get result :ok)
       (error-code result)
       (= state (result-state result))])
-   [false "tahto.transaction/transition-result-invalid" true])])
+   [false "tahto.transaction/transition-result-invalid" true])]

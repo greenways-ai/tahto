@@ -1,6 +1,6 @@
 (ns tahto.monitor-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.monitor :as monitor]
             [tahto.protocol.descriptor :as descriptor]
             [tahto.store.capability :as capability]
@@ -30,8 +30,7 @@
       metadata-result
       object-probe-result)))
 
-(test/print-results
- [(test/check
+[(test-check
    "an absent metadata snapshot is explicitly not ready"
    (monitor/probe-with (invoke-with nil))
    {:protocol "tahto.monitor-probe/0-alpha"
@@ -41,7 +40,7 @@
     :object "ready"
     :object-error nil})
 
-  (test/check
+  (test-check
    "a valid provider load reports its real revision and bounded counts"
    (let [state (assoc (model/empty-state)
                       :metadata-revision 7
@@ -58,7 +57,7 @@
     :revision 7
     :counts {:devices 1 :objects 1 :commits 0 :heads 0 :backups 0}})
 
-  (test/check
+  (test-check
    "object provider failures degrade an otherwise ready metadata service"
    (let [state (model/empty-state)]
      (monitor/probe-with
@@ -75,7 +74,7 @@
     :revision 0
     :counts {:devices 0 :objects 0 :commits 0 :heads 0 :backups 0}})
 
-  (test/check
+  (test-check
    "provider failures remain bounded diagnostic state"
    (monitor/inspect-result
     (model/fail {} "hoplite.store/unavailable" {:secret "not projected"}))
@@ -84,7 +83,7 @@
     :metadata "unavailable"
     :error "hoplite.store/unavailable"})
 
-  (test/check
+  (test-check
    "public health and status project the live metadata probe"
    (let [inspection {:state "degraded"
                      :metadata "unavailable"
@@ -98,7 +97,7 @@
               ["fabric" "objectUpload"])])
    ["degraded" "unavailable" "unavailable" "unavailable" "unavailable"])
 
-  (test/check
+  (test-check
    "paired diagnostics contain aggregate state and no stored records"
    (monitor/diagnostics
     {:state "ready"
@@ -116,7 +115,7 @@
              :object {:state "ready" :error nil}}
     :counts {:devices 2 :objects 5 :commits 1 :heads 1 :backups 0}})
 
-  (test/check
+  (test-check
    "diagnostics require the exact enrolled device and closed monitor scope"
    (let [public-key "p256:device-a"
          device "device.a"
@@ -143,4 +142,4 @@
         (assoc proof :application "attacker.app")
         "2026-08-09T00:00:00.000Z")
        [:error :code])])
-   [true "tahto.monitor/request-verification-invalid"])])
+   [true "tahto.monitor/request-verification-invalid"])]

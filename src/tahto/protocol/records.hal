@@ -1,5 +1,5 @@
 (ns tahto.protocol.records
-  (:require [std.foundation :refer :all]))
+  (:config {}))
 
 (def signature-profile "tahto-signature/0-alpha")
 (def canonical-json-profile "tahto-canonical-json/0-alpha")

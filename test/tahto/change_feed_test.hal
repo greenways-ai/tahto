@@ -1,6 +1,6 @@
 (ns tahto.change-feed-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.change-feed :as feed]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
@@ -98,8 +98,7 @@
    coordinate
    single-head))
 
-(test/print-results
- [(test/check
+[(test-check
    "committed single and divergent heads produce canonical events"
    [(get-in published-one [:value :current-head :state])
     (get-in published-one [:value :cursor])
@@ -108,7 +107,7 @@
     (get-in published-two [:value :metadata-revision])]
    ["current" 1 "divergent" [commit-left commit-right] 2])
 
-  (test/check
+  (test-check
    "an exact duplicate retains its cursor and changed bytes collide"
    (let [replay
          (feed/publish
@@ -122,7 +121,7 @@
       (get-in collision [:error :code])])
    [true 1 "tahto.change/revision-collision"])
 
-  (test/check
+  (test-check
    "events cannot precede a matching recoverable provider receipt"
    [(get-in
      (feed/publish
@@ -137,7 +136,7 @@
    ["tahto.change/receipt-invalid"
     "tahto.change/state-not-committed"])
 
-  (test/check
+  (test-check
    "authorized subscriptions receive bounded resumable queues"
    (let [subscribed
          (feed/subscribe
@@ -168,7 +167,7 @@
       (get-in acknowledged [:value :queue])])
    ["live" 2 2 []])
 
-  (test/check
+  (test-check
    "slow consumers overflow to resync-required without unbounded queues"
    (let [subscribed
          (feed/subscribe
@@ -193,7 +192,7 @@
       (get-in polled [:value :events])])
    ["resync-required" []])
 
-  (test/check
+  (test-check
    "expired, foreign-coordinate and unauthorized cursors fail closed"
    (let [expired-feed
          (feed/publish
@@ -234,7 +233,7 @@
     "tahto.change/resync-required"
     "tahto.change/subscription-not-admitted"])
 
-  (test/check
+  (test-check
    "malformed or oversized events fail before entering retained history"
    [(get-in
      (feed/publish
@@ -243,4 +242,4 @@
      [:error :code])
     (feed/event?
      (assoc (get published-one :value) :semantic-value {:private true}))]
-   ["tahto.change/event-invalid-or-oversized" false])])
+   ["tahto.change/event-invalid-or-oversized" false])]

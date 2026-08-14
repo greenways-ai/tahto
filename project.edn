@@ -17,6 +17,6 @@
  :project/profiles
  {:server
   {:profile/language :hoplite
-   :profile/main tahto.node.app/app
+   :profile/main tahto.node.app
    :profile/options {:port 58100
                      :workers 1}}}}

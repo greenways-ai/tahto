@@ -1,5 +1,6 @@
 (ns tahto.change-feed
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.client :as client]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]

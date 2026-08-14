@@ -1,6 +1,6 @@
 (ns tahto.store.capability-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.store.capability :as capability]
             [tahto.store.host :as host]))
 
@@ -89,8 +89,7 @@
   [result]
   (get-in result [:error :code]))
 
-(test/print-results
- [(test/check
+[(test-check
    "the generic blob provider exposes a closed non-mutating readiness probe"
    (let [prepared (capability/prepare-probe {:marker "unchanged"})
          call (get prepared :value)
@@ -110,7 +109,7 @@
       (get-in result [:value :ready])])
    [true "probe" true {:marker "unchanged"} true])
 
-  (test/check
+  (test-check
    "Tahto effects map to one application-neutral Host/call shape"
    (let [open-call (capability/call-from-effect open-effect)
          append-call (capability/call-from-effect append-effect)
@@ -137,7 +136,7 @@
     false
     true])
 
-  (test/check
+  (test-check
    "the HAL adapter separates logical staging keys from work-scoped sources"
    (let [open-request
          (capability/call-request
@@ -157,7 +156,7 @@
       (has? append-request :path)])
    ["upload.a" digest 12 "upload.a" 4 5 17 false false false])
 
-  (test/check
+  (test-check
    "range plans become offset-length source requests"
    (let [request
          (capability/call-request
@@ -169,7 +168,7 @@
       (has? request :end)])
    [digest 2 7 false false])
 
-  (test/check
+  (test-check
    "application call plans cannot select a native ABI or driver"
    (let [call (capability/call-from-effect append-effect)]
      [(capability/host-call? call)
@@ -179,7 +178,7 @@
        (assoc call :driver "sqlite"))])
    [true false false])
 
-  (test/check
+  (test-check
    "generic requests reject paths raw bodies and extra authority"
    (let [request
          (capability/call-request
@@ -190,7 +189,7 @@
       (capability/request? (assoc request :credential "secret"))])
    [true false false false])
 
-  (test/check
+  (test-check
    "unsupported and malformed Tahto effects fail before host dispatch"
    (let [unsupported (capability/prepare {} manifest-effect)
          malformed
@@ -213,7 +212,7 @@
     "tahto.capability/effect-invalid"
     nil])
 
-  (test/check
+  (test-check
    "prepared calls preserve state and expose only the generic call plan"
    (let [state {:marker "unchanged"}
          result (capability/prepare state append-effect)]
@@ -223,7 +222,7 @@
       (get-in result [:value :service])])
    [true {:marker "unchanged"} true "hoplite.blob"])
 
-  (test/check
+  (test-check
    "generic results are exact operation-specific records"
    [(capability/result? verify-result)
     (capability/result?
@@ -232,7 +231,7 @@
      (assoc verify-result :operation "upload/verify-install"))]
    [true false false])
 
-  (test/check
+  (test-check
    "generic results must match the exact planned call"
    (let [call (capability/call-from-effect verify-effect)]
      [(capability/result-matches-call? call verify-result)
@@ -244,7 +243,7 @@
        (assoc verify-result :staging-key "upload.b"))])
    [true false false])
 
-  (test/check
+  (test-check
    "accepted generic results preserve state only after exact validation"
    (let [state {:marker "unchanged"}
          call (capability/call-from-effect append-effect)
@@ -270,7 +269,7 @@
     false
     "tahto.capability/result-mismatch"])
 
-  (test/check
+  (test-check
    "an injected HAL capability executes the same closed call contract"
    (let [state {:marker "unchanged"}
          result
@@ -290,7 +289,7 @@
       (get result :value)])
    [true {:marker "unchanged"} append-result])
 
-  (test/check
+  (test-check
    "injected providers cannot bypass request and result matching"
    (let [invalid-effect
          (capability/execute-with
@@ -311,7 +310,7 @@
     false
     "tahto.capability/result-mismatch"])
 
-  (test/check
+  (test-check
    "staging open may resume only inside the declared object size"
    (let [call (capability/call-from-effect open-effect)
          result {:protocol capability/result-protocol
@@ -325,7 +324,7 @@
        (assoc result :offset 13))])
    [true false])
 
-  (test/check
+  (test-check
    "verified generic commits translate back into Tahto results in HAL"
    (let [translated
          (capability/verified-install-result verify-effect verify-result)]
@@ -348,7 +347,7 @@
     12
     true])
 
-  (test/check
+  (test-check
    "generic immutable sources translate to bounded Tahto range results"
    (let [translated
          (capability/opened-source-result range-effect source-result)]
@@ -360,7 +359,7 @@
       (host/opened-range? translated digest 2 9)])
    ["object/read-range" 2 9 7 31 true])
 
-  (test/check
+  (test-check
    "mismatched generic results never cross the Tahto result boundary"
    [(capability/verified-install-result
      verify-effect
@@ -370,4 +369,4 @@
      range-effect
      (assoc source-result :length 8))
     (capability/verified-install-result open-effect verify-result)]
-   [nil nil nil])])
+   [nil nil nil])]

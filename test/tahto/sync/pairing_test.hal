@@ -1,6 +1,6 @@
 (ns tahto.sync.pairing-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.store.model :as model]
             [tahto.sync.pairing :as pairing]))
 
@@ -75,8 +75,7 @@
     :public-key "p256:browser-public-key"
     :algorithm "p256-sha256"}})
 
-(test/print-results
- [(test/check
+[(test-check
    "pairing consumes one invitation and grants identity only"
    (let [result
          (pairing/accept
@@ -89,7 +88,7 @@
       (get-in result [:state :devices "device.browser" :status])])
    [true false [] "consumed" "enrolled"])
 
-  (test/check
+  (test-check
    "an invitation is strictly one-time"
    (let [first
          (pairing/accept
@@ -102,7 +101,7 @@
      (get-in second [:error :code]))
    "tahto.pairing/invitation-consumed")
 
-  (test/check
+  (test-check
    "the raw invitation token is never stored"
    (let [state (issued-state)]
      [(has? (get-in state [:pairing-invitations "invite.one"])
@@ -110,7 +109,7 @@
       (get-in state [:pairing-invitations "invite.one" :token-digest])])
    [false token-digest])
 
-  (test/check
+  (test-check
    "the wrong token digest is rejected without consuming the invitation"
    (let [wrong
          "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
@@ -122,7 +121,7 @@
       (get-in result [:state :pairing-invitations "invite.one" :status])])
    ["tahto.pairing/token-invalid" "open"])
 
-  (test/check
+  (test-check
    "an expired invitation is rejected"
    (get-in
     (pairing/accept
@@ -131,7 +130,7 @@
     [:error :code])
    "tahto.pairing/invitation-expired")
 
-  (test/check
+  (test-check
    "prepare binds one open invitation to the exact node device and P-256 key"
    (let [result (pairing/prepare (issued-state) (prepare-request))
          intent (get result :value)]
@@ -144,7 +143,7 @@
          (get-in result [:state :pairing-invitations "invite.one" :intent]))])
    [true true "node.home" "device.browser" "p256:browser-public-key" true])
 
-  (test/check
+  (test-check
    "complete atomically consumes the invite and replays an exact lost result"
    (let [state (issued-state)
          prepared (pairing/prepare state (prepare-request))
@@ -161,7 +160,7 @@
       (= (get first :value) (get replay :value))])
    [true "consumed" "enrolled" false [] true true true])
 
-  (test/check
+  (test-check
    "complete rejects a tampered intent before consuming the invitation"
    (let [state (issued-state)
          prepared (pairing/prepare state (prepare-request))
@@ -172,7 +171,7 @@
       (= (get prepared :state) (get result :state))])
    ["tahto.pairing/intent-mismatch" true])
 
-  (test/check
+  (test-check
    "a prepared intent is replayable but cannot be rebound or disclosed by another token"
    (let [state (issued-state)
          request (prepare-request)
@@ -194,4 +193,4 @@
       (= prepared-state (get replay :state))
       (get-in rebound [:error :code])
       (get-in wrong-token [:error :code])])
-   [true true true "tahto.pairing/intent-conflict" "tahto.pairing/token-invalid"])])
+   [true true true "tahto.pairing/intent-conflict" "tahto.pairing/token-invalid"])]

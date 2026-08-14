@@ -1,5 +1,6 @@
 (ns tahto.node.pairing-wire
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.node.request-verification :as request-verification]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]

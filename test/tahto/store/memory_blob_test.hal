@@ -1,6 +1,6 @@
 (ns tahto.store.memory-blob-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.store.capability :as capability]
             [tahto.store.host :as host]
             [tahto.store.memory-blob :as memory-blob]))
@@ -74,8 +74,7 @@
   [result]
   (get-in result [:error :code]))
 
-(test/print-results
- [(test/check
+[(test-check
    "source fixtures are work-scoped exact records and handles are single-use"
    (let [memory (memory-blob/create)
          registered
@@ -98,7 +97,7 @@
       (get (memory-blob/input-source-entry memory 17) :closed)])
    [true false false "work.a" false false])
 
-  (test/check
+  (test-check
    "the pure-HAL provider executes open resume append commit and range source"
    (let [memory (memory-blob/create)
          registered-first
@@ -191,7 +190,7 @@
     false
     true])
 
-  (test/check
+  (test-check
    "staging abort is idempotent and removes resumable state"
    (let [memory (memory-blob/create)
          invoke (executor memory "work.a")
@@ -209,7 +208,7 @@
       (get-in replayed [:value :aborted])])
    [true true true nil true true])
 
-  (test/check
+  (test-check
    "wrong-work stale-offset and digest-mismatch sources never produce results"
    (let [wrong-work-memory (memory-blob/create)
          wrong-work-registered
@@ -283,7 +282,7 @@
     false
     "tahto.capability/result-invalid"])
 
-  (test/check
+  (test-check
    "incomplete staging and out-of-bounds ranges fail below the Tahto boundary"
    (let [memory (memory-blob/create)
          registered
@@ -349,7 +348,7 @@
     false
     "tahto.capability/result-invalid"])
 
-  (test/check
+  (test-check
    "opened response sources can only be closed by their owning work"
    (let [memory (memory-blob/create)
          registered
@@ -385,4 +384,4 @@
       (get ranged :ok)
       wrong-close
       right-close])
-   [true true true true true false true])])
+   [true true true true true false true])]

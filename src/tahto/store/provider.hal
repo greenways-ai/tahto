@@ -1,5 +1,6 @@
 (ns tahto.store.provider
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
             [tahto.store.transaction :as transaction]))

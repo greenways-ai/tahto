@@ -1,5 +1,6 @@
 (ns tahto.monitor
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.store.capability :as capability]
             [tahto.store.model :as model]
             [tahto.store.provider :as provider]))

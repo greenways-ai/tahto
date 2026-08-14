@@ -1,6 +1,6 @@
 (ns tahto.store.provider-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]
             [tahto.store.provider :as provider]
             [tahto.store.transaction :as transaction]))
@@ -127,22 +127,21 @@
   [result]
   (get-in result [:error :code]))
 
-(test/print-results
- [(test/check
+[(test-check
    "provider revisions fit a signed 64-bit storage column"
    [(provider/provider-revision? 0)
     (provider/provider-revision? provider/max-provider-revision)
     (provider/provider-revision? -1)]
    [true true false])
 
-  (test/check
+  (test-check
    "Tahto snapshots bind state evidence to the state revision"
    [(provider/snapshot? snapshot)
     (provider/snapshot? (assoc snapshot :revision 0))
     (provider/snapshot? (assoc snapshot :database-path "/tmp/unsafe"))]
    [true false nil])
 
-  (test/check
+  (test-check
    "canonical state verification remains Tahto-owned evidence"
    [(provider/state-verification? state-verification state)
     (provider/state-verification?
@@ -153,7 +152,7 @@
      state)]
    [true false nil])
 
-  (test/check
+  (test-check
    "load targets the generic durable store without exposing an ABI"
    (let [result (provider/prepare-load state)
          call (get result :value)]
@@ -165,7 +164,7 @@
       (provider/host-call? call)])
    [true "hoplite.store" "load" 1 false true])
 
-  (test/check
+  (test-check
    "receipt lookup treats the plan digest as an opaque generic key"
    (let [accepted (provider/prepare-receipt state plan-digest)
          rejected (provider/prepare-receipt state "not-a-digest")]
@@ -180,7 +179,7 @@
     false
     "tahto.provider/plan-digest-invalid"])
 
-  (test/check
+  (test-check
    "initialization sends an opaque value and digest to the generic store"
    (let [result
          (provider/prepare-initialize state state-verification)
@@ -195,7 +194,7 @@
       (has? request :state-digest)])
    [true true true state state-digest false false])
 
-  (test/check
+  (test-check
    "initialization cannot use proof for different state evidence"
    (let [result
          (provider/prepare-initialize
@@ -204,13 +203,13 @@
      [(get result :ok) (error-code result)])
    [false "tahto.provider/state-verification-invalid"])
 
-  (test/check
+  (test-check
    "successful and rejected TAHTO-7 results expose the same commit plan"
    [(provider/transaction-plan success-result)
     (provider/transaction-plan rejected-result)]
    [plan plan])
 
-  (test/check
+  (test-check
    "the transaction plan is bound to completed request evidence and state"
    [(provider/transaction-plan? plan state)
     (provider/transaction-plan?
@@ -224,7 +223,7 @@
      (assoc state :metadata-revision 2))]
    [true false false false])
 
-  (test/check
+  (test-check
    "commit verification binds the plan without widening host authority"
    [(provider/commit-verification? commit-verification)
     (provider/commit-verification-matches?
@@ -237,7 +236,7 @@
      (assoc commit-verification :database-path "/tmp/unsafe"))]
    [true true false nil])
 
-  (test/check
+  (test-check
    "Tahto receipt evidence remains an opaque value to the store"
    [(provider/receipt-payload? payload)
     (get payload :protocol)
@@ -249,7 +248,7 @@
     plan-digest
     nil])
 
-  (test/check
+  (test-check
    "compare-and-swap exposes generic mechanics and opaque Tahto values"
    (let [result
          (provider/prepare-compare-and-swap
@@ -277,7 +276,7 @@
     plan-digest
     "tahto.metadata-receipt-payload/0-alpha"])
 
-  (test/check
+  (test-check
    "a completed idempotent error uses the same generic durable boundary"
    (let [result
          (provider/prepare-compare-and-swap
@@ -287,7 +286,7 @@
       (get-in result [:value :arguments 0 :receipt :result-digest])])
    [true "compare-and-swap" result-digest])
 
-  (test/check
+  (test-check
    "mismatched commit evidence fails before a host call is exposed"
    (let [result
          (provider/prepare-compare-and-swap
@@ -296,7 +295,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.provider/commit-verification-invalid"])
 
-  (test/check
+  (test-check
    "malformed transaction results never reach the generic store"
    (let [result
          (provider/prepare-compare-and-swap
@@ -308,7 +307,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.provider/transaction-plan-invalid"])
 
-  (test/check
+  (test-check
    "store requests reject paths credentials drivers and extra fields"
    (let [request
          (provider/call-request
@@ -327,7 +326,7 @@
         :credential "secret"})])
    [true nil nil false])
 
-  (test/check
+  (test-check
    "host call plans cannot carry a native ABI or selected provider"
    (let [call
          (get (provider/prepare-load state) :value)]
@@ -338,7 +337,7 @@
        (assoc call :provider "sqlite"))])
    [true nil nil])
 
-  (test/check
+  (test-check
    "generic store responses are operation-specific"
    [(provider/provider-response? "load" nil)
     (provider/provider-response? "load" load-result)
@@ -351,7 +350,7 @@
      (assoc receipt-result :status "applied"))]
    [true true true true true false nil])
 
-  (test/check
+  (test-check
    "accepted store results preserve state only after closed validation"
    (let [call (get (provider/prepare-load state) :value)
          accepted (provider/accept-result state call load-result)
@@ -380,7 +379,7 @@
     false
     "tahto.provider/result-invalid"])
 
-  (test/check
+  (test-check
    "an injected generic store executes the prepared Host/call contract"
    (let [result
          (provider/execute-prepared-with
@@ -398,7 +397,7 @@
       (get result :value)])
    [true state load-result])
 
-  (test/check
+  (test-check
    "injected stores cannot widen absence or operation semantics"
    (let [load-absent
          (provider/execute-prepared-with
@@ -434,7 +433,7 @@
     false
     "tahto.provider/prepared-invalid"])
 
-  (test/check
+  (test-check
    "generic snapshots translate into the closed Tahto snapshot profile"
    (let [translated
          (provider/snapshot-from-store-result load-result)]
@@ -444,7 +443,7 @@
       (get translated :state-digest)])
    [true provider/snapshot-protocol state state-digest])
 
-  (test/check
+  (test-check
    "generic receipt results receive Tahto replay meaning only in HAL"
    (let [applied
          (provider/receipt-from-store-result commit-result)
@@ -457,7 +456,7 @@
       (provider/receipt-matches? replayed commit-verification)])
    [true "applied" true "replayed" true])
 
-  (test/check
+  (test-check
    "initialization accepts only the exact generic stored value"
    [(provider/initialize-result?
      state state-verification initialize-result)
@@ -467,7 +466,7 @@
      (assoc initialize-result :value-digest request-digest))]
    [true false])
 
-  (test/check
+  (test-check
    "a generic CAS result closes the exact prepared Tahto transaction"
    [(provider/commit-result?
      success-result commit-verification commit-result)
@@ -479,9 +478,9 @@
      (assoc commit-result :receipt-key request-digest))]
    [true true false])
 
-  (test/check
+  (test-check
    "loaded-state returns only a translated and validated snapshot value"
    [(provider/loaded-state load-result)
     (provider/loaded-state
      (assoc load-result :value-digest "invalid"))]
-   [state nil])])
+   [state nil])]

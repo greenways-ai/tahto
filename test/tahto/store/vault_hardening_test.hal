@@ -1,6 +1,6 @@
 (ns tahto.store.vault-hardening-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.store.graph :as graph]
             [tahto.store.host :as host]
             [tahto.store.model :as model]
@@ -56,8 +56,7 @@
    :namespace "profile.primary"
    :digest digest-c})
 
-(test/print-results
- [(test/check
+[(test-check
    "upload metadata rejects empty media types"
    (let [result
          (vault/begin-upload
@@ -71,7 +70,7 @@
      (get-in result [:error :code]))
    "tahto.store/media-type-invalid")
 
-  (test/check
+  (test-check
    "append validates offsets before stale-offset comparison"
    (let [opened
          (vault/begin-upload
@@ -93,7 +92,7 @@
       (count (get result :effects))])
    ["tahto.store/offset-invalid" 0])
 
-  (test/check
+  (test-check
    "manifest registration is idempotent but cannot change one digest's meaning"
    (let [chunks [{:digest digest-a :size 4}
                  {:digest digest-b :size 3}]
@@ -116,7 +115,7 @@
       (get-in conflict-result [:error :code])])
    [true true "tahto.store/manifest-conflict"])
 
-  (test/check
+  (test-check
    "a manifest cannot directly include its own object digest"
    (let [result
          (graph/accept-manifest
@@ -126,7 +125,7 @@
      (get-in result [:error :code]))
    "tahto.store/manifest-self-reference")
 
-  (test/check
+  (test-check
    "root creation validates the closed root-kind vocabulary"
    (let [result
          (graph/pin-root
@@ -137,4 +136,4 @@
            :namespace "profile.primary"
            :digests [digest-a]})]
      (get-in result [:error :code]))
-   "tahto.store/root-kind-invalid")])
+   "tahto.store/root-kind-invalid")]

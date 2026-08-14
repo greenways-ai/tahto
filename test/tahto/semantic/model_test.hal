@@ -1,6 +1,6 @@
 (ns tahto.semantic.model-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.protocol.records :as records]
             [tahto.semantic.model :as semantic]))
 
@@ -83,8 +83,7 @@
 (def too-long-id
   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
-(test/print-results
- [(test/check
+[(test-check
    "the semantic protocols remain additive to the closed core vocabulary"
    [(every? semantic/semantic-protocol?
             [semantic/schema-ref-protocol
@@ -98,7 +97,7 @@
             semantic/semantic-protocols)]
    [true true])
 
-  (test/check
+  (test-check
    "valid closed semantic profiles are accepted"
    [(semantic/schema-ref? schema-entity)
     (semantic/canonical-value-verification? verification)
@@ -108,7 +107,7 @@
     (semantic/semantic-root? semantic-root)]
    [true true true true true true])
 
-  (test/check
+  (test-check
    "package coordinates use the canonical Hara tap owner and name form"
    [(semantic/package-coordinate? "hara:fixture/world-specs")
     (semantic/package-coordinate? "greenways:greenways/world-specs")
@@ -120,7 +119,7 @@
     (semantic/package-coordinate? "hara:fixture/")]
    [true true false false false false false false])
 
-  (test/check
+  (test-check
    "package versions are exact SemVer values rather than mutable ranges"
    [(semantic/package-version? "0.1.0")
     (semantic/package-version? "0.1.0-dev")
@@ -142,7 +141,7 @@
    [true true true true true
     false false false false false false false false false false false false])
 
-  (test/check
+  (test-check
    "schema references require exact immutable package evidence"
    [(semantic/schema-ref? (dissoc schema-entity :package-root))
     (semantic/schema-ref? (assoc schema-entity :protocol "other/1"))
@@ -157,7 +156,7 @@
     (semantic/schema-ref? (assoc schema-entity :entry too-long-id))]
    [false false false false false false false false false false false])
 
-  (test/check
+  (test-check
    "canonical verification is a bounded closed proof, not host authority"
    [(semantic/canonical-value-verification? verification)
     (semantic/canonical-value-verification?
@@ -176,7 +175,7 @@
      (assoc verification :source-handle 17))]
    [true false false false false false false])
 
-  (test/check
+  (test-check
    "semantic links are closed, bounded and strictly ordered"
    [(semantic/semantic-link-vector? [])
     (semantic/semantic-link-vector? [child-link parent-link])
@@ -188,7 +187,7 @@
      (assoc child-link :source-handle 31))]
    [true true false false false false])
 
-  (test/check
+  (test-check
    "semantic objects point at values rather than embedding executable content"
    [(semantic/semantic-object? semantic-object)
     (semantic/semantic-object? (assoc semantic-object :value {:kind "tree"}))
@@ -202,7 +201,7 @@
             (inc semantic/max-semantic-value-bytes)))]
    [true false false false false false])
 
-  (test/check
+  (test-check
    "semantic indexes require non-empty strictly ordered stable IDs"
    [(semantic/semantic-index? semantic-index)
     (semantic/semantic-index?
@@ -223,7 +222,7 @@
      (assoc-in semantic-index [:entries 0 :path] "/tmp/object"))]
    [true false false false false false])
 
-  (test/check
+  (test-check
    "semantic roots pin sorted schemas, one index and named entry roots"
    [(semantic/semantic-root? semantic-root)
     (semantic/semantic-root?
@@ -245,7 +244,7 @@
     (semantic/semantic-root? (assoc semantic-root :source-handle 41))]
    [true false false false false false false false])
 
-  (test/check
+  (test-check
    "field-wise ordering preserves prefix and numeric coordinate semantics"
    (let [schema-a (assoc schema-entity :schema "fixture.a")
          schema-aa (assoc schema-entity :schema "fixture.aa")
@@ -273,7 +272,7 @@
       (semantic/semantic-root-entry-vector? [root-aa root-a])])
    [true false true false true false true false true false])
 
-  (test/check
+  (test-check
    "the shared collection bound accepts each exact maximum and rejects one more"
    [(semantic/bounded-count?
      semantic/max-schema-refs 1 semantic/max-schema-refs)
@@ -295,7 +294,7 @@
     (semantic/bounded-count? 0 0 semantic/max-links)]
    [true false true false true false true false false true])
 
-  (test/check
+  (test-check
    "configured value-size boundaries are exact"
    [(semantic/canonical-value-verification?
      (assoc verification
@@ -309,4 +308,4 @@
      (assoc semantic-object
             :value-size
             semantic/max-semantic-value-bytes))]
-   [true false true])])
+   [true false true])]

@@ -1,6 +1,6 @@
 (ns tahto.store.mutation-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.store.memory-store :as memory-store]
             [tahto.store.model :as model]
             [tahto.store.mutation :as mutation]
@@ -41,8 +41,7 @@
   (fn [service operation request]
     (memory-store/invoke memory service operation request)))
 
-(test/print-results
- [(test/check
+[(test-check
    "a management mutation becomes one generic CAS plan and durable receipt"
    (let [state (model/empty-state)
          memory (memory-store/create)
@@ -73,7 +72,7 @@
          (get (memory-store/snapshot-entry memory) :value))])
    [true true true "applied" true])
 
-  (test/check
+  (test-check
    "an exact transition replay does not create a second metadata revision"
    (let [state (assoc (model/empty-state)
                       :management-marker "invite.one")
@@ -85,4 +84,4 @@
       (= mutation/replay-protocol (get-in replay [:value :protocol]))
       (= 0 (provider/state-revision (get replay :state)))
       (= {:marker "invite.one"} (get-in replay [:value :result]))])
-   [true true true true])])
+   [true true true true])]

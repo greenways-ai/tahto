@@ -1,5 +1,6 @@
 (ns tahto.store.capability
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.store.host :as store-host]
             [tahto.store.model :as model]))
 

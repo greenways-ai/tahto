@@ -1,6 +1,6 @@
 (ns tahto.sync.session-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
             [tahto.sync.device :as device]
@@ -150,8 +150,7 @@
      (get admitted :value)
      {:known-digests known})))
 
-(test/print-results
- [(test/check
+[(test-check
    "pull planning returns only the sorted missing closure behind current heads"
    (let [plan
          (pull-plan (fixture-state)
@@ -172,7 +171,7 @@
     [object-a commit-a]
     true])
 
-  (test/check
+  (test-check
    "known objects are excluded without hiding the current commit root"
    (let [plan
          (pull-plan (fixture-state)
@@ -183,7 +182,7 @@
      (get-in plan [:value :missing]))
    [commit-a])
 
-  (test/check
+  (test-check
    "the same signed request receives the same pending offer"
    (let [first-auth
          (admit (fixture-state)
@@ -211,7 +210,7 @@
       (= (get first-plan :value) (get retry-plan :value))])
    [true true])
 
-  (test/check
+  (test-check
    "a second pull request cannot replace one unacknowledged offer"
    (let [first
          (pull-plan (fixture-state)
@@ -233,7 +232,7 @@
      [(get second :ok) (error-code second)])
    [false "tahto.sync/offer-pending"])
 
-  (test/check
+  (test-check
    "acknowledgement must match the exact offered cursor and digest batch"
    (let [plan
          (pull-plan (fixture-state)
@@ -257,7 +256,7 @@
      [(get invalid :ok) (error-code invalid)])
    [false "tahto.sync/cursor-mismatch"])
 
-  (test/check
+  (test-check
    "a complete offline acknowledgement advances the monotonic device cursor"
    (let [plan
          (pull-plan (fixture-state)
@@ -285,7 +284,7 @@
       (nil? (model/sync-offer state device-a app namespace-id collection))])
    [true session/sync-ack-protocol 1 true])
 
-  (test/check
+  (test-check
    "the next acknowledged round receives the next cursor"
    (let [first
          (pull-plan (fixture-state)
@@ -317,7 +316,7 @@
       (get-in second [:value :missing])])
    [true 2 []])
 
-  (test/check
+  (test-check
    "bounded pull batches remain explicitly incomplete until another round"
    (let [plan
          (pull-plan
@@ -330,7 +329,7 @@
       (get-in plan [:value :complete])])
    [[object-a] false])
 
-  (test/check
+  (test-check
    "an incomplete object closure cannot be advertised to another device"
    (let [state (fixture-state)
          broken
@@ -344,7 +343,7 @@
      [(get plan :ok) (error-code plan)])
    [false "tahto.sync/closure-incomplete"])
 
-  (test/check
+  (test-check
    "push negotiation does not disclose a digest stored only for another namespace"
    (let [admitted
          (admit (fixture-state)
@@ -362,7 +361,7 @@
       (get-in plan [:value :missing])])
    [true [object-a] [hidden-object object-b]])
 
-  (test/check
+  (test-check
    "a context for another operation cannot be reused as sync authority"
    (let [admitted
          (admit (fixture-state)
@@ -376,4 +375,4 @@
           (get admitted :value)
           {:known-digests []})]
      [(get plan :ok) (error-code plan)])
-   [false "tahto.sync/context-not-admitted"])] )
+   [false "tahto.sync/context-not-admitted"])]

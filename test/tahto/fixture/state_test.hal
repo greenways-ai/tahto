@@ -1,6 +1,6 @@
 (ns tahto.fixture.state-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.fixture.state :as fixture-state]
             [tahto.fixture.two-device :as fixture]
             [tahto.store.memory-store :as memory-store]
@@ -24,8 +24,7 @@
   [result]
   (get-in result [:error :code]))
 
-(test/print-results
- [(test/check
+[(test-check
    "the initial fixture state enrols independent A and B identities"
    (let [state (fixture-state/initial-state)]
      [(fixture-state/fixture-state? state)
@@ -41,7 +40,7 @@
     "device.b"
     0])
 
-  (test/check
+  (test-check
    "missing generic state is initialized once and returned as a closed snapshot"
    (let [memory (memory-store/create)
          result
@@ -72,7 +71,7 @@
     false
     false])
 
-  (test/check
+  (test-check
    "a fresh fixture process loads the exact previously initialized state"
    (let [memory (memory-store/create)
          first
@@ -93,7 +92,7 @@
          (get second :state))])
    [true true "initialized" "loaded" true true])
 
-  (test/check
+  (test-check
    "invalid state evidence fails before generic initialization"
    (let [memory (memory-store/create)
          result
@@ -107,7 +106,7 @@
     "tahto.provider/state-verification-invalid"
     nil])
 
-  (test/check
+  (test-check
    "a generic store containing foreign state is rejected without replacement"
    (let [memory (memory-store/create)
          foreign-state (model/empty-state)
@@ -134,7 +133,7 @@
     "tahto.fixture/store-state-foreign"
     true])
 
-  (test/check
+  (test-check
    "bootstrap evidence exposes no provider or transport authority"
    (let [memory (memory-store/create)
          result
@@ -147,4 +146,4 @@
       (has? snapshot :database-path)
       (has? snapshot :credential)
       (has? (get snapshot :state) :provider)])
-   [false false false false false])])
+   [false false false false false])]

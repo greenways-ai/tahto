@@ -1,5 +1,6 @@
 (ns tahto.store.memory-blob
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.store.capability :as capability]
             [tahto.store.host :as store-host]
             [tahto.store.model :as model]))

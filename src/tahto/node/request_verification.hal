@@ -1,5 +1,6 @@
 (ns tahto.node.request-verification
-  (:require [std.foundation :refer :all]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]))
 
 (def request-protocol "tahto.device-request/0-alpha")

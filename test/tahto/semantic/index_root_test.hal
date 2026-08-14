@@ -1,6 +1,6 @@
 (ns tahto.semantic.index-root-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.semantic.admission :as admission]
             [tahto.semantic.index :as index]
             [tahto.semantic.model :as semantic]
@@ -213,8 +213,7 @@
          (index-input semantic-index))]
     (result-state result)))
 
-(test/print-results
- [(test/check
+[(test-check
    "semantic index and root state remain additive before first use"
    (let [state (model/empty-state)]
      [(has? state :semantic-indexes)
@@ -223,7 +222,7 @@
       (root/semantic-roots state)])
    [false {} false {}])
 
-  (test/check
+  (test-check
    "a complete cyclic index selects admitted versions and closes over values"
    (let [state (admitted-state)
          result (index/admit-projected state (index-input semantic-index))
@@ -246,7 +245,7 @@
     [envelope-a envelope-b]
     true true false true true])
 
-  (test/check
+  (test-check
    "every selected root has one matching semantic projection"
    (let [state (admitted-state)
          missing-state
@@ -271,7 +270,7 @@
     "tahto.semantic/index-entry-id-mismatch"
     true])
 
-  (test/check
+  (test-check
    "every v1 typed link resolves through the same exact index"
    (let [missing-link (assoc link-a-to-b :target-id "entity/missing")
          missing-object-a (assoc object-a :links [missing-link])
@@ -292,7 +291,7 @@
     "tahto.semantic/index-link-root-mismatch"
     true])
 
-  (test/check
+  (test-check
    "the immutable index object is installed, authorized and role-distinct"
    (let [state (admitted-state)
          missing-state
@@ -327,7 +326,7 @@
     "tahto.semantic/index-root-dual-use"
     true])
 
-  (test/check
+  (test-check
    "index replay is exact and alternate projections or graph roles conflict"
    (let [no-link-a (assoc object-a :links [])
          no-link-b (assoc object-b :links [])
@@ -358,7 +357,7 @@
     "tahto.semantic/index-projection-conflict" true
     "tahto.semantic/index-edge-conflict" true])
 
-  (test/check
+  (test-check
    "candidate index closure rejects missing and overflowed descendants"
    (let [state (base-installed-state)
          missing
@@ -377,7 +376,7 @@
     [missing-root]
     "tahto.semantic/index-closure-overflow"])
 
-  (test/check
+  (test-check
    "a semantic root selects the index and completes ordinary graph closure"
    (let [state (indexed-state)
          result (root/admit-projected state (root-input semantic-root))
@@ -406,7 +405,7 @@
     [index-root envelope-a envelope-b]
     true true false true true])
 
-  (test/check
+  (test-check
    "root admission requires an admitted authorized index"
    (let [not-admitted-state (admitted-state)
          not-admitted
@@ -432,7 +431,7 @@
     "tahto.semantic/root-index-out-of-scope"
     true])
 
-  (test/check
+  (test-check
    "the input and semantic-root collection coordinates agree exactly"
    (let [state (indexed-state)
          application-mismatch
@@ -458,7 +457,7 @@
     "tahto.semantic/root-collection-mismatch"
     true true true])
 
-  (test/check
+  (test-check
    "named roots are exact role-distinct index selections"
    (let [state (indexed-state)
          missing-selection
@@ -490,7 +489,7 @@
     "tahto.semantic/root-object-dual-use"
     "tahto.semantic/root-index-dual-use"])
 
-  (test/check
+  (test-check
    "the root schema vector equals the exact derived selected set"
    (let [state (indexed-state)
          entries
@@ -514,7 +513,7 @@
     "tahto.semantic/root-schema-refs-mismatch"
     true])
 
-  (test/check
+  (test-check
    "root replay is exact and alternate projections or graph roles conflict"
    (let [state (indexed-state)
          input (root-input semantic-root)
@@ -548,7 +547,7 @@
     "tahto.semantic/root-projection-conflict" true
     "tahto.semantic/root-edge-conflict" true])
 
-  (test/check
+  (test-check
    "candidate root closure rejects missing and overflowed descendants"
    (let [state (base-installed-state)
          missing
@@ -567,7 +566,7 @@
     [missing-root]
     "tahto.semantic/root-closure-overflow"])
 
-  (test/check
+  (test-check
    "index and root inputs are closed and projections contain no host authority"
    (let [state (indexed-state)
          index-extended
@@ -595,4 +594,4 @@
       (has? root-projection :value)])
    ["tahto.semantic/index-input-invalid"
     "tahto.semantic/root-input-invalid"
-    true true false false false false false])])
+    true true false false false false false])]

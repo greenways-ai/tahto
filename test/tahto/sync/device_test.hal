@@ -1,6 +1,6 @@
 (ns tahto.sync.device-test
-  (:require [std.foundation :refer :all]
-            [std.lib.test :as test]
+  (:config {})
+  (:require
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]
             [tahto.sync.device :as device]))
@@ -103,8 +103,7 @@
     (model/empty-state)
     (enrolment (device-record device-a public-key-a) approval-a))))
 
-(test/print-results
- [(test/check
+[(test-check
    "enrolment stores identity but mints no grants or administrator authority"
    (let [result
          (device/enrol-device
@@ -118,7 +117,7 @@
       (get-in result [:value :grants])])
    [true "enrolled" device-a false []])
 
-  (test/check
+  (test-check
    "the same approved device enrolment is idempotent"
    (let [proof (enrolment (device-record device-a public-key-a) approval-a)
          first (device/enrol-device (model/empty-state) proof)
@@ -127,7 +126,7 @@
       (= (result-state first) (result-state second))])
    [true true])
 
-  (test/check
+  (test-check
    "one public key cannot be paired to a second device"
    (let [first
          (device/enrol-device
@@ -140,7 +139,7 @@
      [(get second :ok) (error-code second)])
    [false "tahto.device/public-key-in-use"])
 
-  (test/check
+  (test-check
    "one device identity cannot be silently rebound to another key"
    (let [first
          (device/enrol-device
@@ -153,7 +152,7 @@
      [(get conflict :ok) (error-code conflict)])
    [false "tahto.device/device-conflict"])
 
-  (test/check
+  (test-check
    "management operations are outside the signed application request vocabulary"
    (validate/device-request-verification?
     (request-proof device-a
@@ -164,7 +163,7 @@
                    "request-management-0001"))
    false)
 
-  (test/check
+  (test-check
    "an enrolled device receives a bounded request context"
    (let [result
          (admit
@@ -185,7 +184,7 @@
            :request-digest)])
    [true true authority-a "pending" false request-a])
 
-  (test/check
+  (test-check
    "request admission requires a matching authority decision"
    (let [state (enrolled-state)
          verification
@@ -213,7 +212,7 @@
     "tahto.device/request-authority-mismatch"
     true])
 
-  (test/check
+  (test-check
    "a nonce is rejected on its second use even for the same request"
    (let [proof
          (request-proof device-a
@@ -227,7 +226,7 @@
      [(get second :ok) (error-code second)])
    [false "tahto.device/nonce-replayed"])
 
-  (test/check
+  (test-check
    "a fresh nonce may retry the same idempotent request"
    (let [first
          (admit
@@ -252,7 +251,7 @@
       (get-in second [:value :status])])
    [true true "pending"])
 
-  (test/check
+  (test-check
    "an idempotency key cannot be reused for different canonical bytes"
    (let [first
          (admit
@@ -275,7 +274,7 @@
      [(get conflict :ok) (error-code conflict)])
    [false "tahto.device/idempotency-conflict"])
 
-  (test/check
+  (test-check
    "an idempotent retry must retain the admitted authority root"
    (let [first-verification
          (request-proof device-a
@@ -304,7 +303,7 @@
      [(get conflict :ok) (error-code conflict)])
    [false "tahto.device/idempotency-conflict"])
 
-  (test/check
+  (test-check
    "completed idempotent requests return only the stored result digest"
    (let [authorized
          (admit
@@ -339,7 +338,7 @@
       (get-in retried [:value :result-digest])])
    [true "completed" "completed" true result-a])
 
-  (test/check
+  (test-check
    "a completed request result cannot be mutated"
    (let [authorized
          (admit
@@ -369,7 +368,7 @@
      [(get conflict :ok) (error-code conflict)])
    [false "tahto.device/completion-conflict"])
 
-  (test/check
+  (test-check
    "revocation is durable and blocks subsequent signed requests"
    (let [revoked (device/revoke-device (enrolled-state) (revocation device-a))
          request
@@ -387,7 +386,7 @@
       (error-code request)])
    [true "revoked" false "tahto.device/device-revoked"])
 
-  (test/check
+  (test-check
    "device and replay tables fail closed at configured bounds"
    (let [limited (model/empty-state {:max-devices 1
                                      :max-device-nonces 1})
@@ -419,4 +418,4 @@
                          "request-limit-0002"))]
      [(error-code second) (error-code nonce-limit)])
    ["tahto.device/device-limit-reached"
-    "tahto.device/nonce-limit-reached"])] )
+    "tahto.device/nonce-limit-reached"])]
