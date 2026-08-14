@@ -100,7 +100,7 @@
       (validate/exact-record? payload signed-payload-fields #{})
       (provider/provider-revision? (expected-revision value))
       (map? (signed-request value))
-      (json-value? (signed-request value)))))))
+      (json-value? (signed-request value))))))
 
 (defn route-wire-matches?
   [selected wire]
