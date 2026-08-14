@@ -1,5 +1,6 @@
 name: Validate Chats profile 74
 
+# validation target: materialized collection and exact semantic-read projection
 on:
   push:
     branches:
