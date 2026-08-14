@@ -88,7 +88,7 @@
                         (selected-route route/prepare-operation)
                         prepare-context
                         request))
-      (= (semantic-submit/submit state submit-context request)
+      (= (semantic-submit/submit-transition state submit-context request)
          (route/submit state
                        (selected-route route/submit-operation)
                        submit-context
