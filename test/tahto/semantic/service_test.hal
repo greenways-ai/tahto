@@ -1,0 +1,241 @@
+(ns tahto.semantic.service-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.node.request-verification :as request-verification]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.route :as route]
+            [tahto.semantic.service :as service]
+            [tahto.store.model :as model]
+            [tahto.store.transaction :as transaction]))
+
+(def application "app.example")
+(def namespace-id "profile.primary")
+(def collection "chats")
+(def device-id "device.browser")
+(def public-key "p256:browser-public-key")
+
+(def request-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def changed-request-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def result-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def authority-root
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def key-id
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+(def route-value
+  {:protocol route/route-protocol
+   :operation route/read-operation
+   :application application
+   :namespace namespace-id
+   :collection collection})
+
+(def wire
+  {"protocol" request-verification/request-protocol
+   "device" device-id
+   "publicKey" public-key
+   "algorithm" "p256-sha256"
+   "operation" "semantic.read"
+   "application" application
+   "namespace" namespace-id
+   "collection" collection
+   "timestamp" "2026-08-14T00:00:00Z"
+   "timestampSeconds" 1786665600
+   "nonce" "nonce-semantic-0001"
+   "idempotencyKey" "idempotency-semantic-0001"
+   "payload"
+   {"expected-revision" 0
+    "request"
+    {"kind" "main"
+     "name" "main"
+     "max-commits" 1}}
+   "requestDigest" request-digest
+   "signature"
+   {"profile" request-verification/signature-protocol
+    "algorithm" "p256-sha256"
+    "keyId" key-id
+    "value" "aaaaaaaaaaaaaaaa"}})
+
+(defn state
+  []
+  (assoc-in
+   (model/empty-state)
+   [:devices device-id]
+   {:protocol model/device-protocol
+    :id device-id
+    :node "node.home"
+    :public-key public-key
+    :status "enrolled"
+    :enrolled-at "2026-08-14T00:00:00Z"}))
+
+(defn authority
+  [verification]
+  {:protocol validate/request-authority-protocol
+   :allowed true
+   :device (get verification :device)
+   :operation (get verification :operation)
+   :application (get verification :application)
+   :namespace (get verification :namespace)
+   :collection (get verification :collection)
+   :request-digest (get verification :request-digest)
+   :decision-root authority-root
+   :observed-at "2026-08-14T00:00:01Z"})
+
+(defn result-verification
+  [verification]
+  {:protocol transaction/result-verification-protocol
+   :verified true
+   :operation (get verification :operation)
+   :request-digest (get verification :request-digest)
+   :outcome "error"
+   :result-digest result-digest
+   :completed-at "2026-08-14T00:00:02Z"})
+
+(defn request
+  ([wire-value selected result-proof]
+   (let [verification
+         (request-verification/verification-value wire-value)]
+     {:protocol service/request-protocol
+      :route selected
+      :wire wire-value
+      :authority (authority verification)
+      :result-verification result-proof}))
+  ([wire-value selected]
+   (let [verification
+         (request-verification/verification-value wire-value)]
+     (request
+      wire-value
+      selected
+      (result-verification verification)))))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "signed JSON payloads become closed keyword-keyed Hara values"
+   (service/json->hara
+    {"kind" "main"
+     "nested" {"max-commits" 2}
+     "values" [{"id" "chat.a"}]})
+   {:kind "main"
+    :nested {:max-commits 2}
+    :values [{:id "chat.a"}]})
+
+  (test/check
+   "the service request and signed payload reject unknown fields"
+   (let [verification
+         (request-verification/verification-value wire)
+         valid (request wire route-value)
+         outer (assoc valid :provider "forbidden")
+         payload
+         (assoc wire
+                "payload"
+                (assoc (get wire "payload")
+                       "provider" "forbidden"))]
+     [(service/request? valid)
+      (service/request? outer)
+      (service/request?
+       (request payload route-value
+                (result-verification
+                 (request-verification/verification-value payload))))])
+   [true false false])
+
+  (test/check
+   "one admitted request completes atomically and exact replay returns its prior closed result"
+   (let [verification
+         (request-verification/verification-value wire)
+         first-request (request wire route-value)
+         first
+         (service/dispatch-verified
+          (state) first-request verification)
+         committed (get first :state)
+         replay-request (request wire route-value nil)
+         replay
+         (service/dispatch-verified
+          committed replay-request verification)]
+     [(get first :ok)
+      (error-code first)
+      (get first :service-replayed)
+      (get committed :metadata-revision)
+      (get-in first [:transaction :result-digest])
+      (get-in first [:transaction :result :code])
+      (get-in committed
+              [service/result-state-key
+               (model/idempotency-key
+                device-id "idempotency-semantic-0001")
+               :result-digest])
+      (get replay :ok)
+      (error-code replay)
+      (get replay :service-replayed)
+      (= committed (get replay :state))
+      (get-in replay [:transaction :result-digest])
+      (get-in replay [:transaction :result :code])])
+   [false
+    "tahto.semantic/read-head-missing"
+    false
+    1
+    result-digest
+    "tahto.semantic/read-head-missing"
+    result-digest
+    false
+    "tahto.semantic/read-head-missing"
+    true
+    true
+    result-digest
+    "tahto.semantic/read-head-missing"])
+
+  (test/check
+   "reusing a nonce for changed signed content remains rejected"
+   (let [verification
+         (request-verification/verification-value wire)
+         first
+         (service/dispatch-verified
+          (state) (request wire route-value) verification)
+         committed (get first :state)
+         changed-payload
+         (assoc (get wire "payload") "expected-revision" 1)
+         changed-wire
+         (assoc
+          (assoc
+           (assoc wire "payload" changed-payload)
+           "requestDigest" changed-request-digest)
+          "idempotencyKey" "idempotency-semantic-0002")
+         changed-verification
+         (request-verification/verification-value changed-wire)
+         result
+         (service/dispatch-verified
+          committed
+          (request changed-wire route-value)
+          changed-verification)]
+     [(get result :ok)
+      (error-code result)
+      (= committed (get result :state))
+      (get committed :metadata-revision)])
+   [false "tahto.device/nonce-replayed" true 1])
+
+  (test/check
+   "route and verified-wire substitutions fail before request admission"
+   (let [initial (state)
+         verification
+         (request-verification/verification-value wire)
+         changed-route (assoc route-value :collection "other")
+         route-result
+         (service/dispatch-verified
+          initial (request wire changed-route) verification)
+         changed-verification
+         (assoc verification :request-digest changed-request-digest)
+         proof-result
+         (service/dispatch-verified
+          initial (request wire route-value) changed-verification)]
+     [(error-code route-result)
+      (= initial (get route-result :state))
+      (error-code proof-result)
+      (= initial (get proof-result :state))])
+   ["tahto.semantic/service-route-request-mismatch"
+    true
+    "tahto.semantic/service-verification-mismatch"
+    true])])
