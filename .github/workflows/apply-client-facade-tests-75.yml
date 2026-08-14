@@ -27,11 +27,13 @@ jobs:
           path = Path('test/tahto/semantic/value_source_test.hal')
           source = path.read_text()
           old = '{:digest value-left :offset 8 :length 16}'
-          new = '''{:protocol "hoplite.blob-request/0-alpha"
-       :operation "object/open-source"
-       :digest value-left
-       :offset 8
-       :length 16}'''
+          new = '\n'.join([
+              '{:protocol "hoplite.blob-request/0-alpha"',
+              '       :operation "object/open-source"',
+              '       :digest value-left',
+              '       :offset 8',
+              '       :length 16}',
+          ])
           if source.count(old) != 1:
               raise SystemExit('expected one stale value-source request fixture')
           path.write_text(source.replace(old, new, 1))
