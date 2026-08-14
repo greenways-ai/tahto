@@ -1,0 +1,152 @@
+(ns tahto.profile.chats.collection
+  (:require [std.foundation :refer :all]
+            [tahto.profile.chats.model :as chats]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.model :as semantic]
+            [tahto.store.model :as model]))
+
+(def protocol "greenways.chat-collection/0-alpha")
+(def schema "greenways.chat-collection")
+(def schema-version 1)
+(def entry "greenways.chats/collection-spec")
+(def semantic-id "collection/chats")
+(def chat-link-role "greenways.chats/chat")
+(def max-chat-count 1000)
+
+(def fields
+  #{:protocol :summaries})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn chat-semantic-id?
+  [value]
+  (truth-value
+   (and
+    (string? value)
+    (= 37 (count value))
+    (= "chat/" (str/slice value 0 5))
+    (chats/chat-id?
+     (str/slice value 5 (count value))))))
+
+(defn schema-ref?
+  [value]
+  (truth-value
+   (and
+    (semantic/schema-ref? value)
+    (= schema (get value :schema))
+    (= schema-version (get value :schema-version))
+    (= chats/package-coordinate (get value :package))
+    (= chats/package-version (get value :package-version))
+    (= entry (get value :entry)))))
+
+(defn link?
+  [value]
+  (truth-value
+   (and
+    (semantic/semantic-link? value)
+    (= chat-link-role (get value :role))
+    (chat-semantic-id? (get value :target-id)))))
+
+(defn summary-before?
+  [left right]
+  (let [updated
+        (compare
+         (get left :updated-at)
+         (get right :updated-at))]
+    (truth-value
+     (or
+      (> updated 0)
+      (and
+       (= updated 0)
+       (< (compare
+           (get left :id)
+           (get right :id))
+          0))))))
+
+(defn ordered-summaries?
+  [values]
+  (truth-value
+   (and
+    (vector? values)
+    (<= (count values) max-chat-count)
+    (every? chats/summary? values)
+    (if
+     (<= (count values) 1)
+     true
+     (loop [index 1]
+       (if
+        (= index (count values))
+        true
+        (if
+         (summary-before?
+          (nth values (dec index))
+          (nth values index))
+         (recur (inc index))
+         false)))))))
+
+(defn value?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value fields #{})
+    (= protocol (get value :protocol))
+    (ordered-summaries? (get value :summaries)))))
+
+(defn has-summary-id?
+  [summaries id]
+  (truth-value
+   (reduce
+    (fn [found summary]
+      (or found (= id (get summary :id))))
+    false
+    summaries)))
+
+(defn has-link-target?
+  [links target-id]
+  (truth-value
+   (reduce
+    (fn [found link]
+      (or found (= target-id (get link :target-id))))
+    false
+    links)))
+
+(defn projection?
+  [projection collection-value]
+  (let [summaries (get collection-value :summaries)
+        links (get projection :links)]
+    (truth-value
+     (and
+      (value? collection-value)
+      (map? projection)
+      (= semantic-id (get projection :id))
+      (schema-ref? (get projection :schema-ref))
+      (semantic/semantic-link-vector? links)
+      (= (count summaries) (count links))
+      (every? link? links)
+      (every?
+       (fn [summary]
+         (has-link-target?
+          links
+          (chats/chat-semantic-id
+           (get summary :id))))
+       summaries)
+      (every?
+       (fn [link]
+         (has-summary-id?
+          summaries
+          (str/slice
+           (get link :target-id)
+           5
+           (count (get link :target-id)))))
+       links)))))
+
+(defn value
+  [summaries]
+  (let [candidate
+        {:protocol protocol
+         :summaries summaries}]
+    (if (value? candidate)
+      candidate
+      nil)))

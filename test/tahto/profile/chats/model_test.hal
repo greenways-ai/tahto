@@ -1,0 +1,162 @@
+(ns tahto.profile.chats.model-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.profile.chats.model :as chats]
+            [tahto.semantic.model :as semantic]))
+
+(def id-a "0000000000000000000000000000000a")
+(def id-b "0000000000000000000000000000000b")
+(def message-a "1000000000000000000000000000000a")
+(def message-b "1000000000000000000000000000000b")
+
+(def root-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def root-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def package-root
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+
+(def source
+  {:protocol chats/source-protocol
+   :provider "openai.chatgpt"
+   :source-id "conversation-0001"})
+
+(def chat
+  {:protocol chats/chat-protocol
+   :id id-a
+   :title "First chat"
+   :source source
+   :created-at "2026-08-14T00:00:00Z"
+   :updated-at "2026-08-14T00:02:00Z"
+   :message-count 2})
+
+(def message
+  {:protocol chats/message-protocol
+   :id message-a
+   :role "user"
+   :content "Hello"
+   :created-at "2026-08-14T00:01:00Z"})
+
+(def chat-schema-ref
+  {:protocol semantic/schema-ref-protocol
+   :schema chats/chat-schema
+   :schema-version chats/schema-version
+   :package chats/package-coordinate
+   :package-version chats/package-version
+   :package-root package-root
+   :entry chats/chat-entry})
+
+(def message-schema-ref
+  {:protocol semantic/schema-ref-protocol
+   :schema chats/message-schema
+   :schema-version chats/schema-version
+   :package chats/package-coordinate
+   :package-version chats/package-version
+   :package-root package-root
+   :entry chats/message-entry})
+
+(def chat-links
+  [{:protocol semantic/semantic-link-protocol
+    :role chats/chat-message-role
+    :target-id (chats/message-semantic-id message-a)
+    :target-root root-a}
+   {:protocol semantic/semantic-link-protocol
+    :role chats/chat-message-role
+    :target-id (chats/message-semantic-id message-b)
+    :target-root root-b}])
+
+(def message-links
+  [{:protocol semantic/semantic-link-protocol
+    :role chats/message-chat-role
+    :target-id (chats/chat-semantic-id id-a)
+    :target-root root-a}])
+
+(test/print-results
+ [(test/check
+   "Chats values use closed bounded schemas"
+   [(chats/source? source)
+    (chats/chat? chat)
+    (chats/message? message)
+    (chats/chat?
+     (assoc chat :credential "secret"))
+    (chats/chat?
+     (assoc chat :id
+            "0000000000000000000000000000000A"))
+    (chats/chat?
+     (assoc chat
+            :created-at "2026-08-14T00:03:00Z"))
+    (chats/message?
+     (assoc message :content "line\nbreak"))]
+   [true true true false false false false])
+
+  (test/check
+   "stable IDs and logical resources are exact"
+   [(chats/chat-semantic-id id-a)
+    (chats/message-semantic-id message-a)
+    (chats/chat-resource id-a)
+    (chats/chat-resource?
+     (chats/chat-resource id-a))
+    (chats/chat-id-from-resource
+     (chats/chat-resource id-a))
+    (chats/chat-resource?
+     "greenways:tahto/chat/not-a-chat")]
+   [(str "chat/" id-a)
+    (str "message/" message-a)
+    (str chats/chat-resource-prefix id-a)
+    true
+    id-a
+    false])
+
+  (test/check
+   "schema references bind the exact Chats specification entry"
+   [(chats/chat-schema-ref? chat-schema-ref)
+    (chats/message-schema-ref? message-schema-ref)
+    (chats/chat-schema-ref? message-schema-ref)
+    (chats/chat-schema-ref?
+     (assoc chat-schema-ref
+            :package-version "latest"))
+    (chats/message-schema-ref?
+     (assoc message-schema-ref
+            :provider "sqlite"))]
+   [true true false false false])
+
+  (test/check
+   "semantic projections retain typed message and parent links"
+   [(chats/chat-projection?
+     {:id (chats/chat-semantic-id id-a)
+      :schema-ref chat-schema-ref
+      :links chat-links}
+     chat)
+    (chats/message-projection?
+     {:id (chats/message-semantic-id message-a)
+      :schema-ref message-schema-ref
+      :links message-links}
+     message
+     id-a)
+    (chats/chat-projection?
+     {:id (chats/chat-semantic-id id-b)
+      :schema-ref chat-schema-ref
+      :links chat-links}
+     chat)
+    (chats/message-projection?
+     {:id (chats/message-semantic-id message-a)
+      :schema-ref message-schema-ref
+      :links message-links}
+     message
+     id-b)]
+   [true true false false])
+
+  (test/check
+   "summary projection contains bounded public fields only"
+   (let [summary (chats/summary chat)]
+     [(chats/summary? summary)
+      (get summary :uri)
+      (get summary :provider)
+      (has? summary :source-id)
+      (chats/summary?
+       (assoc summary :route "/private"))])
+   [true
+    (str chats/chat-resource-prefix id-a)
+    "openai.chatgpt"
+    false
+    false])])

@@ -1,0 +1,535 @@
+(ns tahto.profile.chats.read
+  (:require [std.foundation :refer :all]
+            [tahto.profile.chats.collection :as chat-collection]
+            [tahto.profile.chats.model :as chats]
+            [tahto.profile.chats.query :as query]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.admission :as admission]
+            [tahto.semantic.canonical-value :as canonical]
+            [tahto.semantic.model :as semantic]
+            [tahto.semantic.read :as semantic-read]
+            [tahto.store.model :as model]))
+
+(def protocol "greenways.chats-read-result/0-alpha")
+
+(def branch-fields
+  #{:commit-root :semantic-root :outcome :value})
+
+(def result-fields
+  #{:protocol :selector :resource :head-digest :head :branches})
+
+(def outcomes
+  #{"available" "missing"})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn profile-context?
+  [context]
+  (truth-value
+   (and
+    (validate/request-context? context)
+    (= semantic-read/operation
+       (get context :operation))
+    (= "pending" (get context :status))
+    (= false (get context :replayed))
+    (nil? (get context :result-digest))
+    (chats/exact-coordinate? context))))
+
+(defn selected-id
+  [request]
+  (if
+   (= "recent" (get request :selector))
+   chat-collection/semantic-id
+   (chats/chat-semantic-id
+    (get request :chat-id))))
+
+(defn semantic-request
+  [request]
+  {:kind chats/head-kind
+   :name chats/head-name
+   :max-commits semantic-read/max-read-commits
+   :id (selected-id request)})
+
+(defn query-resource
+  [request]
+  (if
+   (= "recent" (get request :selector))
+   chats/collection-resource
+   (chats/chat-resource
+    (get request :chat-id))))
+
+(defn profile-fail
+  ([state code]
+   (profile-fail state code {}))
+  ([state code details]
+   (model/fail state code details)))
+
+(defn read-value-with
+  [state projection invoke]
+  (cond
+    (not (admission/projection? projection))
+    (profile-fail
+     state "greenways.chats/projection-invalid")
+
+    :else
+    (let [input
+          {:application chats/application
+           :namespace chats/namespace-id
+           :root (get projection :value-root)
+           :max-bytes semantic/max-semantic-value-bytes}
+          result
+          (canonical/read-with state input invoke)]
+      (cond
+        (not (get result :ok))
+        (profile-fail
+         state
+         "greenways.chats/value-read-failed"
+         {:cause (get result :error)})
+
+        (not (= (get projection :value-root)
+                (get-in result [:value :root])))
+        (profile-fail
+         state "greenways.chats/value-root-mismatch")
+
+        (not (= (get projection :value-size)
+                (get-in result [:value :value-size])))
+        (profile-fail
+         state "greenways.chats/value-size-mismatch")
+
+        :else
+        (model/ok
+         state
+         (get-in result [:value :value]))))))
+
+(defn recent-page
+  [request summaries]
+  (cond
+    (not (query/recent-request? request))
+    {:ok false
+     :error {:code "greenways.chats/query-invalid"
+             :details {}}}
+
+    (not (chat-collection/ordered-summaries? summaries))
+    {:ok false
+     :error {:code "greenways.chats/summary-values-invalid"
+             :details {}}}
+
+    :else
+    (let [cursor
+          (if (nil? (get request :cursor))
+            0
+            (get request :cursor))
+          page
+          (query/page-forward
+           summaries cursor (get request :limit))]
+      (if
+       (not (get page :ok))
+       page
+       (let [value
+             {:protocol query/recent-result-protocol
+              :resource chats/collection-resource
+              :cursor (get-in page [:value :cursor])
+              :next-cursor
+              (get-in page [:value :next-cursor])
+              :items (get-in page [:value :items])
+              :total (get-in page [:value :total])}]
+         (if
+          (query/recent-result? value)
+          {:ok true :value value}
+          {:ok false
+           :error
+           {:code "greenways.chats/query-result-invalid"
+            :details {}}}))))))
+
+(defn message-values-with
+  [state chat-projection chat-value invoke]
+  (let [chat-id (get chat-value :id)
+        links (get chat-projection :links)]
+    (loop [position 0
+           values []]
+      (if
+       (= position (count links))
+       (model/ok state values)
+       (let [link (nth links position)
+             root (get link :target-root)
+             projection
+             (admission/semantic-object-projection
+              state root)]
+         (cond
+           (nil? projection)
+           (profile-fail
+            state
+            "greenways.chats/message-projection-missing"
+            {:root root})
+
+           (not (= root (get projection :root)))
+           (profile-fail
+            state
+            "greenways.chats/message-root-mismatch"
+            {:root root})
+
+           (not (= (get link :target-id)
+                   (get projection :id)))
+           (profile-fail
+            state
+            "greenways.chats/message-id-mismatch"
+            {:root root})
+
+           :else
+           (let [read-result
+                 (read-value-with
+                  state projection invoke)]
+             (if
+              (not (get read-result :ok))
+              read-result
+              (let [value (get read-result :value)]
+                (cond
+                  (not (chats/message-projection?
+                        projection value chat-id))
+                  (profile-fail
+                   state
+                   "greenways.chats/message-profile-invalid"
+                   {:root root})
+
+                  (> (compare
+                      (get chat-value :created-at)
+                      (get value :created-at))
+                     0)
+                  (profile-fail
+                   state
+                   "greenways.chats/message-before-chat"
+                   {:root root})
+
+                  :else
+                  (recur
+                   (inc position)
+                   (conj values value))))))))))))
+
+(defn query-value-valid?
+  [selector value]
+  (truth-value
+   (cond
+     (= "recent" selector)
+     (query/recent-result? value)
+
+     (= "chat" selector)
+     (query/chat-result? value)
+
+     (= "messages" selector)
+     (query/message-page? value)
+
+     :else false)))
+
+(defn branch?
+  [selector value]
+  (let [outcome (get value :outcome)
+        branch-value (get value :value)]
+    (truth-value
+     (and
+      (validate/exact-record? value branch-fields #{})
+      (model/canonical-digest?
+       (get value :commit-root))
+      (model/canonical-digest?
+       (get value :semantic-root))
+      (has? outcomes outcome)
+      (if
+       (= "missing" outcome)
+       (and
+        (not (= "recent" selector))
+        (nil? branch-value))
+       (query-value-valid?
+        selector branch-value))))))
+
+(defn result?
+  [value]
+  (let [selector (get value :selector)
+        branches (get value :branches)
+        head (get value :head)]
+    (truth-value
+     (and
+      (validate/exact-record? value result-fields #{})
+      (= protocol (get value :protocol))
+      (has? query/selectors selector)
+      (= (query-resource
+          {:selector selector
+           :chat-id
+           (if
+            (= "recent" selector)
+            nil
+            (chats/chat-id-from-resource
+             (get value :resource)))})
+         (get value :resource))
+      (model/canonical-digest?
+       (get value :head-digest))
+      (semantic-read/head-summary? head)
+      (vector? branches)
+      (> (count branches) 0)
+      (<= (count branches)
+          semantic-read/max-read-commits)
+      (every?
+       (fn [branch]
+         (branch? selector branch))
+       branches)
+      (= (get head :commits)
+         (vec
+          (map
+           (fn [branch]
+             (get branch :commit-root))
+           branches)))))))
+
+(defn missing-branch
+  [branch]
+  {:ok true
+   :value
+   {:commit-root (get branch :commit-root)
+    :semantic-root (get branch :semantic-root)
+    :outcome "missing"
+    :value nil}})
+
+(defn available-branch
+  [branch value]
+  {:ok true
+   :value
+   {:commit-root (get branch :commit-root)
+    :semantic-root (get branch :semantic-root)
+    :outcome "available"
+    :value value}})
+
+(defn branch-fail
+  ([code]
+   (branch-fail code {}))
+  ([code details]
+   {:ok false
+    :error {:code code :details details}}))
+
+(defn process-recent-with
+  [state request branch invoke]
+  (let [projection (get branch :selection)]
+    (cond
+      (nil? projection)
+      (branch-fail
+       "greenways.chats/collection-projection-missing"
+       {:commit-root (get branch :commit-root)})
+
+      :else
+      (let [read-result
+            (read-value-with
+             state projection invoke)]
+        (if
+         (not (get read-result :ok))
+         {:ok false :error (get read-result :error)}
+         (let [value (get read-result :value)]
+           (if
+            (not (chat-collection/projection?
+                  projection value))
+            (branch-fail
+             "greenways.chats/collection-profile-invalid"
+             {:commit-root (get branch :commit-root)})
+            (let [queried
+                  (recent-page
+                   request
+                   (get value :summaries))]
+              (if
+               (get queried :ok)
+               (available-branch
+                branch (get queried :value))
+               queried))))))))
+
+(defn read-chat-with
+  [state branch invoke]
+  (let [projection (get branch :selection)]
+    (if
+     (nil? projection)
+     {:ok true :missing true}
+     (let [read-result
+           (read-value-with
+            state projection invoke)]
+       (if
+        (not (get read-result :ok))
+        {:ok false :error (get read-result :error)}
+        (let [value (get read-result :value)]
+          (if
+           (chats/chat-projection?
+            projection value)
+           {:ok true
+            :missing false
+            :projection projection
+            :value value}
+           (branch-fail
+            "greenways.chats/chat-profile-invalid"
+            {:commit-root
+             (get branch :commit-root)}))))))))
+
+(defn process-chat-with
+  [state request branch invoke]
+  (let [read-result
+        (read-chat-with state branch invoke)]
+    (cond
+      (not (get read-result :ok))
+      read-result
+
+      (get read-result :missing)
+      (missing-branch branch)
+
+      :else
+      (let [queried
+            (query/exact-chat
+             request
+             [(get read-result :value)])]
+        (if
+         (get queried :ok)
+         (available-branch
+          branch (get queried :value))
+         queried))))
+
+(defn process-messages-with
+  [state request branch invoke]
+  (let [chat-result
+        (read-chat-with state branch invoke)]
+    (cond
+      (not (get chat-result :ok))
+      chat-result
+
+      (get chat-result :missing)
+      (missing-branch branch)
+
+      :else
+      (let [messages-result
+            (message-values-with
+             state
+             (get chat-result :projection)
+             (get chat-result :value)
+             invoke)]
+        (if
+         (not (get messages-result :ok))
+         {:ok false
+          :error (get messages-result :error)}
+         (let [queried
+               (query/message-page
+                request
+                (get messages-result :value))]
+           (if
+            (get queried :ok)
+            (available-branch
+             branch (get queried :value))
+            queried)))))))
+
+(defn process-branch-with
+  [state request branch invoke]
+  (let [selector (get request :selector)]
+    (cond
+      (= "recent" selector)
+      (process-recent-with
+       state request branch invoke)
+
+      (= "chat" selector)
+      (process-chat-with
+       state request branch invoke)
+
+      (= "messages" selector)
+      (process-messages-with
+       state request branch invoke)
+
+      :else
+      (branch-fail
+       "greenways.chats/query-invalid"))))
+
+(defn read-value-matches?
+  [context request read-value]
+  (truth-value
+   (and
+    (semantic-read/result? read-value)
+    (= chats/application
+       (get read-value :application))
+    (= chats/namespace-id
+       (get read-value :namespace))
+    (= chats/collection
+       (get read-value :collection))
+    (= (get context :device)
+       (get read-value :device))
+    (= (get context :request-digest)
+       (get read-value :request-digest))
+    (= (selected-id request)
+       (get read-value :requested-id)))))
+
+(defn project-with
+  [state context request read-value invoke]
+  (cond
+    (not (profile-context? context))
+    (profile-fail
+     state "greenways.chats/context-not-admitted")
+
+    (not (query/request? request))
+    (profile-fail
+     state "greenways.chats/query-invalid")
+
+    (not (read-value-matches?
+          context request read-value))
+    (profile-fail
+     state "greenways.chats/semantic-read-mismatch")
+
+    :else
+    (let [source-branches (get read-value :branches)]
+      (loop [position 0
+             branches []]
+        (if
+         (= position (count source-branches))
+         (let [value
+               {:protocol protocol
+                :selector (get request :selector)
+                :resource (query-resource request)
+                :head-digest
+                (get read-value :head-digest)
+                :head (get read-value :head)
+                :branches branches}]
+           (if
+            (result? value)
+            (model/ok state value)
+            (profile-fail
+             state
+             "greenways.chats/read-result-invalid")))
+         (let [processed
+               (process-branch-with
+                state
+                request
+                (nth source-branches position)
+                invoke)]
+           (if
+            (get processed :ok)
+            (recur
+             (inc position)
+             (conj branches
+                   (get processed :value)))
+            (profile-fail
+             state
+             (get-in processed [:error :code])
+             (get-in processed
+                     [:error :details])))))))))
+
+(defn query-with
+  [state context request invoke]
+  (cond
+    (not (profile-context? context))
+    (profile-fail
+     state "greenways.chats/context-not-admitted")
+
+    (not (query/request? request))
+    (profile-fail
+     state "greenways.chats/query-invalid")
+
+    :else
+    (let [read-result
+          (semantic-read/read
+           state context (semantic-request request))]
+      (if
+       (get read-result :ok)
+       (project-with
+        state context request
+        (get read-result :value)
+        invoke)
+       (profile-fail
+        state
+        "greenways.chats/semantic-read-failed"
+        {:cause (get read-result :error)})))))

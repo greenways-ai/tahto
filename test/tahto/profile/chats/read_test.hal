@@ -1,0 +1,451 @@
+(ns tahto.profile.chats.read-test
+  (:require [std.foundation :refer :all]
+            [hoplite.value :as portable]
+            [std.lib.test :as test]
+            [tahto.profile.chats.collection :as chat-collection]
+            [tahto.profile.chats.model :as chats]
+            [tahto.profile.chats.query :as query]
+            [tahto.profile.chats.read :as read]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.history :as semantic-history]
+            [tahto.semantic.model :as semantic]
+            [tahto.semantic.read :as semantic-read]
+            [tahto.store.model :as model]))
+
+(def chat-id "0000000000000000000000000000000a")
+(def message-id "1000000000000000000000000000000a")
+
+(def collection-value-left
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+(def chat-value-left
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def message-value-left
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def collection-value-right
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+(def chat-value-right
+  "sha256:4444444444444444444444444444444444444444444444444444444444444444")
+(def message-value-right
+  "sha256:5555555555555555555555555555555555555555555555555555555555555555")
+
+(def collection-object-left
+  "sha256:6666666666666666666666666666666666666666666666666666666666666666")
+(def chat-object-left
+  "sha256:7777777777777777777777777777777777777777777777777777777777777777")
+(def message-object-left
+  "sha256:8888888888888888888888888888888888888888888888888888888888888888")
+(def collection-object-right
+  "sha256:9999999999999999999999999999999999999999999999999999999999999999")
+(def chat-object-right
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def message-object-right
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+(def index-left
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def index-right
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def root-left
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def root-right
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def commit-left
+  "sha256:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f")
+(def commit-right
+  "sha256:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f")
+(def head-digest
+  "sha256:2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f")
+(def request-digest
+  "sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f")
+(def package-root
+  "sha256:4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f")
+
+(defn source
+  [id]
+  {:protocol chats/source-protocol
+   :provider "openai.chatgpt"
+   :source-id id})
+
+(defn chat-value
+  [title updated]
+  {:protocol chats/chat-protocol
+   :id chat-id
+   :title title
+   :source (source (str "source-" title))
+   :created-at "2026-08-14T00:00:00Z"
+   :updated-at updated
+   :message-count 1})
+
+(def chat-left
+  (chat-value "Left title" "2026-08-14T00:02:00Z"))
+(def chat-right
+  (chat-value "Right title" "2026-08-14T00:03:00Z"))
+
+(def message-left
+  {:protocol chats/message-protocol
+   :id message-id
+   :role "user"
+   :content "left message"
+   :created-at "2026-08-14T00:01:00Z"})
+
+(def message-right
+  {:protocol chats/message-protocol
+   :id message-id
+   :role "assistant"
+   :content "right message"
+   :created-at "2026-08-14T00:01:30Z"})
+
+(def collection-left
+  {:protocol chat-collection/protocol
+   :summaries [(chats/summary chat-left)]})
+
+(def collection-right
+  {:protocol chat-collection/protocol
+   :summaries [(chats/summary chat-right)]})
+
+(defn schema-ref
+  [schema entry]
+  {:protocol semantic/schema-ref-protocol
+   :schema schema
+   :schema-version 1
+   :package chats/package-coordinate
+   :package-version chats/package-version
+   :package-root package-root
+   :entry entry})
+
+(def chat-schema-ref
+  (schema-ref chats/chat-schema chats/chat-entry))
+(def collection-schema-ref
+  (schema-ref chat-collection/schema chat-collection/entry))
+(def message-schema-ref
+  (schema-ref chats/message-schema chats/message-entry))
+
+(defn semantic-link
+  [role target-id target-root]
+  {:protocol semantic/semantic-link-protocol
+   :role role
+   :target-id target-id
+   :target-root target-root})
+
+(defn object-projections
+  [collection-root chat-root message-root
+   collection-value-root chat-value-root message-value-root]
+  {:collection
+   {:root collection-root
+    :id chat-collection/semantic-id
+    :schema-ref collection-schema-ref
+    :value-root collection-value-root
+    :value-size 256
+    :links
+    [(semantic-link
+      chat-collection/chat-link-role
+      (chats/chat-semantic-id chat-id)
+      chat-root)]}
+   :chat
+   {:root chat-root
+    :id (chats/chat-semantic-id chat-id)
+    :schema-ref chat-schema-ref
+    :value-root chat-value-root
+    :value-size 256
+    :links
+    [(semantic-link
+      chats/chat-message-role
+      (chats/message-semantic-id message-id)
+      message-root)]}
+   :message
+   {:root message-root
+    :id (chats/message-semantic-id message-id)
+    :schema-ref message-schema-ref
+    :value-root message-value-root
+    :value-size 128
+    :links
+    [(semantic-link
+      chats/message-chat-role
+      (chats/chat-semantic-id chat-id)
+      chat-root)]}})
+
+(def projections-left
+  (object-projections
+   collection-object-left chat-object-left message-object-left
+   collection-value-left chat-value-left message-value-left))
+
+(def projections-right
+  (object-projections
+   collection-object-right chat-object-right message-object-right
+   collection-value-right chat-value-right message-value-right))
+
+(defn index-projection
+  [root projections]
+  {:root root
+   :entries
+   [{:id (chats/chat-semantic-id chat-id)
+     :root (get-in projections [:chat :root])}
+    {:id chat-collection/semantic-id
+     :root (get-in projections [:collection :root])}
+    {:id (chats/message-semantic-id message-id)
+     :root (get-in projections [:message :root])}]})
+
+(defn root-projection
+  [root index-root projections]
+  {:root root
+   :application chats/application
+   :namespace chats/namespace-id
+   :collection chats/collection
+   :schema-refs
+   [chat-schema-ref collection-schema-ref message-schema-ref]
+   :index-root index-root
+   :roots
+   [{:name "collection"
+     :id chat-collection/semantic-id
+     :root (get-in projections [:collection :root])}]})
+
+(defn signature
+  [key-id]
+  {:profile "tahto-signature/0-alpha"
+   :algorithm "ed25519"
+   :key-id key-id
+   :value "abcdefghijklmnopqrstuvwxyz0123456789"})
+
+(defn commit-record
+  [root device semantic-root]
+  {:protocol model/commit-protocol
+   :root root
+   :application chats/application
+   :namespace chats/namespace-id
+   :collection chats/collection
+   :schema semantic-history/schema
+   :schema-version semantic-history/schema-version
+   :device device
+   :parents []
+   :objects [semantic-root]
+   :tombstones []
+   :sequence 1
+   :timestamp "2026-08-14T00:04:00Z"
+   :signature (signature (str device ".key"))})
+
+(def device-a
+  {:protocol model/device-protocol
+   :id "device.a"
+   :node "node.home"
+   :public-key "ed25519:device-a-public-key"
+   :status "enrolled"
+   :enrolled-at "2026-08-14T00:00:00Z"})
+
+(def context
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation semantic-read/operation
+   :application chats/application
+   :namespace chats/namespace-id
+   :collection chats/collection
+   :request-digest request-digest
+   :authority-root request-digest
+   :idempotency-key "chats-read-0001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(def portable-values
+  {collection-value-left {:size 256 :value collection-left}
+   chat-value-left {:size 256 :value chat-left}
+   message-value-left {:size 128 :value message-left}
+   collection-value-right {:size 256 :value collection-right}
+   chat-value-right {:size 256 :value chat-right}
+   message-value-right {:size 128 :value message-right}})
+
+(defn base-state
+  []
+  (let [head-key
+        (model/head-key
+         chats/application chats/namespace-id chats/collection
+         chats/head-kind chats/head-name)
+        value-roots
+        (into #{} (keys portable-values))
+        value-objects
+        (reduce
+         (fn [objects entry]
+           (assoc
+            objects
+            (key entry)
+            (model/object-record
+             (key entry)
+             (get-in entry [1 :size]))))
+         {}
+         portable-values)
+        head
+        {:protocol model/head-protocol
+         :application chats/application
+         :namespace chats/namespace-id
+         :collection chats/collection
+         :kind chats/head-kind
+         :name chats/head-name
+         :commits [commit-left commit-right]
+         :expected []
+         :updated-at "2026-08-14T00:05:00Z"
+         :signature (signature "head.key")}]
+    (assoc
+     (model/empty-state)
+     :devices {"device.a" device-a}
+     :objects value-objects
+     :references
+     {(model/namespace-key
+       chats/application chats/namespace-id)
+      value-roots}
+     :semantic-objects
+     {collection-object-left (get projections-left :collection)
+      chat-object-left (get projections-left :chat)
+      message-object-left (get projections-left :message)
+      collection-object-right (get projections-right :collection)
+      chat-object-right (get projections-right :chat)
+      message-object-right (get projections-right :message)}
+     :semantic-indexes
+     {index-left (index-projection index-left projections-left)
+      index-right (index-projection index-right projections-right)}
+     :semantic-roots
+     {root-left (root-projection root-left index-left projections-left)
+      root-right (root-projection root-right index-right projections-right)}
+     :commits
+     {commit-left (commit-record commit-left "device.a" root-left)
+      commit-right (commit-record commit-right "device.b" root-right)}
+     :heads {head-key head}
+     :head-digests {head-key head-digest})))
+
+(defn value-provider
+  [service operation request]
+  (let [entry (get portable-values (get request :digest))]
+    (if
+     (and
+      (= portable/service service)
+      (= portable/operation operation)
+      (not (nil? entry)))
+     (portable/verified-result
+      (get request :digest)
+      (get entry :size)
+      (get entry :value))
+     (portable/failed-result
+      (get request :digest)
+      "hoplite.value/object-missing"))))
+
+(test/print-results
+ [(test/check
+   "recent summaries remain separate for every divergent semantic head"
+   (let [state (base-state)
+         result
+         (read/query-with
+          state context
+          {:protocol query/request-protocol
+           :selector "recent"
+           :limit 100}
+          value-provider)]
+     [(get result :ok)
+      (read/result? (get result :value))
+      (get-in result [:value :head :commits])
+      (vec
+       (map
+        (fn [branch]
+          (get-in branch [:value :items 0 :title]))
+        (get-in result [:value :branches])))
+      (= state (get result :state))])
+   [true true
+    [commit-left commit-right]
+    ["Left title" "Right title"]
+    true])
+
+  (test/check
+   "exact Chat values are verified independently in every branch"
+   (let [result
+         (read/query-with
+          (base-state) context
+          {:protocol query/request-protocol
+           :selector "chat"
+           :chat-id chat-id}
+          value-provider)]
+     [(get result :ok)
+      (vec
+       (map
+        (fn [branch]
+          (get-in branch [:value :chat :title]))
+        (get-in result [:value :branches])))])
+   [true ["Left title" "Right title"]])
+
+  (test/check
+   "message pages follow exact Chat links and preserve branch values"
+   (let [result
+         (read/query-with
+          (base-state) context
+          {:protocol query/request-protocol
+           :selector "messages"
+           :chat-id chat-id
+           :direction "forward"
+           :limit 10}
+          value-provider)]
+     [(get result :ok)
+      (vec
+       (map
+        (fn [branch]
+          (get-in branch [:value :items 0 :content]))
+        (get-in result [:value :branches])))])
+   [true ["left message" "right message"]])
+
+  (test/check
+   "absent Chats remain explicit per branch instead of choosing a head"
+   (let [missing-id "ffffffffffffffffffffffffffffffff"
+         result
+         (read/query-with
+          (base-state) context
+          {:protocol query/request-protocol
+           :selector "chat"
+           :chat-id missing-id}
+          value-provider)]
+     [(get result :ok)
+      (vec
+       (map
+        (fn [branch]
+          [(get branch :outcome)
+           (get branch :value)])
+        (get-in result [:value :branches])))])
+   [true [["missing" nil] ["missing" nil]]])
+
+  (test/check
+   "context, canonical value, and projection substitution fail closed"
+   (let [state (base-state)
+         replayed
+         (read/query-with
+          state
+          (assoc context :replayed true)
+          {:protocol query/request-protocol
+           :selector "recent"
+           :limit 1}
+          value-provider)
+         wrong-value
+         (read/query-with
+          state context
+          {:protocol query/request-protocol
+           :selector "recent"
+           :limit 1}
+          (fn [service operation request]
+            (portable/verified-result
+             (get request :digest)
+             (get-in portable-values
+                     [(get request :digest) :size])
+             chat-left)))
+         changed-state
+         (assoc-in
+          state
+          [:semantic-objects collection-object-left :schema-ref]
+          chat-schema-ref)
+         changed-projection
+         (read/query-with
+          changed-state context
+          {:protocol query/request-protocol
+           :selector "recent"
+           :limit 1}
+          value-provider)]
+     [(get-in replayed [:error :code])
+      (get-in wrong-value [:error :code])
+      (get-in changed-projection [:error :code])
+      (= state (get replayed :state))])
+   ["greenways.chats/context-not-admitted"
+    "greenways.chats/collection-profile-invalid"
+    "greenways.chats/collection-profile-invalid"
+    true])])

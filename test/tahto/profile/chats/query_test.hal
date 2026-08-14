@@ -1,0 +1,216 @@
+(ns tahto.profile.chats.query-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.profile.chats.model :as chats]
+            [tahto.profile.chats.query :as query]))
+
+(def chat-a "0000000000000000000000000000000a")
+(def chat-b "0000000000000000000000000000000b")
+(def chat-c "0000000000000000000000000000000c")
+
+(def message-a "1000000000000000000000000000000a")
+(def message-b "1000000000000000000000000000000b")
+(def message-c "1000000000000000000000000000000c")
+(def message-d "1000000000000000000000000000000d")
+
+(defn source
+  [id]
+  {:protocol chats/source-protocol
+   :provider "openai.chatgpt"
+   :source-id id})
+
+(defn chat
+  [id title updated message-count]
+  {:protocol chats/chat-protocol
+   :id id
+   :title title
+   :source (source (str "source-" id))
+   :created-at "2026-08-14T00:00:00Z"
+   :updated-at updated
+   :message-count message-count})
+
+(def chats-values
+  [(chat chat-a "Older" "2026-08-14T00:01:00Z" 1)
+   (chat chat-c "Newest C" "2026-08-14T00:03:00Z" 4)
+   (chat chat-b "Newest B" "2026-08-14T00:03:00Z" 2)])
+
+(defn message
+  [id role content created]
+  {:protocol chats/message-protocol
+   :id id
+   :role role
+   :content content
+   :created-at created})
+
+(def message-values
+  [(message message-c "assistant" "three" "2026-08-14T00:03:00Z")
+   (message message-a "user" "one" "2026-08-14T00:01:00Z")
+   (message message-d "tool" "four" "2026-08-14T00:04:00Z")
+   (message message-b "assistant" "two" "2026-08-14T00:02:00Z")])
+
+(test/print-results
+ [(test/check
+   "recent summaries are deterministic, bounded, and cursor paged"
+   (let [first-page
+         (query/recent
+          {:protocol query/request-protocol
+           :selector "recent"
+           :limit 2}
+          chats-values)
+         second-page
+         (query/recent
+          {:protocol query/request-protocol
+           :selector "recent"
+           :cursor 2
+           :limit 2}
+          chats-values)]
+     [(get first-page :ok)
+      (query/recent-result? (get first-page :value))
+      (vec
+       (map
+        (fn [summary] (get summary :id))
+        (get-in first-page [:value :items])))
+      (get-in first-page [:value :next-cursor])
+      (vec
+       (map
+        (fn [summary] (get summary :id))
+        (get-in second-page [:value :items])))
+      (get-in second-page [:value :next-cursor])])
+   [true true [chat-b chat-c] 2 [chat-a] nil])
+
+  (test/check
+   "exact Chat lookup preserves missing as a bounded value"
+   (let [found
+         (query/exact-chat
+          {:protocol query/request-protocol
+           :selector "chat"
+           :chat-id chat-b}
+          chats-values)
+         missing
+         (query/exact-chat
+          {:protocol query/request-protocol
+           :selector "chat"
+           :chat-id
+           "ffffffffffffffffffffffffffffffff"}
+          chats-values)]
+     [(get-in found [:value :chat :title])
+      (query/chat-result? (get found :value))
+      (get-in missing [:value :chat])
+      (query/chat-result? (get missing :value))])
+   ["Newest B" true nil true])
+
+  (test/check
+   "message pages are chronologically stable in both directions"
+   (let [forward
+         (query/message-page
+          {:protocol query/request-protocol
+           :selector "messages"
+           :chat-id chat-c
+           :direction "forward"
+           :limit 2}
+          message-values)
+         backward
+         (query/message-page
+          {:protocol query/request-protocol
+           :selector "messages"
+           :chat-id chat-c
+           :direction "backward"
+           :limit 2}
+          message-values)
+         previous
+         (query/message-page
+          {:protocol query/request-protocol
+           :selector "messages"
+           :chat-id chat-c
+           :direction "backward"
+           :cursor 2
+           :limit 2}
+          message-values)]
+     [(vec
+       (map
+        (fn [value] (get value :id))
+        (get-in forward [:value :items])))
+      (get-in forward [:value :next-cursor])
+      (vec
+       (map
+        (fn [value] (get value :id))
+        (get-in backward [:value :items])))
+      (get-in backward [:value :next-cursor])
+      (vec
+       (map
+        (fn [value] (get value :id))
+        (get-in previous [:value :items])))
+      (get-in previous [:value :next-cursor])
+      (query/message-page? (get backward :value))])
+   [[message-a message-b]
+    2
+    [message-c message-d]
+    2
+    [message-a message-b]
+    nil
+    true])
+
+  (test/check
+   "unknown fields, selectors, oversized limits, and stale cursors fail closed"
+   [(query/request?
+     {:protocol query/request-protocol
+      :selector "recent"
+      :limit 10
+      :predicate "anything"})
+    (query/request?
+     {:protocol query/request-protocol
+      :selector "search"
+      :limit 10})
+    (query/request?
+     {:protocol query/request-protocol
+      :selector "messages"
+      :chat-id chat-a
+      :direction "forward"
+      :limit 101})
+    (get-in
+     (query/recent
+      {:protocol query/request-protocol
+       :selector "recent"
+       :cursor 5
+       :limit 1}
+      chats-values)
+     [:error :code])
+    (get-in
+     (query/message-page
+      {:protocol query/request-protocol
+       :selector "messages"
+       :chat-id chat-a
+       :direction "forward"
+       :cursor 8
+       :limit 1}
+      message-values)
+     [:error :code])]
+   [false
+    false
+    false
+    "greenways.chats/cursor-out-of-range"
+    "greenways.chats/cursor-out-of-range"])
+
+  (test/check
+   "invalid application values never enter query projections"
+   [(get-in
+     (query/recent
+      {:protocol query/request-protocol
+       :selector "recent"
+       :limit 1}
+      [(assoc (first chats-values)
+              :private-path "/tmp/chat")])
+     [:error :code])
+    (get-in
+     (query/message-page
+      {:protocol query/request-protocol
+       :selector "messages"
+       :chat-id chat-a
+       :direction "forward"
+       :limit 1}
+      [(assoc (first message-values)
+              :credential "secret")])
+     [:error :code])]
+   ["greenways.chats/chat-values-invalid"
+    "greenways.chats/message-values-invalid"])
+ ])
