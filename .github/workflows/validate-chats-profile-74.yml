@@ -21,6 +21,16 @@ jobs:
         with:
           ref: agent/chats-profile-74
           fetch-depth: 0
+      - name: Trace exact feature checkout
+        run: |
+          echo "FEATURE_HEAD=$(git rev-parse HEAD)"
+          git status --short --branch
+          echo '--- value-source expectation ---'
+          grep -n -A8 -B3 'object/open-source' test/tahto/semantic/value_source_test.hal
+          echo '--- response-source expectation ---'
+          grep -n -A3 -B3 'object-out-of-scope' test/tahto/store/response_source_test.hal
+          echo '--- matching test paths before dependencies ---'
+          find . -type f \( -name 'value_source_test.hal' -o -name 'response_source_test.hal' \) -print -exec sha256sum {} \;
       - name: Validate static contracts
         run: |
           python3 conformance/check-bootstrap.py
@@ -58,6 +68,8 @@ jobs:
           mkdir -p .conformance-src/hoplite
           cp .dependencies/technology/hoplite/migration/value/src/hoplite/value.hal .conformance-src/hoplite/value.hal
           cp .dependencies/technology/hoplite/core/lib/src/hoplite/response_source.hal .conformance-src/hoplite/response_source.hal
+          echo '--- matching test paths after dependencies ---'
+          find . -type f \( -name 'value_source_test.hal' -o -name 'response_source_test.hal' \) -print -exec sha256sum {} \;
       - name: Run complete Hara conformance
         run: |
           python3 - <<'PY'
@@ -78,8 +90,10 @@ jobs:
           status=$?
           set -e
           if [ "$status" -ne 0 ]; then
+            echo '--- first failing markers ---'
+            grep -n -E 'FAIL|failed|Error|error|actual|expected' /tmp/chats-hara-test.log | head -n 80 || true
             echo '--- failing Hara test tail ---'
-            tail -n 220 /tmp/chats-hara-test.log
+            tail -n 320 /tmp/chats-hara-test.log
             exit "$status"
           fi
-          tail -n 40 /tmp/chats-hara-test.log
+          tail -n 60 /tmp/chats-hara-test.log
