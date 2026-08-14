@@ -13,6 +13,13 @@
   },
   "schemas": [
     {
+      "schema": "greenways.chat-collection",
+      "schemaVersion": 1,
+      "package": "hara:greenways/chats-profile",
+      "packageVersion": "0.1.0",
+      "entry": "greenways.chats/collection-spec"
+    },
+    {
       "schema": "greenways.chat",
       "schemaVersion": 1,
       "package": "hara:greenways/chats-profile",
@@ -28,6 +35,24 @@
     }
   ],
   "fixtures": [
+    {
+      "id": "valid-collection",
+      "value": {
+        "protocol": "greenways.chat-collection/0-alpha",
+        "summaries": [
+          {
+            "protocol": "greenways.chat-summary/0-alpha",
+            "id": "0000000000000000000000000000000a",
+            "uri": "greenways:tahto/chat/0000000000000000000000000000000a",
+            "title": "First chat",
+            "provider": "openai.chatgpt",
+            "updated-at": "2026-08-14T00:02:00Z",
+            "message-count": 2
+          }
+        ]
+      },
+      "valid": true
+    },
     {
       "id": "valid-chat",
       "value": {
@@ -55,6 +80,20 @@
         "created-at": "2026-08-14T00:01:00Z"
       },
       "valid": true
+    },
+    {
+      "id": "unordered-collection",
+      "collectionOverride": {
+        "summaryOrder": "oldest-first"
+      },
+      "valid": false
+    },
+    {
+      "id": "duplicate-collection-chat",
+      "collectionOverride": {
+        "duplicateSummaryId": true
+      },
+      "valid": false
     },
     {
       "id": "uppercase-chat-id",

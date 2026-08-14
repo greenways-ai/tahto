@@ -38,6 +38,11 @@ grep -F '"greenways.chat-message/0-alpha"' src/tahto/profile/chats/model.hal
 grep -F '"greenways:tahto/collection/chats"' src/tahto/profile/chats/model.hal
 grep -F '"hara:greenways/chats-profile"' src/tahto/profile/chats/model.hal
 grep -F '(semantic/semantic-link-vector?' src/tahto/profile/chats/model.hal
+grep -F '(ns tahto.profile.chats.collection' src/tahto/profile/chats/collection.hal
+grep -F '"greenways.chat-collection/0-alpha"' src/tahto/profile/chats/collection.hal
+grep -F '"collection/chats"' src/tahto/profile/chats/collection.hal
+grep -F 'max-chat-count 1000' src/tahto/profile/chats/collection.hal
+grep -F '(semantic/semantic-link-vector?' src/tahto/profile/chats/collection.hal
 grep -F '(ns tahto.profile.chats.query' src/tahto/profile/chats/query.hal
 grep -F '#{"recent" "chat" "messages"}' src/tahto/profile/chats/query.hal
 grep -F 'greenways.chats/cursor-out-of-range' src/tahto/profile/chats/query.hal
@@ -46,6 +51,7 @@ grep -F 'greenways.chats/cursor-out-of-range' src/tahto/profile/chats/query.hal
 grep -F '(ns tahto.client-test' test/tahto/client_test.hal
 grep -F '(ns tahto.change-feed.facade-test' test/tahto/change_feed/facade_test.hal
 grep -F '(ns tahto.profile.chats.model-test' test/tahto/profile/chats/model_test.hal
+grep -F '(ns tahto.profile.chats.collection-test' test/tahto/profile/chats/collection_test.hal
 grep -F '(ns tahto.profile.chats.query-test' test/tahto/profile/chats/query_test.hal
 grep -F '(ns tahto.semantic.model-test' test/tahto/semantic/model_test.hal
 grep -F '(ns tahto.semantic.admission-test' test/tahto/semantic/admission_test.hal

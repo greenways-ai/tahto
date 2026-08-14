@@ -1,0 +1,116 @@
+(ns tahto.profile.chats.collection-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.profile.chats.collection :as collection]
+            [tahto.profile.chats.model :as chats]
+            [tahto.semantic.model :as semantic]))
+
+(def chat-a "0000000000000000000000000000000a")
+(def chat-b "0000000000000000000000000000000b")
+
+(def chat-root-a
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def chat-root-b
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def package-root
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+
+(defn summary
+  [id title updated]
+  {:protocol chats/summary-protocol
+   :id id
+   :uri (chats/chat-resource id)
+   :title title
+   :provider "openai.chatgpt"
+   :updated-at updated
+   :message-count 1})
+
+(def summary-a
+  (summary chat-a "A" "2026-08-14T00:03:00Z"))
+(def summary-b
+  (summary chat-b "B" "2026-08-14T00:02:00Z"))
+
+(def schema-ref
+  {:protocol semantic/schema-ref-protocol
+   :schema collection/schema
+   :schema-version collection/schema-version
+   :package chats/package-coordinate
+   :package-version chats/package-version
+   :package-root package-root
+   :entry collection/entry})
+
+(def links
+  [{:protocol semantic/semantic-link-protocol
+    :role collection/chat-link-role
+    :target-id (chats/chat-semantic-id chat-a)
+    :target-root chat-root-a}
+   {:protocol semantic/semantic-link-protocol
+    :role collection/chat-link-role
+    :target-id (chats/chat-semantic-id chat-b)
+    :target-root chat-root-b}])
+
+(def collection-value
+  {:protocol collection/protocol
+   :summaries [summary-a summary-b]})
+
+(def projection
+  {:id collection/semantic-id
+   :schema-ref schema-ref
+   :links links})
+
+(test/print-results
+ [(test/check
+   "the materialized collection keeps exact deterministic summaries"
+   [(collection/value? collection-value)
+    (collection/ordered-summaries?
+     [summary-a summary-b])
+    (collection/ordered-summaries?
+     [summary-b summary-a])
+    (collection/ordered-summaries?
+     [summary-a summary-a])
+    (= collection-value
+       (collection/value [summary-a summary-b]))]
+   [true true false false true])
+
+  (test/check
+   "the collection schema reference is exact and immutable"
+   [(collection/schema-ref? schema-ref)
+    (collection/schema-ref?
+     (assoc schema-ref :package-version "latest"))
+    (collection/schema-ref?
+     (assoc schema-ref :entry chats/chat-entry))
+    (collection/schema-ref?
+     (assoc schema-ref :provider "sqlite"))]
+   [true false false false])
+
+  (test/check
+   "collection projections bind every summary to one typed Chat link"
+   [(collection/projection? projection collection-value)
+    (collection/projection?
+     (assoc projection :id "collection/other")
+     collection-value)
+    (collection/projection?
+     (assoc projection :links [(first links)])
+     collection-value)
+    (collection/projection?
+     (assoc-in projection [:links 1 :target-id]
+               (chats/chat-semantic-id chat-a))
+     collection-value)
+    (collection/projection?
+     (assoc-in projection [:links 0 :role]
+               "greenways.chats/route")
+     collection-value)]
+   [true false false false false])
+
+  (test/check
+   "collection values reject widened or malformed fields"
+   [(collection/value?
+     (assoc collection-value :route "local"))
+    (collection/value?
+     {:protocol collection/protocol
+      :summaries
+      [(assoc summary-a :credential "secret")]})
+    (collection/value?
+     {:protocol collection/protocol
+      :summaries "not-a-vector"})]
+   [false false false])])
