@@ -1,0 +1,436 @@
+(ns tahto.semantic.value-source-test
+  (:require [std.foundation :refer :all]
+            [hoplite.response-source :as portable]
+            [std.lib.test :as test]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.history :as semantic-history]
+            [tahto.semantic.read :as read]
+            [tahto.semantic.value-source :as value-source]
+            [tahto.store.capability :as capability]
+            [tahto.store.model :as model]))
+
+(def application "fixture.world")
+(def namespace-id "world.a")
+(def collection "scene")
+(def stable-id "entity/tree")
+
+(def value-left
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+(def value-right
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def object-left
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def object-right
+  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
+(def index-left
+  "sha256:4444444444444444444444444444444444444444444444444444444444444444")
+(def index-right
+  "sha256:5555555555555555555555555555555555555555555555555555555555555555")
+(def root-left
+  "sha256:6666666666666666666666666666666666666666666666666666666666666666")
+(def root-right
+  "sha256:7777777777777777777777777777777777777777777777777777777777777777")
+(def commit-left
+  "sha256:8888888888888888888888888888888888888888888888888888888888888888")
+(def commit-right
+  "sha256:9999999999999999999999999999999999999999999999999999999999999999")
+(def head-digest
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def request-digest
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def changed-digest
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def package-root
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+
+(def schema-ref
+  {:protocol "tahto.schema-ref/0-alpha"
+   :schema "fixture.entity"
+   :schema-version 1
+   :package "hara:fixture/world-specs"
+   :package-version "0.1.0"
+   :package-root package-root
+   :entry "fixture.entity/spec"})
+
+(defn signature
+  [key-id]
+  {:profile "tahto-signature/0-alpha"
+   :algorithm "ed25519"
+   :key-id key-id
+   :value "abcdefghijklmnopqrstuvwxyz0123456789"})
+
+(def object-left-projection
+  {:root object-left
+   :id stable-id
+   :schema-ref schema-ref
+   :value-root value-left
+   :value-size 64
+   :links []})
+
+(def object-right-projection
+  {:root object-right
+   :id stable-id
+   :schema-ref schema-ref
+   :value-root value-right
+   :value-size 72
+   :links []})
+
+(def index-left-projection
+  {:root index-left
+   :entries [{:id stable-id :root object-left}]})
+
+(def index-right-projection
+  {:root index-right
+   :entries [{:id stable-id :root object-right}]})
+
+(def root-left-projection
+  {:root root-left
+   :application application
+   :namespace namespace-id
+   :collection collection
+   :schema-refs [schema-ref]
+   :index-root index-left
+   :roots [{:name "document" :id stable-id :root object-left}]})
+
+(def root-right-projection
+  {:root root-right
+   :application application
+   :namespace namespace-id
+   :collection collection
+   :schema-refs [schema-ref]
+   :index-root index-right
+   :roots [{:name "document" :id stable-id :root object-right}]})
+
+(defn commit-record
+  [root device semantic-root sequence]
+  {:protocol model/commit-protocol
+   :root root
+   :application application
+   :namespace namespace-id
+   :collection collection
+   :schema semantic-history/schema
+   :schema-version semantic-history/schema-version
+   :device device
+   :parents []
+   :objects [semantic-root]
+   :tombstones []
+   :sequence sequence
+   :timestamp "2026-08-14T00:00:00Z"
+   :signature (signature (str device ".key"))})
+
+(def left-commit
+  (commit-record commit-left "device.a" root-left 1))
+
+(def right-commit
+  (commit-record commit-right "device.b" root-right 1))
+
+(def head
+  {:protocol model/head-protocol
+   :application application
+   :namespace namespace-id
+   :collection collection
+   :kind "main"
+   :name "primary"
+   :commits [commit-left commit-right]
+   :expected []
+   :updated-at "2026-08-14T00:10:00Z"
+   :signature (signature "head.key")})
+
+(def device
+  {:protocol model/device-protocol
+   :id "device.a"
+   :node "node.home"
+   :public-key "ed25519:device-a-public-key"
+   :status "enrolled"
+   :enrolled-at "2026-08-14T00:00:00Z"})
+
+(def context
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation read/operation
+   :application application
+   :namespace namespace-id
+   :collection collection
+   :request-digest request-digest
+   :authority-root request-digest
+   :idempotency-key "semantic-value-source-0001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(def semantic-read-request
+  {:kind "main"
+   :name "primary"
+   :max-commits 2
+   :id stable-id})
+
+(defn base-state
+  []
+  (let [head-key
+        (model/head-key application namespace-id collection "main" "primary")
+        namespace-key
+        (model/namespace-key application namespace-id)]
+    (assoc
+     (model/empty-state {:max-range-bytes 128})
+     :devices {"device.a" device}
+     :objects
+     {value-left (model/object-record value-left 64)
+      value-right (model/object-record value-right 72)}
+     :references
+     {namespace-key #{value-left value-right}}
+     :semantic-objects
+     {object-left object-left-projection
+      object-right object-right-projection}
+     :semantic-indexes
+     {index-left index-left-projection
+      index-right index-right-projection}
+     :semantic-roots
+     {root-left root-left-projection
+      root-right root-right-projection}
+     :commits
+     {commit-left left-commit
+      commit-right right-commit}
+     :heads {head-key head}
+     :head-digests {head-key head-digest})))
+
+(defn current-read-result
+  [state]
+  (get-in
+   (read/read state context semantic-read-request)
+   [:value]))
+
+(defn source-request
+  [read-result commit-root id offset length]
+  {:protocol value-source/request-protocol
+   :read-result read-result
+   :commit-root commit-root
+   :id id
+   :offset offset
+   :length length})
+
+(defn host-result
+  [digest handle offset length]
+  {:protocol capability/result-protocol
+   :operation "object/open-source"
+   :source-handle handle
+   :digest digest
+   :offset offset
+   :length length})
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
+
+(test/print-results
+ [(test/check
+   "one divergent branch opens only its exact selected immutable value range"
+   (let [state (base-state)
+         read-result (current-read-result state)
+         calls (atom [])
+         opened
+         (value-source/open-with
+          state
+          context
+          (source-request read-result commit-left stable-id 8 16)
+          (fn [service operation request]
+            (swap! calls conj [service operation request])
+            (host-result value-left 31 8 16)))
+         value (get opened :value)]
+     [(get opened :ok)
+      (= state (get opened :state))
+      (get value :protocol)
+      (get value :commit-root)
+      (get value :semantic-object-root)
+      (get value :value-root)
+      (get value :value-size)
+      (get value :offset)
+      (get value :length)
+      (get-in value [:source :protocol])
+      (get-in value [:source :service])
+      (get-in value [:source :source-handle])
+      @calls
+      (value-source/result? value)])
+   [true
+    true
+    value-source/protocol
+    commit-left
+    object-left
+    value-left
+    64
+    8
+    16
+    portable/protocol
+    "hoplite.blob"
+    31
+    [["hoplite.blob"
+      "object/open-source"
+      {:digest value-left :offset 8 :length 16}]]
+    true])
+
+  (test/check
+   "the same stable ID resolves independently on the other branch"
+   (let [state (base-state)
+         result
+         (value-source/open-with
+          state
+          context
+          (source-request
+           (current-read-result state)
+           commit-right stable-id 0 72)
+          (fn [service operation request]
+            (host-result value-right 37 0 72)))]
+     [(get result :ok)
+      (get-in result [:value :commit-root])
+      (get-in result [:value :semantic-object-root])
+      (get-in result [:value :value-root])
+      (get-in result [:value :value-size])
+      (= state (get result :state))])
+   [true commit-right object-right value-right 72 true])
+
+  (test/check
+   "forged or stale read projections fail before the host callback"
+   (let [state (base-state)
+         read-result (current-read-result state)
+         calls (atom 0)
+         invoke
+         (fn [service operation request]
+           (swap! calls inc)
+           (host-result value-left 41 0 8))
+         stale
+         (value-source/open-with
+          state context
+          (source-request
+           (assoc read-result :head-digest changed-digest)
+           commit-left stable-id 0 8)
+          invoke)
+         foreign
+         (value-source/open-with
+          state
+          (assoc context :namespace "world.other")
+          (source-request read-result commit-left stable-id 0 8)
+          invoke)]
+     [(error-code stale)
+      (error-code foreign)
+      @calls
+      (= state (get stale :state))
+      (= state (get foreign :state))])
+   ["tahto.semantic/value-source-read-stale"
+    "tahto.semantic/value-source-read-context-mismatch"
+    0 true true])
+
+  (test/check
+   "branch, stable-ID and absent selection substitutions fail closed"
+   (let [state (base-state)
+         read-result (current-read-result state)
+         wrong-branch
+         (value-source/open-with
+          state context
+          (source-request read-result changed-digest stable-id 0 8)
+          (fn [service operation request]
+            (host-result value-left 43 0 8)))
+         wrong-id
+         (value-source/open-with
+          state context
+          (source-request read-result commit-left "entity/other" 0 8)
+          (fn [service operation request]
+            (host-result value-left 47 0 8)))
+         missing-read
+         (get-in
+          (read/read
+           state context
+           (assoc semantic-read-request :id "entity/missing"))
+          [:value])
+         missing
+         (value-source/open-with
+          state context
+          (source-request
+           missing-read commit-left "entity/missing" 0 8)
+          (fn [service operation request]
+            (host-result value-left 53 0 8)))]
+     [(error-code wrong-branch)
+      (error-code wrong-id)
+      (error-code missing)])
+   ["tahto.semantic/value-source-branch-missing"
+    "tahto.semantic/value-source-id-mismatch"
+    "tahto.semantic/value-source-selection-missing"])
+
+  (test/check
+   "unsafe, empty and out-of-range selections never open a source"
+   (let [state (base-state)
+         read-result (current-read-result state)
+         calls (atom 0)
+         invoke
+         (fn [service operation request]
+           (swap! calls inc)
+           (host-result value-left 59 0 8))
+         empty
+         (value-source/open-with
+          state context
+          (source-request read-result commit-left stable-id 0 0)
+          invoke)
+         overflow
+         (value-source/open-with
+          state context
+          (source-request
+           read-result commit-left stable-id
+           portable/safe-integer-max 1)
+          invoke)
+         out-of-range
+         (value-source/open-with
+          state context
+          (source-request read-result commit-left stable-id 60 8)
+          invoke)]
+     [(error-code empty)
+      (error-code overflow)
+      (error-code out-of-range)
+      @calls])
+   ["tahto.semantic/value-source-request-invalid"
+    "tahto.semantic/value-source-request-invalid"
+    "tahto.store/range-out-of-bounds"
+    0])
+
+  (test/check
+   "provider-result substitution is rejected without changing Tahto state"
+   (let [state (base-state)
+         read-result (current-read-result state)
+         mismatched
+         (value-source/open-with
+          state context
+          (source-request read-result commit-left stable-id 8 16)
+          (fn [service operation request]
+            (host-result value-right 61 8 16)))
+         widened
+         (value-source/open-with
+          state context
+          (source-request read-result commit-left stable-id 8 16)
+          (fn [service operation request]
+            (assoc
+             (host-result value-left 67 8 16)
+             :provider "alternate")))]
+     [(error-code mismatched)
+      (error-code widened)
+      (= state (get mismatched :state))
+      (= state (get widened :state))
+      (has? (get mismatched :state) :source-handle)
+      (has? (get widened :state) :provider)])
+   ["tahto.capability/result-mismatch"
+    "tahto.capability/result-invalid"
+    true true false false])
+
+  (test/check
+   "request and result records remain closed"
+   (let [state (base-state)
+         read-result (current-read-result state)
+         request
+         (source-request read-result commit-left stable-id 0 8)
+         opened
+         (value-source/open-with
+          state context request
+          (fn [service operation provider-request]
+            (host-result value-left 71 0 8)))
+         value (get opened :value)]
+     [(value-source/request? request)
+      (value-source/request? (assoc request :provider "memory"))
+      (value-source/result? value)
+      (value-source/result? (assoc value :location "hidden"))])
+   [true false true false])])
