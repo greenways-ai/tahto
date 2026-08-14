@@ -1,0 +1,190 @@
+{
+  "protocol": "greenways.chats-conformance/0-alpha",
+  "coordinate": {
+    "application": "greenways.chats",
+    "namespace": "local",
+    "collection": "chats",
+    "headKind": "main",
+    "headName": "primary"
+  },
+  "resources": {
+    "collection": "greenways:tahto/collection/chats",
+    "chatPrefix": "greenways:tahto/chat/"
+  },
+  "schemas": [
+    {
+      "schema": "greenways.chat-collection",
+      "schemaVersion": 1,
+      "package": "hara:greenways/chats-profile",
+      "packageVersion": "0.1.0",
+      "entry": "greenways.chats/collection-spec"
+    },
+    {
+      "schema": "greenways.chat",
+      "schemaVersion": 1,
+      "package": "hara:greenways/chats-profile",
+      "packageVersion": "0.1.0",
+      "entry": "greenways.chats/chat-spec"
+    },
+    {
+      "schema": "greenways.chat-message",
+      "schemaVersion": 1,
+      "package": "hara:greenways/chats-profile",
+      "packageVersion": "0.1.0",
+      "entry": "greenways.chats/message-spec"
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "valid-collection",
+      "valueProtocol": "greenways.chat-collection/0-alpha",
+      "semanticId": "collection/chats",
+      "maxSummaries": 1000,
+      "valid": true
+    },
+    {
+      "id": "valid-chat",
+      "valueProtocol": "greenways.chat/0-alpha",
+      "semanticId": "chat/0000000000000000000000000000000a",
+      "messageCount": 2,
+      "valid": true
+    },
+    {
+      "id": "valid-message",
+      "valueProtocol": "greenways.chat-message/0-alpha",
+      "semanticId": "message/1000000000000000000000000000000a",
+      "role": "user",
+      "valid": true
+    },
+    {
+      "id": "unordered-collection",
+      "collectionOverride": {
+        "summaryOrder": "oldest-first"
+      },
+      "valid": false
+    },
+    {
+      "id": "duplicate-collection-chat",
+      "collectionOverride": {
+        "duplicateSummaryId": true
+      },
+      "valid": false
+    },
+    {
+      "id": "uppercase-chat-id",
+      "override": {
+        "id": "0000000000000000000000000000000A"
+      },
+      "valid": false
+    },
+    {
+      "id": "updated-before-created",
+      "override": {
+        "updated-at": "2026-08-13T23:59:59Z"
+      },
+      "valid": false
+    },
+    {
+      "id": "secret-field",
+      "extra": {
+        "credential": "forbidden"
+      },
+      "valid": false
+    },
+    {
+      "id": "recent-order",
+      "selector": "recent",
+      "limit": 2,
+      "orderedIds": [
+        "0000000000000000000000000000000b",
+        "0000000000000000000000000000000c"
+      ],
+      "nextCursor": 2
+    },
+    {
+      "id": "forward-message-page",
+      "selector": "messages",
+      "direction": "forward",
+      "limit": 2,
+      "orderedIds": [
+        "1000000000000000000000000000000a",
+        "1000000000000000000000000000000b"
+      ],
+      "nextCursor": 2
+    },
+    {
+      "id": "backward-message-page",
+      "selector": "messages",
+      "direction": "backward",
+      "limit": 2,
+      "orderedIds": [
+        "1000000000000000000000000000000c",
+        "1000000000000000000000000000000d"
+      ],
+      "nextCursor": 2
+    },
+    {
+      "id": "arbitrary-predicate",
+      "selector": "recent",
+      "extra": {
+        "predicate": "anything"
+      },
+      "valid": false
+    },
+    {
+      "id": "oversized-page",
+      "selector": "messages",
+      "limit": 101,
+      "valid": false
+    },
+    {
+      "id": "divergent-recent-read",
+      "semanticReadProtocol": "tahto.semantic-read-result/0-alpha",
+      "selectedId": "collection/chats",
+      "branchTitles": [
+        "Left title",
+        "Right title"
+      ],
+      "branchSelection": "preserve-all"
+    },
+    {
+      "id": "divergent-exact-chat-read",
+      "selectedId": "chat/0000000000000000000000000000000a",
+      "branchTitles": [
+        "Left title",
+        "Right title"
+      ],
+      "branchSelection": "preserve-all"
+    },
+    {
+      "id": "divergent-message-read",
+      "selectedId": "chat/0000000000000000000000000000000a",
+      "branchMessages": [
+        "left message",
+        "right message"
+      ],
+      "branchSelection": "preserve-all"
+    },
+    {
+      "id": "missing-chat-per-branch",
+      "selectedId": "chat/ffffffffffffffffffffffffffffffff",
+      "outcomes": [
+        "missing",
+        "missing"
+      ]
+    },
+    {
+      "id": "semantic-read-context-substitution",
+      "contextOverride": {
+        "replayed": true
+      },
+      "error": "greenways.chats/context-not-admitted"
+    },
+    {
+      "id": "canonical-value-substitution",
+      "valueSchema": "greenways.chat",
+      "selectedSchema": "greenways.chat-collection",
+      "error": "greenways.chats/collection-profile-invalid"
+    }
+  ]
+}
