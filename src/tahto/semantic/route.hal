@@ -68,7 +68,7 @@
   [state context]
   (truth-value
    (and
-    (validate/device-request-context? context)
+    (validate/request-context? context)
     (= "pending" (get context :status))
     (= false (get context :replayed))
     (nil? (get context :result-digest))
