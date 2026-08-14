@@ -119,7 +119,7 @@
       (semantic-prepare/prepare state context request)
 
       (= expected-operation submit-operation)
-      (semantic-submit/submit state context request)
+      (semantic-submit/submit-transition state context request)
 
       :else
       (model/fail state
