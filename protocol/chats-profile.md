@@ -7,7 +7,7 @@ query language.
 
 ## Coordinate and resources
 
-The profile is fixed to the Tahto coordinate:
+The profile is fixed to:
 
 ```text
 application  greenways.chats
@@ -16,7 +16,7 @@ collection   chats
 head         main / primary
 ```
 
-Greenways clients address the route-independent resources:
+Greenways clients use route-independent resources:
 
 ```text
 greenways:tahto/collection/chats
@@ -28,7 +28,7 @@ handle, or storage implementation.
 
 ## Exact installed specification
 
-Chat and Message semantic objects use exact schema references from:
+The reviewed package contract is:
 
 ```text
 package          hara:greenways/chats-profile
@@ -36,100 +36,103 @@ package version  0.1.0
 schema version   1
 ```
 
-The package root remains mandatory immutable evidence supplied by trusted
-installation. The two exported schema entries are:
+The exact package root remains mandatory trusted-installation evidence. Exported
+schema entries are:
 
 ```text
-greenways.chat          -> greenways.chats/chat-spec
-greenways.chat-message  -> greenways.chats/message-spec
+greenways.chat-collection -> greenways.chats/collection-spec
+greenways.chat            -> greenways.chats/chat-spec
+greenways.chat-message    -> greenways.chats/message-spec
 ```
 
 A schema reference does not install or fetch code.
 
 ## Application values
 
-A Chat is one closed `greenways.chat/0-alpha` value:
+A Chat is one closed `greenways.chat/0-alpha` value with a 32-lowercase-hex ID,
+1–512 character title, bounded opaque source reference, creation/update times,
+and a message count bounded at 100,000.
 
-```clojure
-{:protocol "greenways.chat/0-alpha"
- :id <32 lowercase hex>
- :title <1..512 characters>
- :source
- {:protocol "greenways.chat-source/0-alpha"
-  :provider <bounded identifier>
-  :source-id <1..1024 characters>}
- :created-at <UTC timestamp>
- :updated-at <UTC timestamp not before created-at>
- :message-count <0..100000>}
-```
-
-A Message is one closed `greenways.chat-message/0-alpha` value:
-
-```clojure
-{:protocol "greenways.chat-message/0-alpha"
- :id <32 lowercase hex>
- :role "system" | "user" | "assistant" | "tool"
- :content <0..262144 characters>
- :created-at <UTC timestamp>}
-```
+A Message is one closed `greenways.chat-message/0-alpha` value with a
+32-lowercase-hex ID, one of `system`, `user`, `assistant`, or `tool`, bounded
+content, and a creation time.
 
 Private prompts, credentials, browser cookies, routes, paths, native handles,
 and provider configuration are not profile fields. `source-id` is a bounded
-opaque external reference, not a reusable authorization value.
+opaque external reference, not reusable authorization.
 
-## Semantic identity and links
+## Semantic identity, materialized collection, and links
 
 Stable semantic IDs are:
 
 ```text
+collection/chats
 chat/<chat-id>
 message/<message-id>
 ```
 
-A Chat semantic envelope contains exactly `message-count` ordered typed links
-with role `greenways.chat/message`. A Message semantic envelope contains one
-parent link with role `greenways.message/chat`. Every link retains both the
-stable target ID and exact semantic-object root. The ordinary Tahto semantic
-index and root continue to prove link closure, stable-ID selection, schema set,
-and complete collection identity.
+`greenways.chat-collection/0-alpha` contains at most 1,000 bounded public Chat
+summaries ordered by descending `updated-at` and ascending Chat ID. Its semantic
+envelope contains one `greenways.chats/chat` link for every summary. The
+summary and link ID sets must agree exactly.
+
+A Chat envelope contains exactly `message-count` ordered
+`greenways.chat/message` links. A Message envelope contains one
+`greenways.message/chat` parent link. Every link retains a stable target ID and
+exact semantic-object root. Ordinary Tahto semantic index/root laws continue to
+prove link closure, stable-ID selection, schema set, and collection identity.
 
 ## Closed query algebra
 
-The profile exposes only three selectors through
-`greenways.chats-query/0-alpha`:
+`greenways.chats-query/0-alpha` exposes only:
 
 ```text
-recent    bounded cursor page of summaries, newest first
+recent    bounded cursor page from the materialized collection
 chat      exact Chat ID lookup
-messages  bounded forward/backward page, chronological within a page
+messages  bounded forward/backward page through the Chat's message links
 ```
 
 Limits are positive and at most 100. Cursors are non-negative offsets. Unknown
 selectors, fields, predicates, sort expressions, database clauses, and
-out-of-range cursors fail closed.
+out-of-range cursors fail closed. Message pages are chronological by
+`created-at` and Message ID.
 
-Recent ordering is deterministic by descending `updated-at` and ascending Chat
-ID. Message ordering is deterministic by ascending `created-at` and ascending
-Message ID. Query results contain application values and stable logical URIs
-only; they contain no Tahto provider or route state.
+## Exact semantic-read projection
+
+The profile issues only the existing `semantic.read` operation against
+`main/primary`:
+
+- `recent` selects `collection/chats`;
+- `chat` and `messages` select the exact `chat/<id>` stable ID.
+
+Each returned `tahto.semantic-read-result/0-alpha` must match the authenticated
+pending context's device, request digest, coordinate, and selected stable ID.
+The profile preserves every branch in head order. It never chooses, combines, or
+silently merges divergent valid heads.
+
+For each branch it verifies canonical application values through
+`hoplite.value`, checks exact value root/size agreement, validates the installed
+Chats schema, and then projects a bounded result. Message reads follow only the
+exact typed links in that branch's Chat projection. A Chat missing from one
+branch remains an explicit `missing` outcome for that branch.
+
+Reads never mutate Tahto state. Changed canonical values, schema references,
+link targets, roots, sizes, contexts, or semantic-read envelopes fail before a
+Chats result is returned.
 
 ## Fabric integration
 
-This profile is layered over, rather than duplicated beside, Tahto's existing
-boundaries:
-
 ```text
-verified canonical application value
+verified canonical value
   -> Chats schema predicate
-  -> tahto.semantic-object/index/root admission
-  -> tahto.semantic.prepare
+  -> semantic object/index/root admission
+  -> semantic prepare
   -> signed commit/head records
-  -> tahto.semantic.submit
-  -> hoplite.store compare-and-swap + receipt
-  -> tahto.semantic-change-feed invalidation
+  -> semantic submit
+  -> hoplite.store CAS + receipt
+  -> semantic-head invalidation
 ```
 
-The semantic-read adapter, profile mutation orchestration, persistent-provider
-fixture, deterministic 1,000-Chat corpus, and release benchmark are subsequent
-commits on issue #74. The model/query layer in this document is pure and has no
-host effects.
+Mutation orchestration, persistent-provider restart evidence, the deterministic
+1,000-Chat corpus, and release benchmark remain subsequent #74 slices. Local
+application/capability enforcement remains a Greenways OS responsibility.

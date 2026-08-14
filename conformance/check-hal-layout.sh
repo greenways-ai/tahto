@@ -16,6 +16,7 @@ test -f src/tahto/change_feed/facade.hal
 test -f src/tahto/profile/chats/model.hal
 test -f src/tahto/profile/chats/collection.hal
 test -f src/tahto/profile/chats/query.hal
+test -f src/tahto/profile/chats/read.hal
 test -f src/tahto/store/model.hal
 test -f src/tahto/store/host.hal
 test -f src/tahto/store/capability.hal
@@ -50,6 +51,7 @@ test -f test/tahto/change_feed/facade_test.hal
 test -f test/tahto/profile/chats/model_test.hal
 test -f test/tahto/profile/chats/collection_test.hal
 test -f test/tahto/profile/chats/query_test.hal
+test -f test/tahto/profile/chats/read_test.hal
 test -f test/tahto/store/vault_test.hal
 test -f test/tahto/store/graph_test.hal
 test -f test/tahto/store/history_test.hal

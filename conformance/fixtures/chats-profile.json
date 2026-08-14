@@ -37,48 +37,23 @@
   "fixtures": [
     {
       "id": "valid-collection",
-      "value": {
-        "protocol": "greenways.chat-collection/0-alpha",
-        "summaries": [
-          {
-            "protocol": "greenways.chat-summary/0-alpha",
-            "id": "0000000000000000000000000000000a",
-            "uri": "greenways:tahto/chat/0000000000000000000000000000000a",
-            "title": "First chat",
-            "provider": "openai.chatgpt",
-            "updated-at": "2026-08-14T00:02:00Z",
-            "message-count": 2
-          }
-        ]
-      },
+      "valueProtocol": "greenways.chat-collection/0-alpha",
+      "semanticId": "collection/chats",
+      "maxSummaries": 1000,
       "valid": true
     },
     {
       "id": "valid-chat",
-      "value": {
-        "protocol": "greenways.chat/0-alpha",
-        "id": "0000000000000000000000000000000a",
-        "title": "First chat",
-        "source": {
-          "protocol": "greenways.chat-source/0-alpha",
-          "provider": "openai.chatgpt",
-          "source-id": "conversation-0001"
-        },
-        "created-at": "2026-08-14T00:00:00Z",
-        "updated-at": "2026-08-14T00:02:00Z",
-        "message-count": 2
-      },
+      "valueProtocol": "greenways.chat/0-alpha",
+      "semanticId": "chat/0000000000000000000000000000000a",
+      "messageCount": 2,
       "valid": true
     },
     {
       "id": "valid-message",
-      "value": {
-        "protocol": "greenways.chat-message/0-alpha",
-        "id": "1000000000000000000000000000000a",
-        "role": "user",
-        "content": "Hello",
-        "created-at": "2026-08-14T00:01:00Z"
-      },
+      "valueProtocol": "greenways.chat-message/0-alpha",
+      "semanticId": "message/1000000000000000000000000000000a",
+      "role": "user",
       "valid": true
     },
     {
@@ -161,6 +136,55 @@
       "selector": "messages",
       "limit": 101,
       "valid": false
+    },
+    {
+      "id": "divergent-recent-read",
+      "semanticReadProtocol": "tahto.semantic-read-result/0-alpha",
+      "selectedId": "collection/chats",
+      "branchTitles": [
+        "Left title",
+        "Right title"
+      ],
+      "branchSelection": "preserve-all"
+    },
+    {
+      "id": "divergent-exact-chat-read",
+      "selectedId": "chat/0000000000000000000000000000000a",
+      "branchTitles": [
+        "Left title",
+        "Right title"
+      ],
+      "branchSelection": "preserve-all"
+    },
+    {
+      "id": "divergent-message-read",
+      "selectedId": "chat/0000000000000000000000000000000a",
+      "branchMessages": [
+        "left message",
+        "right message"
+      ],
+      "branchSelection": "preserve-all"
+    },
+    {
+      "id": "missing-chat-per-branch",
+      "selectedId": "chat/ffffffffffffffffffffffffffffffff",
+      "outcomes": [
+        "missing",
+        "missing"
+      ]
+    },
+    {
+      "id": "semantic-read-context-substitution",
+      "contextOverride": {
+        "replayed": true
+      },
+      "error": "greenways.chats/context-not-admitted"
+    },
+    {
+      "id": "canonical-value-substitution",
+      "valueSchema": "greenways.chat",
+      "selectedSchema": "greenways.chat-collection",
+      "error": "greenways.chats/collection-profile-invalid"
     }
   ]
 }

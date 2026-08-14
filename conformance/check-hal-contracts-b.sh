@@ -46,6 +46,12 @@ grep -F '(semantic/semantic-link-vector?' src/tahto/profile/chats/collection.hal
 grep -F '(ns tahto.profile.chats.query' src/tahto/profile/chats/query.hal
 grep -F '#{"recent" "chat" "messages"}' src/tahto/profile/chats/query.hal
 grep -F 'greenways.chats/cursor-out-of-range' src/tahto/profile/chats/query.hal
+grep -F '(ns tahto.profile.chats.read' src/tahto/profile/chats/read.hal
+grep -F '(semantic-read/read' src/tahto/profile/chats/read.hal
+grep -F '(canonical/read-with' src/tahto/profile/chats/read.hal
+grep -F '(chat-collection/projection?' src/tahto/profile/chats/read.hal
+grep -F 'greenways.chats/semantic-read-mismatch' src/tahto/profile/chats/read.hal
+grep -F ':branches branches' src/tahto/profile/chats/read.hal
 ! grep -R -E 'credential|private-path|source-handle|provider-path|route' src/tahto/profile/chats
 
 grep -F '(ns tahto.client-test' test/tahto/client_test.hal
@@ -53,6 +59,7 @@ grep -F '(ns tahto.change-feed.facade-test' test/tahto/change_feed/facade_test.h
 grep -F '(ns tahto.profile.chats.model-test' test/tahto/profile/chats/model_test.hal
 grep -F '(ns tahto.profile.chats.collection-test' test/tahto/profile/chats/collection_test.hal
 grep -F '(ns tahto.profile.chats.query-test' test/tahto/profile/chats/query_test.hal
+grep -F '(ns tahto.profile.chats.read-test' test/tahto/profile/chats/read_test.hal
 grep -F '(ns tahto.semantic.model-test' test/tahto/semantic/model_test.hal
 grep -F '(ns tahto.semantic.admission-test' test/tahto/semantic/admission_test.hal
 grep -F '(ns tahto.semantic.index-root-test' test/tahto/semantic/index_root_test.hal
