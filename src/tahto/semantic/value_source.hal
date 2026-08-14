@@ -1,0 +1,267 @@
+(ns tahto.semantic.value-source
+  (:require [std.foundation :refer :all]
+            [hoplite.response-source :as portable]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.read :as read]
+            [tahto.store.model :as model]
+            [tahto.store.response-source :as response-source]))
+
+(def protocol
+  "tahto.semantic-value-source/0-alpha")
+
+(def request-protocol
+  "tahto.semantic-value-source-request/0-alpha")
+
+(def request-fields
+  #{:protocol :read-result :commit-root :id :offset :length})
+
+(def result-fields
+  #{:protocol :device :request-digest
+    :application :namespace :collection
+    :commit-root :id :semantic-object-root
+    :value-root :value-size :offset :length :source})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn request?
+  [value]
+  (let [offset (get value :offset)
+        length (get value :length)]
+    (truth-value
+     (and
+      (validate/exact-record? value request-fields #{})
+      (= request-protocol (get value :protocol))
+      (read/result? (get value :read-result))
+      (model/canonical-digest? (get value :commit-root))
+      (model/identifier? (get value :id))
+      (portable/non-negative-safe-integer? offset)
+      (portable/positive-safe-integer? length)
+      (<= offset (- portable/safe-integer-max length))))))
+
+(defn admitted-context?
+  [state context]
+  (truth-value
+   (and
+    (validate/request-context? context)
+    (= read/operation (get context :operation))
+    (= "pending" (get context :status))
+    (= false (get context :replayed))
+    (nil? (get context :result-digest))
+    (model/device-enrolled? state (get context :device)))))
+
+(defn result-context-matches?
+  [context result]
+  (= [(get context :device)
+      (get context :request-digest)
+      (get context :application)
+      (get context :namespace)
+      (get context :collection)]
+     [(get result :device)
+      (get result :request-digest)
+      (get result :application)
+      (get result :namespace)
+      (get result :collection)]))
+
+(defn read-request
+  [result id]
+  (let [head (get result :head)]
+    {:kind (get head :kind)
+     :name (get head :name)
+     :max-commits (count (get result :branches))
+     :id id}))
+
+(defn current-read
+  [state context result id]
+  (read/read state context (read-request result id)))
+
+(defn matching-branches
+  [result commit-root]
+  (vec
+   (filter
+    (fn [branch]
+      (= commit-root (get branch :commit-root)))
+    (get result :branches))))
+
+(defn selected-branch
+  [result commit-root]
+  (let [matches (matching-branches result commit-root)]
+    (if (= 1 (count matches))
+      (first matches)
+      nil)))
+
+(defn source-result
+  [context request branch descriptor]
+  (let [selection (get branch :selection)]
+    {:protocol protocol
+     :device (get context :device)
+     :request-digest (get context :request-digest)
+     :application (get context :application)
+     :namespace (get context :namespace)
+     :collection (get context :collection)
+     :commit-root (get branch :commit-root)
+     :id (get request :id)
+     :semantic-object-root (get selection :root)
+     :value-root (get selection :value-root)
+     :value-size (get selection :value-size)
+     :offset (get request :offset)
+     :length (get request :length)
+     :source descriptor}))
+
+(defn result?
+  [value]
+  (let [source (get value :source)]
+    (truth-value
+     (and
+      (validate/exact-record? value result-fields #{})
+      (= protocol (get value :protocol))
+      (model/identifier? (get value :device))
+      (model/canonical-digest? (get value :request-digest))
+      (model/identifier? (get value :application))
+      (model/identifier? (get value :namespace))
+      (model/identifier? (get value :collection))
+      (model/canonical-digest? (get value :commit-root))
+      (model/identifier? (get value :id))
+      (model/canonical-digest? (get value :semantic-object-root))
+      (model/canonical-digest? (get value :value-root))
+      (model/positive-integer? (get value :value-size))
+      (portable/non-negative-safe-integer? (get value :offset))
+      (portable/positive-safe-integer? (get value :length))
+      (<= (+ (get value :offset) (get value :length))
+          (get value :value-size))
+      (portable/response-source? source)
+      (= (get value :offset) (get source :offset))
+      (= (get value :length) (get source :length))))))
+
+(defn accept-opened
+  [state context request branch opened]
+  (if
+   (not (get opened :ok))
+   opened
+   (let [descriptor (get opened :value)
+         value (source-result context request branch descriptor)]
+     (cond
+       (not (= state (get opened :state)))
+       (model/fail state
+                   "tahto.semantic/value-source-state-changed")
+
+       (not (result? value))
+       (model/fail state
+                   "tahto.semantic/value-source-result-invalid")
+
+       :else
+       (model/ok state value)))))
+
+(defn prepare-open
+  [state context request]
+  (let [read-result (get request :read-result)
+        id (get request :id)
+        commit-root (get request :commit-root)]
+    (cond
+      (not (admitted-context? state context))
+      (model/fail state
+                  "tahto.semantic/value-source-context-not-admitted")
+
+      (not (request? request))
+      (model/fail state
+                  "tahto.semantic/value-source-request-invalid")
+
+      (not (result-context-matches? context read-result))
+      (model/fail state
+                  "tahto.semantic/value-source-read-context-mismatch")
+
+      (not (= id (get read-result :requested-id)))
+      (model/fail state
+                  "tahto.semantic/value-source-id-mismatch")
+
+      :else
+      (let [current (current-read state context read-result id)]
+        (cond
+          (not (get current :ok))
+          (model/fail state
+                      "tahto.semantic/value-source-read-stale"
+                      {:cause (get-in current [:error :code])})
+
+          (not (= read-result (get current :value)))
+          (model/fail state
+                      "tahto.semantic/value-source-read-stale")
+
+          :else
+          (let [branch (selected-branch read-result commit-root)]
+            (cond
+              (nil? branch)
+              (model/fail state
+                          "tahto.semantic/value-source-branch-missing"
+                          {:commit-root commit-root})
+
+              (nil? (get branch :selection))
+              (model/fail state
+                          "tahto.semantic/value-source-selection-missing"
+                          {:commit-root commit-root
+                           :id id})
+
+              (not (= id (get-in branch [:selection :id])))
+              (model/fail state
+                          "tahto.semantic/value-source-selection-mismatch")
+
+              :else
+              (let [selection (get branch :selection)
+                    value-root (get selection :value-root)
+                    value-size (get selection :value-size)
+                    installed (model/stored-object state value-root)
+                    offset (get request :offset)
+                    length (get request :length)]
+                (cond
+                  (nil? installed)
+                  (model/fail state
+                              "tahto.semantic/value-source-value-missing"
+                              {:root value-root})
+
+                  (not (= value-size (get installed :size)))
+                  (model/fail state
+                              "tahto.semantic/value-source-size-mismatch"
+                              {:root value-root
+                               :declared value-size
+                               :installed (get installed :size)})
+
+                  :else
+                  (model/ok
+                   state
+                   {:branch branch
+                    :source-request
+                    {:application (get context :application)
+                     :namespace (get context :namespace)
+                     :digest value-root
+                     :start offset
+                     :end (+ offset length)}}))))))))))
+
+(defn open-with
+  [state context request invoke]
+  (let [prepared (prepare-open state context request)]
+    (if
+     (not (get prepared :ok))
+     prepared
+     (let [plan (get prepared :value)
+           branch (get plan :branch)
+           opened
+           (response-source/open-with
+            state
+            (get plan :source-request)
+            invoke)]
+       (accept-opened state context request branch opened)))))
+
+(defn ^:async open
+  [state context request]
+  (let [prepared (prepare-open state context request)]
+    (if
+     (not (get prepared :ok))
+     prepared
+     (let [plan (get prepared :value)
+           branch (get plan :branch)
+           opened
+           (co/await
+            (response-source/open
+             state
+             (get plan :source-request)))]
+       (accept-opened state context request branch opened)))))
