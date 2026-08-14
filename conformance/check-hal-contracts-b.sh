@@ -17,6 +17,16 @@ grep -F '(provider/prepare-compare-and-swap' src/tahto/semantic/submit.hal
 grep -F '(semantic-submit/submit-transition' src/tahto/semantic/route.hal
 grep -F '(ns tahto.semantic.value-source' src/tahto/semantic/value_source.hal
 grep -F '"tahto.semantic-value-source-request/0-alpha"' src/tahto/semantic/value_source.hal
+grep -F '(ns tahto.client' src/tahto/client.hal
+grep -F '[tahto.semantic.service :as semantic-service]' src/tahto/client.hal
+grep -F '[tahto.semantic.value-source :as value-source]' src/tahto/client.hal
+grep -F '(semantic-service/dispatch-verified' src/tahto/client.hal
+grep -F '"tahto.semantic/value-source"' src/tahto/client.hal
+! grep -F 'submit-payload-fields' src/tahto/client.hal
+! grep -F '[tahto.semantic.read :as semantic-read]' src/tahto/client.hal
+! grep -F '[tahto.semantic.prepare :as semantic-prepare]' src/tahto/client.hal
+! grep -F '[tahto.semantic.submit :as semantic-submit]' src/tahto/client.hal
+grep -F '(ns tahto.client-test' test/tahto/client_test.hal
 grep -F '(ns tahto.semantic.model-test' test/tahto/semantic/model_test.hal
 grep -F '(ns tahto.semantic.admission-test' test/tahto/semantic/admission_test.hal
 grep -F '(ns tahto.semantic.index-root-test' test/tahto/semantic/index_root_test.hal
