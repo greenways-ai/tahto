@@ -1,9 +1,9 @@
 (ns tahto.client
   (:require [std.foundation :refer :all]
+            [tahto.node.request-verification :as request-verification]
             [tahto.protocol.validate :as validate]
-            [tahto.semantic.prepare :as semantic-prepare]
-            [tahto.semantic.read :as semantic-read]
-            [tahto.semantic.submit :as semantic-submit]
+            [tahto.semantic.service :as semantic-service]
+            [tahto.semantic.value-source :as value-source]
             [tahto.store.model :as model]
             [tahto.store.provider :as provider]
             [tahto.sync.session :as sync]))
@@ -13,10 +13,20 @@
 (def result-protocol "tahto.client-result/0-alpha")
 (def head-result-protocol "tahto.head-read-result/0-alpha")
 
+(def semantic-read-operation "tahto.semantic/read")
+(def semantic-prepare-operation "tahto.semantic/prepare")
+(def semantic-submit-operation "tahto.semantic/submit")
+(def semantic-value-source-operation "tahto.semantic/value-source")
+(def head-read-operation "tahto.head/read")
+(def sync-plan-operation "tahto.sync/plan")
+(def sync-push-operation "tahto.sync/push")
+(def sync-pull-operation "tahto.sync/pull")
+(def sync-ack-operation "tahto.sync/ack")
+
 (def operations
-  ["tahto.semantic/read" "tahto.semantic/prepare" "tahto.semantic/submit"
-   "tahto.head/read" "tahto.sync/plan" "tahto.sync/push"
-   "tahto.sync/pull" "tahto.sync/ack"])
+  [semantic-read-operation semantic-prepare-operation semantic-submit-operation
+   semantic-value-source-operation head-read-operation sync-plan-operation
+   sync-push-operation sync-pull-operation sync-ack-operation])
 
 (def request-fields
   #{:protocol :operation :coordinate :payload
@@ -25,9 +35,11 @@
 (def coordinate-fields
   #{:application :namespace :collection})
 
-(def submit-payload-fields
-  #{:expected-revision :request-verification :request-authority
-    :input :result-verification})
+(def semantic-payload-fields
+  #{:service-request})
+
+(def value-source-payload-fields
+  #{:request})
 
 (def plan-payload-fields
   #{:direction :request})
@@ -42,21 +54,24 @@
 
 (defn coordinate?
   [value]
-  (and (validate/exact-record? value coordinate-fields #{})
-       (model/identifier? (get value :application))
-       (model/identifier? (get value :namespace))
-       (model/identifier? (get value :collection))))
+  (truth-value
+   (and
+    (validate/exact-record? value coordinate-fields #{})
+    (model/identifier? (get value :application))
+    (model/identifier? (get value :namespace))
+    (model/identifier? (get value :collection)))))
 
 (defn request?
   [value]
   (truth-value
-   (and (validate/exact-record? value request-fields #{})
-        (= request-protocol (get value :protocol))
-        (member? operations (get value :operation))
-        (coordinate? (get value :coordinate))
-        (map? (get value :payload))
-        (model/canonical-digest? (get value :package-revision))
-        (provider/provider-revision? (get value :provider-revision)))))
+   (and
+    (validate/exact-record? value request-fields #{})
+    (= request-protocol (get value :protocol))
+    (member? operations (get value :operation))
+    (coordinate? (get value :coordinate))
+    (map? (get value :payload))
+    (model/canonical-digest? (get value :package-revision))
+    (provider/provider-revision? (get value :provider-revision)))))
 
 (defn coordinate-vector
   [value]
@@ -70,29 +85,114 @@
    (get context :namespace)
    (get context :collection)])
 
+(defn semantic-operation?
+  [operation]
+  (member?
+   [semantic-read-operation semantic-prepare-operation semantic-submit-operation]
+   operation))
+
+(defn semantic-route-operation
+  [operation]
+  (cond
+    (= operation semantic-read-operation) "semantic/read"
+    (= operation semantic-prepare-operation) "semantic/prepare"
+    (= operation semantic-submit-operation) "semantic/submit"
+    :else nil))
+
 (defn kernel-operation
   [request]
   (let [operation (get request :operation)
         direction (get-in request [:payload :direction])]
     (cond
-      (= operation "tahto.semantic/read") "semantic.read"
-      (= operation "tahto.semantic/prepare") "semantic.prepare"
-      (= operation "tahto.semantic/submit") "semantic.submit"
-      (= operation "tahto.head/read") "head.read"
-      (= operation "tahto.sync/push") "sync.push"
-      (= operation "tahto.sync/pull") "sync.pull"
-      (= operation "tahto.sync/ack") "sync.ack"
-      (and (= operation "tahto.sync/plan") (= direction "push")) "sync.push"
-      (and (= operation "tahto.sync/plan") (= direction "pull")) "sync.pull"
+      (= operation semantic-read-operation) "semantic.read"
+      (= operation semantic-prepare-operation) "semantic.prepare"
+      (= operation semantic-submit-operation) "semantic.submit"
+      (= operation semantic-value-source-operation) "semantic.read"
+      (= operation head-read-operation) "head.read"
+      (= operation sync-push-operation) "sync.push"
+      (= operation sync-pull-operation) "sync.pull"
+      (= operation sync-ack-operation) "sync.ack"
+      (and (= operation sync-plan-operation) (= direction "push")) "sync.push"
+      (and (= operation sync-plan-operation) (= direction "pull")) "sync.pull"
       :else nil)))
+
+(defn base-context-compatible?
+  [context request]
+  (truth-value
+   (and
+    (validate/request-context? context)
+    (= "pending" (get context :status))
+    (= false (get context :replayed))
+    (nil? (get context :result-digest))
+    (= (kernel-operation request) (get context :operation))
+    (= (coordinate-vector (get request :coordinate))
+       (context-coordinate context)))))
+
+(defn semantic-payload?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value semantic-payload-fields #{})
+    (semantic-service/request? (get value :service-request)))))
+
+(defn value-source-payload?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value value-source-payload-fields #{})
+    (value-source/request? (get value :request)))))
+
+(defn service-request
+  [request]
+  (get-in request [:payload :service-request]))
+
+(defn service-verification
+  [request]
+  (request-verification/verification-value
+   (get (service-request request) :wire)))
+
+(defn semantic-context-compatible?
+  [context request]
+  (let [service-request-value (service-request request)
+        verification (service-verification request)
+        selected (get service-request-value :route)
+        authority (get service-request-value :authority)]
+    (truth-value
+     (and
+      (semantic-payload? (get request :payload))
+      (= (semantic-route-operation (get request :operation))
+         (get selected :operation))
+      (= (coordinate-vector (get request :coordinate))
+         [(get selected :application)
+          (get selected :namespace)
+          (get selected :collection)])
+      (= (get request :provider-revision)
+         (semantic-service/expected-revision service-request-value))
+      (= [(get context :device)
+          (get context :operation)
+          (get context :application)
+          (get context :namespace)
+          (get context :collection)
+          (get context :request-digest)
+          (get context :idempotency-key)
+          (get context :authority-root)]
+         [(get verification :device)
+          (get verification :operation)
+          (get verification :application)
+          (get verification :namespace)
+          (get verification :collection)
+          (get verification :request-digest)
+          (get verification :idempotency-key)
+          (get authority :decision-root)])))))
 
 (defn context-compatible?
   [context request]
-  (and (validate/request-context? context)
-       (= "pending" (get context :status))
-       (= (kernel-operation request) (get context :operation))
-       (= (coordinate-vector (get request :coordinate))
-          (context-coordinate context))))
+  (truth-value
+   (and
+    (base-context-compatible? context request)
+    (if (semantic-operation? (get request :operation))
+      (semantic-context-compatible? context request)
+      true))))
 
 (defn fail
   ([state code]
@@ -120,10 +220,11 @@
 
 (defn head-request?
   [value]
-  (and
-   (validate/exact-record? value #{:kind :name} #{})
-   (member? validate/head-kinds (get value :kind))
-   (model/identifier? (get value :name))))
+  (truth-value
+   (and
+    (validate/exact-record? value #{:kind :name} #{})
+    (member? validate/head-kinds (get value :kind))
+    (model/identifier? (get value :name)))))
 
 (defn head-read
   [state context payload]
@@ -166,57 +267,46 @@
          :commits (get head :commits)
          :updated-at (get head :updated-at)}}))))
 
-(defn submit-payload?
-  [value]
-  (and (validate/exact-record? value submit-payload-fields #{})
-       (provider/provider-revision? (get value :expected-revision))
-       (map? (get value :request-verification))
-       (map? (get value :request-authority))
-       (map? (get value :input))
-       (map? (get value :result-verification))))
-
 (defn plan-payload?
   [value]
-  (and (validate/exact-record? value plan-payload-fields #{})
-       (or (= "push" (get value :direction))
-           (= "pull" (get value :direction)))
-       (map? (get value :request))))
+  (truth-value
+   (and
+    (validate/exact-record? value plan-payload-fields #{})
+    (or (= "push" (get value :direction))
+        (= "pull" (get value :direction)))
+    (map? (get value :request)))))
 
-(defn invoke
-  [state context request]
+(defn invoke-with
+  [state context request open-source]
   (let [operation (get request :operation)
         payload (get request :payload)]
     (cond
-      (= operation "tahto.semantic/read")
-      (semantic-read/read state context payload)
+      (semantic-operation? operation)
+      (semantic-service/dispatch-verified
+       state
+       (service-request request)
+       (service-verification request))
 
-      (= operation "tahto.semantic/prepare")
-      (semantic-prepare/prepare state context payload)
+      (= operation semantic-value-source-operation)
+      (if (or (nil? open-source)
+              (not (value-source-payload? payload)))
+        (fail state "tahto.client/value-source-unavailable")
+        (value-source/open-with
+         state context (get payload :request) open-source))
 
-      (= operation "tahto.semantic/submit")
-      (if (submit-payload? payload)
-        (semantic-submit/execute
-         state
-         (get payload :expected-revision)
-         (get payload :request-verification)
-         (get payload :request-authority)
-         (get payload :input)
-         (get payload :result-verification))
-        (fail state "tahto.client/submit-payload-invalid"))
-
-      (= operation "tahto.head/read")
+      (= operation head-read-operation)
       (head-read state context payload)
 
-      (= operation "tahto.sync/push")
+      (= operation sync-push-operation)
       (sync/plan-push state context payload)
 
-      (= operation "tahto.sync/pull")
+      (= operation sync-pull-operation)
       (sync/plan-pull state context payload)
 
-      (= operation "tahto.sync/ack")
+      (= operation sync-ack-operation)
       (sync/acknowledge-pull state context payload)
 
-      (= operation "tahto.sync/plan")
+      (= operation sync-plan-operation)
       (if (not (plan-payload? payload))
         (fail state "tahto.client/plan-payload-invalid")
         (if (= "push" (get payload :direction))
@@ -226,8 +316,8 @@
       :else
       (fail state "tahto.client/operation-unsupported"))))
 
-(defn dispatch
-  [state context installed-package-revision request]
+(defn dispatch-with
+  [state context installed-package-revision request open-source]
   (cond
     (not (request? request))
     (fail state "tahto.client/request-invalid")
@@ -244,4 +334,8 @@
     (fail state "tahto.client/context-not-admitted")
 
     :else
-    (wrap request (invoke state context request))))
+    (wrap request (invoke-with state context request open-source))))
+
+(defn dispatch
+  [state context installed-package-revision request]
+  (dispatch-with state context installed-package-revision request nil))
