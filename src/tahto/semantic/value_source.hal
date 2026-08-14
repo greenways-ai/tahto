@@ -153,8 +153,8 @@
        :else
        (model/ok state value)))))
 
-(defn open-with
-  [state context request invoke]
+(defn prepare-open
+  [state context request]
   (let [read-result (get request :read-result)
         id (get request :id)
         commit-root (get request :commit-root)]
@@ -226,99 +226,42 @@
                                :installed (get installed :size)})
 
                   :else
-                  (accept-opened
+                  (model/ok
                    state
-                   context
-                   request
-                   branch
-                   (response-source/open-with
-                    state
+                   {:branch branch
+                    :source-request
                     {:application (get context :application)
                      :namespace (get context :namespace)
                      :digest value-root
                      :start offset
-                     :end (+ offset length)}
-                    invoke))))))))))))
+                     :end (+ offset length)}}))))))))))
+
+(defn open-with
+  [state context request invoke]
+  (let [prepared (prepare-open state context request)]
+    (if
+     (not (get prepared :ok))
+     prepared
+     (let [plan (get prepared :value)
+           branch (get plan :branch)
+           opened
+           (response-source/open-with
+            state
+            (get plan :source-request)
+            invoke)]
+       (accept-opened state context request branch opened)))))
 
 (defn ^:async open
   [state context request]
-  (let [read-result (get request :read-result)
-        id (get request :id)
-        commit-root (get request :commit-root)]
-    (cond
-      (not (admitted-context? state context))
-      (model/fail state
-                  "tahto.semantic/value-source-context-not-admitted")
-
-      (not (request? request))
-      (model/fail state
-                  "tahto.semantic/value-source-request-invalid")
-
-      (not (result-context-matches? context read-result))
-      (model/fail state
-                  "tahto.semantic/value-source-read-context-mismatch")
-
-      (not (= id (get read-result :requested-id)))
-      (model/fail state
-                  "tahto.semantic/value-source-id-mismatch")
-
-      :else
-      (let [current (current-read state context read-result id)]
-        (cond
-          (not (get current :ok))
-          (model/fail state
-                      "tahto.semantic/value-source-read-stale"
-                      {:cause (get-in current [:error :code])})
-
-          (not (= read-result (get current :value)))
-          (model/fail state
-                      "tahto.semantic/value-source-read-stale")
-
-          :else
-          (let [branch (selected-branch read-result commit-root)]
-            (cond
-              (nil? branch)
-              (model/fail state
-                          "tahto.semantic/value-source-branch-missing"
-                          {:commit-root commit-root})
-
-              (nil? (get branch :selection))
-              (model/fail state
-                          "tahto.semantic/value-source-selection-missing"
-                          {:commit-root commit-root
-                           :id id})
-
-              :else
-              (let [selection (get branch :selection)
-                    value-root (get selection :value-root)
-                    value-size (get selection :value-size)
-                    installed (model/stored-object state value-root)
-                    offset (get request :offset)
-                    length (get request :length)]
-                (cond
-                  (nil? installed)
-                  (model/fail state
-                              "tahto.semantic/value-source-value-missing"
-                              {:root value-root})
-
-                  (not (= value-size (get installed :size)))
-                  (model/fail state
-                              "tahto.semantic/value-source-size-mismatch"
-                              {:root value-root
-                               :declared value-size
-                               :installed (get installed :size)})
-
-                  :else
-                  (accept-opened
-                   state
-                   context
-                   request
-                   branch
-                   (co/await
-                    (response-source/open
-                     state
-                     {:application (get context :application)
-                      :namespace (get context :namespace)
-                      :digest value-root
-                      :start offset
-                      :end (+ offset length)}))))))))))))))
+  (let [prepared (prepare-open state context request)]
+    (if
+     (not (get prepared :ok))
+     prepared
+     (let [plan (get prepared :value)
+           branch (get plan :branch)
+           opened
+           (co/await
+            (response-source/open
+             state
+             (get plan :source-request)))]
+       (accept-opened state context request branch opened)))))
