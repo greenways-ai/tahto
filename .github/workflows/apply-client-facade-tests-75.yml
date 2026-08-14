@@ -1,0 +1,54 @@
+name: Apply client facade expectation repairs
+
+on:
+  push:
+    branches:
+      - agent/apply-client-facade-tests-75
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/tahto-client-facade-75
+          fetch-depth: 0
+      - name: Repair inherited portable response-source expectations
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('test/tahto/semantic/value_source_test.hal')
+          source = path.read_text()
+          old = '{:digest value-left :offset 8 :length 16}'
+          new = '''{:protocol "hoplite.blob-request/0-alpha"
+       :operation "object/open-source"
+       :digest value-left
+       :offset 8
+       :length 16}'''
+          if source.count(old) != 1:
+              raise SystemExit('expected one stale value-source request fixture')
+          path.write_text(source.replace(old, new, 1))
+
+          path = Path('test/tahto/store/response_source_test.hal')
+          source = path.read_text()
+          old = '[false "tahto.store/object-not-authorized" []]'
+          new = '[false "tahto.store/object-out-of-scope" []]'
+          if source.count(old) != 1:
+              raise SystemExit('expected one stale out-of-scope error fixture')
+          path.write_text(source.replace(old, new, 1))
+          PY
+
+          git diff --check
+          git config user.name "tahto-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add test/tahto/semantic/value_source_test.hal \
+                  test/tahto/store/response_source_test.hal
+          git commit -m "Align portable response-source expectations"
+          git push origin HEAD:agent/tahto-client-facade-75
