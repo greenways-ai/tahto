@@ -11,7 +11,7 @@
 (def summary-protocol "greenways.chat-summary/0-alpha")
 
 (def application "greenways.chats")
-(def namespace "local")
+(def namespace-id "local")
 (def collection "chats")
 (def head-kind "main")
 (def head-name "primary")
@@ -295,7 +295,7 @@
 (defn exact-coordinate?
   [value]
   (truth-value
-   (= [application namespace collection]
+   (= [application namespace-id collection]
       [(get value :application)
        (get value :namespace)
        (get value :collection)])))
