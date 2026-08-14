@@ -9,7 +9,7 @@
             [tahto.store.model :as model]))
 
 (def application "fixture.world")
-(def namespace "world.a")
+(def namespace-id "world.a")
 (def collection "scene")
 (def request-digest
   "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -32,7 +32,7 @@
   {:protocol route/route-protocol
    :operation operation
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection})
 
 (defn request-context
@@ -41,9 +41,10 @@
    :device "device.a"
    :operation operation
    :application application
-   :namespace namespace
+   :namespace namespace-id
    :collection collection
    :request-digest request-digest
+   :authority-root request-digest
    :idempotency-key "semantic-route-idempotency-0001"
    :status "pending"
    :replayed false
@@ -72,28 +73,54 @@
     nil])
 
   (test/check
-   "each wrapper delegates without rewriting the underlying result"
+   "each wrapper preserves the admitted kernel result exactly"
    (let [state (base-state)
          request {}
          read-context (request-context semantic-read/operation)
          prepare-context (request-context semantic-prepare/operation)
-         submit-context (request-context semantic-submit/operation)]
-     [(= (semantic-read/read state read-context request)
+         submit-context (request-context semantic-submit/operation)
+         direct-read (semantic-read/read state read-context request)
+         routed-read
          (route/read state
                      (selected-route route/read-operation)
                      read-context
-                     request))
-      (= (semantic-prepare/prepare state prepare-context request)
+                     request)
+         direct-prepare
+         (semantic-prepare/prepare state prepare-context request)
+         routed-prepare
          (route/prepare state
                         (selected-route route/prepare-operation)
                         prepare-context
-                        request))
-      (= (semantic-submit/submit-transition state submit-context request)
+                        request)
+         direct-submit
+         (semantic-submit/submit-transition state submit-context request)
+         routed-submit
          (route/submit state
                        (selected-route route/submit-operation)
                        submit-context
-                       request))])
-   [true true true])
+                       request)]
+     [(route/request-evidence? state read-context)
+      (route/request-evidence? state prepare-context)
+      (route/request-evidence? state submit-context)
+      (error-code direct-read)
+      (error-code routed-read)
+      (= direct-read routed-read)
+      (error-code direct-prepare)
+      (error-code routed-prepare)
+      (= direct-prepare routed-prepare)
+      (error-code direct-submit)
+      (error-code routed-submit)
+      (= direct-submit routed-submit)])
+   [true true true
+    "tahto.semantic/read-request-invalid"
+    "tahto.semantic/read-request-invalid"
+    true
+    "tahto.semantic/prepare-request-invalid"
+    "tahto.semantic/prepare-request-invalid"
+    true
+    "tahto.semantic/submit-input-invalid"
+    "tahto.semantic/submit-input-invalid"
+    true])
 
   (test/check
    "unknown slash and dotted route operations fail without changing state"
