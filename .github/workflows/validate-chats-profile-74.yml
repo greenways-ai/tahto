@@ -1,0 +1,74 @@
+name: Validate Chats profile 74
+
+on:
+  push:
+    branches:
+      - agent/validate-chats-profile-74
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      HARA_REVISION: 45eebddeca2a61e490337c90821b30b2328749e0
+      HOPLITE_REVISION: 12796b70166d03b1e17d5b00bfa2817d7ab3a672
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/chats-profile-74
+          fetch-depth: 0
+      - name: Validate static contracts
+        run: |
+          python3 conformance/check-bootstrap.py
+          python3 conformance/check-protocol.py
+          bash conformance/check-hal-layout.sh
+          bash conformance/check-hal-contracts-a.sh
+          bash conformance/check-hal-contracts-b.sh
+          bash conformance/check-hal-security.sh
+      - name: Verify reviewed dependency pins
+        run: |
+          test "$(tr -d '\n' < packaging/hara-revision)" = "$HARA_REVISION"
+          test "$(tr -d '\n' < packaging/hoplite-revision)" = "$HOPLITE_REVISION"
+      - name: Check out reviewed Hara
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara
+          ref: ${{ env.HARA_REVISION }}
+          path: .dependencies/technology/hara
+          persist-credentials: false
+      - name: Check out reviewed Hoplite
+        uses: actions/checkout@v4
+        with:
+          repository: greenways-ai/hoplite
+          ref: ${{ env.HOPLITE_REVISION }}
+          path: .dependencies/technology/hoplite
+          persist-credentials: false
+      - name: Install reviewed Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+      - name: Build Hara test runner
+        run: cargo build --locked --release --manifest-path .dependencies/technology/hara/core/rust/Cargo.toml --bin hara
+      - name: Stage portable Hoplite contracts
+        run: |
+          mkdir -p .conformance-src/hoplite
+          cp .dependencies/technology/hoplite/migration/value/src/hoplite/value.hal .conformance-src/hoplite/value.hal
+          cp .dependencies/technology/hoplite/core/lib/src/hoplite/response_source.hal .conformance-src/hoplite/response_source.hal
+      - name: Run complete Hara conformance
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('project.edn')
+          source = path.read_text()
+          updated = source.replace(
+              ':project/source-paths ["src"]',
+              ':project/source-paths ["src" ".conformance-src"]',
+          )
+          if updated == source:
+              raise SystemExit('project.edn source paths were not updated')
+          path.write_text(updated)
+          PY
+          .dependencies/technology/hara/core/rust/target/release/hara test
