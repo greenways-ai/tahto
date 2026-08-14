@@ -1,0 +1,310 @@
+(ns tahto.change-feed.facade-test
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.change-feed.facade :as feed]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
+
+(def application "app.example")
+(def namespace-id "profile.primary")
+(def collection "archive")
+(def coordinate
+  {:application application
+   :namespace namespace-id
+   :collection collection})
+
+(def commit-left
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def commit-right
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def head-left
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def head-right
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def plan-root
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def request-root
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def result-root
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def state-root
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+
+(def no-head
+  {:state "none" :commits [] :digests []})
+
+(defn head-record
+  [commits]
+  {:application application
+   :namespace namespace-id
+   :collection collection
+   :commits commits})
+
+(defn committed-state
+  [revision commits digest]
+  (let [state
+        (assoc
+         (model/empty-state)
+         :metadata-revision revision)
+        key
+        (model/head-key
+         application namespace-id collection
+         "main" "primary")]
+    (assoc
+     (assoc
+      state
+      :heads
+      (assoc
+       (get state :heads)
+       key
+       (head-record commits)))
+     :head-digests
+     (assoc
+      (get state :head-digests)
+      key
+      digest))))
+
+(def state-one
+  (committed-state 1 [commit-left] head-left))
+
+(def state-two
+  (committed-state
+   2 [commit-left commit-right] head-right))
+
+(defn receipt
+  [revision]
+  {:protocol provider/receipt-protocol
+   :status "applied"
+   :revision revision
+   :plan-digest plan-root
+   :request-digest request-root
+   :result-digest result-root
+   :state-digest state-root
+   :completed-at "2026-08-14T00:02:00Z"})
+
+(defn context
+  []
+  {:protocol validate/request-context-protocol
+   :device "device.a"
+   :operation "head.read"
+   :application application
+   :namespace namespace-id
+   :collection collection
+   :request-digest request-root
+   :authority-root request-root
+   :idempotency-key "change-feed-facade-0001"
+   :status "pending"
+   :replayed false
+   :result-digest nil})
+
+(def published-one
+  (feed/publish
+   (feed/initial-state)
+   state-one
+   (receipt 1)
+   coordinate
+   no-head))
+
+(def single-head
+  (get-in published-one
+          [:value :current-head]))
+
+(def published-two
+  (feed/publish
+   (get published-one :state)
+   state-two
+   (receipt 2)
+   coordinate
+   single-head))
+
+(test/print-results
+ [(test/check
+   "the exported facade restores retained events without live subscriptions"
+   (let [subscribed
+         (feed/subscribe
+          (get published-two :state)
+          (context)
+          {:subscription "subscription.restart"
+           :coordinate coordinate
+           :after-cursor 2
+           :max-queue 2})
+         checkpointed
+         (feed/checkpoint
+          (get subscribed :state)
+          state-two)
+         checkpoint-value
+         (get checkpointed :value)
+         restored
+         (feed/restore
+          (feed/initial-state)
+          state-two
+          checkpoint-value)
+         resumed
+         (feed/subscribe
+          (get restored :state)
+          (context)
+          {:subscription "subscription.resumed"
+           :coordinate coordinate
+           :after-cursor 1
+           :max-queue 2})]
+     [(get checkpointed :ok)
+      (feed/checkpoint? checkpoint-value)
+      (get restored :ok)
+      (get-in restored
+              [:state :feed/next-cursor])
+      (get-in restored
+              [:state :feed/latest-revision])
+      (get-in restored
+              [:state :feed/subscriptions])
+      (get-in resumed
+              [:value :queue 0 :cursor])])
+   [true true true 3 2 {} 2])
+
+  (test/check
+   "provider or semantic-head drift requires a fresh current-head query"
+   (let [checkpoint-value
+         (get
+          (feed/checkpoint
+           (get published-two :state)
+           state-two)
+          :value)
+         advanced-state
+         (assoc state-two
+                :metadata-revision 3)
+         changed-state
+         (committed-state
+          2 [commit-left commit-right] head-left)]
+     [(get-in
+       (feed/restore
+        (feed/initial-state)
+        advanced-state
+        checkpoint-value)
+       [:error :code])
+      (get-in
+       (feed/restore
+        (feed/initial-state)
+        changed-state
+        checkpoint-value)
+       [:error :code])])
+   ["tahto.change/resync-required"
+    "tahto.change/resync-required"])
+
+  (test/check
+   "checkpoint fields, sequence, limits and target state remain closed"
+   (let [checkpoint-value
+         (get
+          (feed/checkpoint
+           (get published-two :state)
+           state-two)
+          :value)
+         widened
+         (assoc checkpoint-value
+                :source-handle 19)
+         changed-cursor
+         (assoc
+          checkpoint-value
+          :events
+          [(assoc
+            (first
+             (get checkpoint-value :events))
+            :cursor 7)])
+         non-empty-target
+         (get published-one :state)
+         changed-limits
+         (feed/initial-state
+          {:max-history 2})]
+     [(feed/checkpoint? widened)
+      (feed/checkpoint? changed-cursor)
+      (get-in
+       (feed/restore
+        (feed/initial-state)
+        state-two
+        widened)
+       [:error :code])
+      (get-in
+       (feed/restore
+        non-empty-target
+        state-two
+        checkpoint-value)
+       [:error :code])
+      (get-in
+       (feed/restore
+        changed-limits
+        state-two
+        checkpoint-value)
+       [:error :code])])
+   [false
+    false
+    "tahto.change/checkpoint-invalid"
+    "tahto.change/restore-target-not-empty"
+    "tahto.change/checkpoint-limits-mismatch"])
+
+  (test/check
+   "replayed and completed contexts cannot own public subscriptions"
+   [(get-in
+     (feed/subscribe
+      (get published-one :state)
+      (assoc (context) :replayed true)
+      {:subscription "subscription.replayed"
+       :coordinate coordinate
+       :after-cursor 1
+       :max-queue 2})
+     [:error :code])
+    (get-in
+     (feed/subscribe
+      (get published-one :state)
+      (assoc
+       (context)
+       :result-digest result-root)
+      {:subscription "subscription.completed"
+       :coordinate coordinate
+       :after-cursor 1
+       :max-queue 2})
+     [:error :code])]
+   ["tahto.change/subscription-not-admitted"
+    "tahto.change/subscription-not-admitted"])
+
+  (test/check
+   "public polling and acknowledgement retain exact pending context"
+   (let [subscribed
+         (feed/subscribe
+          (get published-one :state)
+          (context)
+          {:subscription "subscription.live"
+           :coordinate coordinate
+           :after-cursor 1
+           :max-queue 2})
+         advanced
+         (feed/publish
+          (get subscribed :state)
+          state-two
+          (receipt 2)
+          coordinate
+          single-head)
+         replayed-context
+         (assoc (context) :replayed true)]
+     [(get-in
+       (feed/poll
+        (get advanced :state)
+        replayed-context
+        "subscription.live")
+       [:error :code])
+      (get-in
+       (feed/acknowledge
+        (get advanced :state)
+        (assoc
+         (context)
+         :result-digest result-root)
+        "subscription.live"
+        2)
+       [:error :code])
+      (get-in
+       (feed/poll
+        (get advanced :state)
+        (context)
+        "subscription.live")
+       [:value :events 0 :cursor])])
+   ["tahto.change/subscription-not-admitted"
+    "tahto.change/subscription-not-admitted"
+    2])])
