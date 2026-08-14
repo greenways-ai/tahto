@@ -14,6 +14,7 @@ grep -F '"tahto.semantic-prepare-result/0-alpha"' src/tahto/semantic/prepare.hal
 grep -F '"tahto.semantic-submit-result/0-alpha"' src/tahto/semantic/submit.hal
 grep -F '(transaction/execute' src/tahto/semantic/submit.hal
 grep -F '(provider/prepare-compare-and-swap' src/tahto/semantic/submit.hal
+grep -F '(semantic-submit/submit-transition' src/tahto/semantic/route.hal
 grep -F '(ns tahto.semantic.model-test' test/tahto/semantic/model_test.hal
 grep -F '(ns tahto.semantic.admission-test' test/tahto/semantic/admission_test.hal
 grep -F '(ns tahto.semantic.index-root-test' test/tahto/semantic/index_root_test.hal
