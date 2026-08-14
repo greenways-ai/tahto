@@ -1,0 +1,319 @@
+(ns tahto.change-feed.facade
+  (:require [std.foundation :refer :all]
+            [tahto.change-feed :as core]
+            [tahto.client :as client]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
+
+(def protocol core/protocol)
+(def event-protocol core/event-protocol)
+(def subscription-protocol core/subscription-protocol)
+(def poll-protocol core/poll-protocol)
+(def checkpoint-protocol "tahto.semantic-change-checkpoint/0-alpha")
+
+(def limit-fields
+  #{:max-subscriptions :max-queue :max-history :max-event-bytes})
+
+(def checkpoint-fields
+  #{:protocol :limits :next-cursor :latest-revision
+    :provider-revision :events})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn exact-fields?
+  [value fields]
+  (validate/exact-record? value fields #{}))
+
+(defn limits?
+  [value]
+  (truth-value
+   (and
+    (exact-fields? value limit-fields)
+    (model/positive-integer? (get value :max-subscriptions))
+    (model/positive-integer? (get value :max-queue))
+    (model/positive-integer? (get value :max-history))
+    (model/positive-integer? (get value :max-event-bytes)))))
+
+(defn initial-state
+  ([]
+   (core/initial-state))
+  ([limits]
+   (core/initial-state limits)))
+
+(defn event?
+  [value]
+  (core/event? value))
+
+(defn head?
+  [value]
+  (core/head? value))
+
+(defn publish
+  [feed committed-state receipt coordinate previous]
+  (core/publish feed committed-state receipt coordinate previous))
+
+(defn admitted-context?
+  [context coordinate]
+  (truth-value
+   (and
+    (validate/request-context? context)
+    (= "pending" (get context :status))
+    (= false (get context :replayed))
+    (nil? (get context :result-digest))
+    (= "head.read" (get context :operation))
+    (= (client/coordinate-vector coordinate)
+       (client/context-coordinate context)))))
+
+(defn subscribe
+  [feed context request]
+  (let [coordinate (get request :coordinate)]
+    (cond
+      (not (core/subscription-request? request feed))
+      (core/subscribe feed context request)
+
+      (not (admitted-context? context coordinate))
+      (core/feed-fail
+       feed
+       "tahto.change/subscription-not-admitted")
+
+      :else
+      (core/subscribe feed context request))))
+
+(defn subscription-item
+  [feed context subscription]
+  (get-in
+   feed
+   [:feed/subscriptions
+    (str (get context :device) ":" subscription)]))
+
+(defn poll
+  [feed context subscription]
+  (let [item (subscription-item feed context subscription)]
+    (if
+     (and
+      (not (nil? item))
+      (not (admitted-context?
+            context
+            (get item :coordinate))))
+     (core/feed-fail
+      feed
+      "tahto.change/subscription-not-admitted")
+     (core/poll feed context subscription))))
+
+(defn acknowledge
+  [feed context subscription cursor]
+  (let [item (subscription-item feed context subscription)]
+    (if
+     (and
+      (not (nil? item))
+      (not (admitted-context?
+            context
+            (get item :coordinate))))
+     (core/feed-fail
+      feed
+      "tahto.change/subscription-not-admitted")
+     (core/acknowledge
+      feed context subscription cursor))))
+
+(defn event-sequence-report
+  [events maximum-bytes]
+  (reduce
+   (fn [report event]
+     (let [previous (get report :previous)]
+       (if
+        (and
+         (get report :valid)
+         (event? event)
+         (<= (count (str event)) maximum-bytes)
+         (or
+          (nil? previous)
+          (and
+           (> (get event :cursor)
+              (get previous :cursor))
+           (>= (get event :metadata-revision)
+               (get previous :metadata-revision)))))
+        {:valid true :previous event}
+        {:valid false :previous previous})))
+   {:valid true :previous nil}
+   events))
+
+(defn checkpoint?
+  [value]
+  (let [limits (get value :limits)
+        events (get value :events)
+        maximum-history
+        (if (map? limits)
+          (get limits :max-history)
+          0)
+        maximum-bytes
+        (if (map? limits)
+          (get limits :max-event-bytes)
+          0)
+        report
+        (if
+         (vector? events)
+         (event-sequence-report events maximum-bytes)
+         {:valid false :previous nil})
+        latest-event (get report :previous)
+        next-cursor (get value :next-cursor)
+        latest-revision (get value :latest-revision)
+        provider-revision (get value :provider-revision)]
+    (truth-value
+     (and
+      (exact-fields? value checkpoint-fields)
+      (= checkpoint-protocol (get value :protocol))
+      (limits? limits)
+      (vector? events)
+      (<= (count events) maximum-history)
+      (get report :valid)
+      (model/positive-integer? next-cursor)
+      (provider/provider-revision? latest-revision)
+      (provider/provider-revision? provider-revision)
+      (<= latest-revision provider-revision)
+      (if
+       (nil? latest-event)
+       (and
+        (= 1 next-cursor)
+        (= 0 latest-revision))
+       (and
+        (= next-cursor
+           (inc (get latest-event :cursor)))
+        (= latest-revision
+           (get latest-event :metadata-revision))))))))
+
+(defn pristine-feed?
+  [feed]
+  (truth-value
+   (and
+    (limits? (get feed :feed/limits))
+    (= 1 (get feed :feed/next-cursor))
+    (= 0 (get feed :feed/latest-revision))
+    (= [] (get feed :feed/events))
+    (= {} (get feed :feed/subscriptions)))))
+
+(defn latest-events-by-coordinate
+  [events]
+  (reduce
+   (fn [latest event]
+     (assoc
+      latest
+      (client/coordinate-vector
+       (get event :coordinate))
+      event))
+   {}
+   events))
+
+(defn checkpoint-matches-state?
+  [checkpoint-value committed-state]
+  (reduce
+   (fn [valid entry]
+     (if
+      (not valid)
+      false
+      (let [event (val entry)]
+        (=
+         (get event :current-head)
+         (core/current-head
+          committed-state
+          (get event :coordinate))))))
+   true
+   (latest-events-by-coordinate
+    (get checkpoint-value :events))))
+
+(defn checkpoint
+  [feed committed-state]
+  (let [provider-revision
+        (provider/state-revision committed-state)
+        candidate
+        {:protocol checkpoint-protocol
+         :limits (get feed :feed/limits)
+         :next-cursor (get feed :feed/next-cursor)
+         :latest-revision
+         (get feed :feed/latest-revision)
+         :provider-revision provider-revision
+         :events (get feed :feed/events)}]
+    (cond
+      (not
+       (provider/provider-revision?
+        provider-revision))
+      (core/feed-fail
+       feed
+       "tahto.change/committed-state-invalid")
+
+      (< provider-revision
+         (get feed :feed/latest-revision))
+      (core/feed-fail
+       feed
+       "tahto.change/state-not-committed")
+
+      (not (checkpoint? candidate))
+      (core/feed-fail
+       feed
+       "tahto.change/checkpoint-invalid")
+
+      :else
+      (core/feed-ok feed candidate))))
+
+(defn restore
+  [feed committed-state checkpoint-value]
+  (let [current-revision
+        (provider/state-revision committed-state)]
+    (cond
+      (not (checkpoint? checkpoint-value))
+      (core/feed-fail
+       feed
+       "tahto.change/checkpoint-invalid")
+
+      (not (pristine-feed? feed))
+      (core/feed-fail
+       feed
+       "tahto.change/restore-target-not-empty")
+
+      (not
+       (=
+        (get feed :feed/limits)
+        (get checkpoint-value :limits)))
+      (core/feed-fail
+       feed
+       "tahto.change/checkpoint-limits-mismatch")
+
+      (not
+       (provider/provider-revision?
+        current-revision))
+      (core/feed-fail
+       feed
+       "tahto.change/committed-state-invalid")
+
+      (not
+       (=
+        current-revision
+        (get checkpoint-value
+             :provider-revision)))
+      (core/feed-fail
+       feed
+       "tahto.change/resync-required")
+
+      (not
+       (checkpoint-matches-state?
+        checkpoint-value committed-state))
+      (core/feed-fail
+       feed
+       "tahto.change/resync-required")
+
+      :else
+      (let [restored
+            (assoc
+             feed
+             :feed/next-cursor
+             (get checkpoint-value :next-cursor)
+             :feed/latest-revision
+             (get checkpoint-value :latest-revision)
+             :feed/events
+             (get checkpoint-value :events)
+             :feed/subscriptions
+             {})]
+        (core/feed-ok
+         restored checkpoint-value)))))

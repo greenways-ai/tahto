@@ -26,7 +26,14 @@ grep -F '"tahto.semantic/value-source"' src/tahto/client.hal
 ! grep -F '[tahto.semantic.read :as semantic-read]' src/tahto/client.hal
 ! grep -F '[tahto.semantic.prepare :as semantic-prepare]' src/tahto/client.hal
 ! grep -F '[tahto.semantic.submit :as semantic-submit]' src/tahto/client.hal
+grep -F '(ns tahto.change-feed.facade' src/tahto/change_feed/facade.hal
+grep -F '"tahto.semantic-change-checkpoint/0-alpha"' src/tahto/change_feed/facade.hal
+grep -F '(core/subscribe' src/tahto/change_feed/facade.hal
+grep -F '(core/current-head' src/tahto/change_feed/facade.hal
+grep -F '(provider/state-revision' src/tahto/change_feed/facade.hal
+grep -F ':tahto/change-feed {:export/namespace tahto.change-feed.facade}' project.edn
 grep -F '(ns tahto.client-test' test/tahto/client_test.hal
+grep -F '(ns tahto.change-feed.facade-test' test/tahto/change_feed/facade_test.hal
 grep -F '(ns tahto.semantic.model-test' test/tahto/semantic/model_test.hal
 grep -F '(ns tahto.semantic.admission-test' test/tahto/semantic/admission_test.hal
 grep -F '(ns tahto.semantic.index-root-test' test/tahto/semantic/index_root_test.hal
