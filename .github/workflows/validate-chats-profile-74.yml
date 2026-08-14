@@ -72,4 +72,14 @@ jobs:
               raise SystemExit('project.edn source paths were not updated')
           path.write_text(updated)
           PY
-          .dependencies/technology/hara/core/rust/target/release/hara test
+
+          set +e
+          .dependencies/technology/hara/core/rust/target/release/hara test > /tmp/chats-hara-test.log 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo '--- failing Hara test tail ---'
+            tail -n 220 /tmp/chats-hara-test.log
+            exit "$status"
+          fi
+          tail -n 40 /tmp/chats-hara-test.log
