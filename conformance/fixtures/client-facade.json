@@ -4,6 +4,7 @@
     "tahto.semantic/read",
     "tahto.semantic/prepare",
     "tahto.semantic/submit",
+    "tahto.semantic/value-source",
     "tahto.head/read",
     "tahto.sync/plan",
     "tahto.sync/push",
@@ -17,13 +18,77 @@
   },
   "packageRevision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "providerRevision": 7,
+  "semanticServiceRequestProtocol": "tahto.semantic-service-request/0-alpha",
+  "semanticValueSourceRequestProtocol": "tahto.semantic-value-source-request/0-alpha",
   "fixtures": [
-    {"id": "read-current", "operation": "tahto.semantic/read", "outcome": "ok"},
-    {"id": "read-divergent", "operation": "tahto.head/read", "commits": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "outcome": "ok"},
-    {"id": "wrong-operation", "contextOverride": {"operation": "head.read"}, "error": "tahto.client/context-not-authorized"},
-    {"id": "wrong-coordinate", "coordinateOverride": {"collection": "other"}, "error": "tahto.client/context-not-authorized"},
-    {"id": "wrong-package-revision", "packageRevision": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "error": "tahto.client/package-revision-mismatch"},
-    {"id": "wrong-provider-revision", "providerRevision": 8, "error": "tahto.client/provider-revision-mismatch"},
-    {"id": "unknown-provider-field", "extra": {"providerPath": "/forbidden"}, "error": "tahto.client/request-invalid"}
+    {
+      "id": "semantic-authorised-service",
+      "operation": "tahto.semantic/read",
+      "payloadFields": ["serviceRequest"],
+      "outcome": "ok"
+    },
+    {
+      "id": "head-read-divergent",
+      "operation": "tahto.head/read",
+      "commits": [
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      ],
+      "outcome": "ok"
+    },
+    {
+      "id": "value-source-without-reviewed-callback",
+      "operation": "tahto.semantic/value-source",
+      "error": "tahto.client/value-source-unavailable"
+    },
+    {
+      "id": "wrong-context-operation",
+      "contextOverride": {"operation": "head.read"},
+      "error": "tahto.client/context-not-admitted"
+    },
+    {
+      "id": "wrong-coordinate",
+      "coordinateOverride": {"collection": "other"},
+      "error": "tahto.client/context-not-admitted"
+    },
+    {
+      "id": "wrong-package-revision",
+      "packageRevision": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "error": "tahto.client/package-revision-mismatch"
+    },
+    {
+      "id": "wrong-provider-revision",
+      "providerRevision": 8,
+      "error": "tahto.client/provider-revision-mismatch"
+    },
+    {
+      "id": "route-wire-substitution",
+      "serviceRequestOverride": {"routeCollection": "other"},
+      "error": "tahto.client/context-not-admitted"
+    },
+    {
+      "id": "authority-root-substitution",
+      "serviceRequestOverride": {
+        "decisionRoot": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "error": "tahto.client/context-not-admitted"
+    },
+    {
+      "id": "retired-second-authority-payload",
+      "operation": "tahto.semantic/submit",
+      "payloadFields": [
+        "expectedRevision",
+        "requestVerification",
+        "requestAuthority",
+        "input",
+        "resultVerification"
+      ],
+      "error": "tahto.client/context-not-admitted"
+    },
+    {
+      "id": "unknown-provider-field",
+      "extra": {"providerPath": "/forbidden"},
+      "error": "tahto.client/request-invalid"
+    }
   ]
 }

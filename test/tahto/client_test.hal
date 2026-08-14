@@ -2,9 +2,11 @@
   (:require [std.foundation :refer :all]
             [std.lib.test :as test]
             [tahto.client :as client]
+            [tahto.node.request-verification :as request-verification]
             [tahto.protocol.validate :as validate]
-            [tahto.semantic.read :as semantic-read]
-            [tahto.store.model :as model]))
+            [tahto.semantic.service :as semantic-service]
+            [tahto.store.model :as model]
+            [tahto.store.transaction :as transaction]))
 
 (def app-id "app.example")
 (def namespace-id "profile.primary")
@@ -13,17 +15,83 @@
   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 (def request-root
   "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-(def head-root
+(def result-root
   "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
-(def commit-left
+(def head-root
   "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
-(def commit-right
+(def commit-left
   "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def commit-right
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+(def key-id
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
 
 (def coordinate
   {:application app-id
    :namespace namespace-id
    :collection collection-id})
+
+(def wire
+  {"protocol" request-verification/request-protocol
+   "device" "device.a"
+   "publicKey" "p256:device-a-public-key"
+   "algorithm" "p256-sha256"
+   "operation" "semantic.read"
+   "application" app-id
+   "namespace" namespace-id
+   "collection" collection-id
+   "timestamp" "2026-08-14T00:00:00Z"
+   "timestampSeconds" 1786665600
+   "nonce" "nonce-client-read-0001"
+   "idempotencyKey" "request-client-read-0001"
+   "payload"
+   {"expected-revision" 0
+    "request"
+    {"kind" "main"
+     "name" "missing"
+     "max-commits" 4}}
+   "requestDigest" request-root
+   "signature"
+   {"profile" request-verification/signature-protocol
+    "algorithm" "p256-sha256"
+    "keyId" key-id
+    "value" "aaaaaaaaaaaaaaaa"}})
+
+(def verification
+  (request-verification/verification-value wire))
+
+(def authority
+  {:protocol validate/request-authority-protocol
+   :allowed true
+   :device "device.a"
+   :operation "semantic.read"
+   :application app-id
+   :namespace namespace-id
+   :collection collection-id
+   :request-digest request-root
+   :decision-root request-root
+   :observed-at "2026-08-14T00:00:01Z"})
+
+(def result-verification
+  {:protocol transaction/result-verification-protocol
+   :verified true
+   :operation "semantic.read"
+   :request-digest request-root
+   :outcome "error"
+   :result-digest result-root
+   :completed-at "2026-08-14T00:00:02Z"})
+
+(def service-request
+  {:protocol semantic-service/request-protocol
+   :route
+   {:protocol "tahto.semantic-route/0-alpha"
+    :operation "semantic/read"
+    :application app-id
+    :namespace namespace-id
+    :collection collection-id}
+   :wire wire
+   :authority authority
+   :result-verification result-verification})
 
 (defn context
   [operation]
@@ -35,7 +103,7 @@
    :collection collection-id
    :request-digest request-root
    :authority-root request-root
-   :idempotency-key "request-00000001"
+   :idempotency-key "request-client-read-0001"
    :status "pending"
    :replayed false
    :result-digest nil})
@@ -53,15 +121,15 @@
   {:protocol model/device-protocol
    :id "device.a"
    :node "node.home"
-   :public-key "ed25519:device-a-public-key"
+   :public-key "p256:device-a-public-key"
    :status "enrolled"
    :enrolled-at "2026-08-14T00:00:00Z"})
 
 (defn signature
-  [key-id]
+  [key-id-value]
   {:profile "tahto-signature/0-alpha"
    :algorithm "ed25519"
-   :key-id key-id
+   :key-id key-id-value
    :value "abcdefghijklmnopqrstuvwxyz0123456789"})
 
 (def head
@@ -89,39 +157,54 @@
      (assoc (get base-state :head-digests) key head-root))))
 
 (def semantic-request
-  (request
-   "tahto.semantic/read"
-   {:kind "main" :name "missing" :max-commits 4}))
+  (request client/semantic-read-operation
+           {:service-request service-request}))
 
 (def head-request
-  (request "tahto.head/read" {:kind "main" :name "primary"}))
+  (request client/head-read-operation
+           {:kind "main" :name "primary"}))
+
+(defn error-code
+  [result]
+  (get-in result [:error :code]))
 
 (test/print-results
  [(test/check
-   "the facade publishes the closed embedding surface"
+   "the facade publishes one closed transport-neutral operation surface"
    [client/operations
     (client/request? semantic-request)
     (client/request? (assoc semantic-request :provider-path "/tmp/db"))]
-   [["tahto.semantic/read" "tahto.semantic/prepare"
-     "tahto.semantic/submit" "tahto.head/read" "tahto.sync/plan"
-     "tahto.sync/push" "tahto.sync/pull" "tahto.sync/ack"]
+   [["tahto.semantic/read"
+     "tahto.semantic/prepare"
+     "tahto.semantic/submit"
+     "tahto.semantic/value-source"
+     "tahto.head/read"
+     "tahto.sync/plan"
+     "tahto.sync/push"
+     "tahto.sync/pull"
+     "tahto.sync/ack"]
     true false])
 
   (test/check
-   "semantic reads delegate to the existing authorized kernel"
+   "semantic operations delegate through the exact authorised service request"
    (let [direct
-         (semantic-read/read
-          base-state (context "semantic.read")
-          (get semantic-request :payload))
+         (semantic-service/dispatch-verified
+          base-state service-request verification)
          facade
          (client/dispatch
-          base-state (context "semantic.read") package-root semantic-request)]
-     [(get-in direct [:error :code])
-      (get-in facade [:error :code])
-      (= base-state (get facade :state))])
+          base-state
+          (context "semantic.read")
+          package-root
+          semantic-request)]
+     [(error-code direct)
+      (error-code facade)
+      (= direct facade)
+      (get-in facade [:transaction :request-digest])
+      (get-in facade [:transaction :result-digest])
+      (get-in facade [:state :metadata-revision])])
    ["tahto.semantic/read-head-missing"
     "tahto.semantic/read-head-missing"
-    true])
+    true request-root result-root 1])
 
   (test/check
    "head reads retain every divergent current head"
@@ -137,7 +220,7 @@
   (test/check
    "sync plan delegates to the existing bounded pull planner"
    (let [plan-request
-         (request "tahto.sync/plan"
+         (request client/sync-plan-operation
                   {:direction "pull" :request {:known-digests []}})
          result
          (client/dispatch
@@ -149,26 +232,95 @@
    [true "pull" [] []])
 
   (test/check
+   "the value-source operation requires a reviewed host callback"
+   (let [request-value
+         (request
+          client/semantic-value-source-operation
+          {:request
+           {:protocol "tahto.semantic-value-source-request/0-alpha"
+            :read-result {}
+            :commit-root request-root
+            :id "entity/a"
+            :offset 0
+            :length 1}})
+         result
+         (client/dispatch
+          base-state
+          (context "semantic.read")
+          package-root
+          request-value)]
+     [(get result :ok) (error-code result)])
+   [false "tahto.client/value-source-unavailable"])
+
+  (test/check
    "package, provider, operation and coordinate substitutions fail closed"
-   [(get-in
+   [(error-code
      (client/dispatch
-      base-state (context "semantic.read") head-root semantic-request)
-     [:error :code])
-    (get-in
-     (client/dispatch
-      base-state (context "semantic.read") package-root
-      (assoc semantic-request :provider-revision 1))
-     [:error :code])
-    (get-in
-     (client/dispatch
-      base-state (context "head.read") package-root semantic-request)
-     [:error :code])
-    (get-in
+      base-state (context "semantic.read") head-root semantic-request))
+    (error-code
      (client/dispatch
       base-state (context "semantic.read") package-root
-      (assoc-in semantic-request [:coordinate :collection] "other"))
-     [:error :code])]
+      (assoc semantic-request :provider-revision 1)))
+    (error-code
+     (client/dispatch
+      base-state (context "head.read") package-root semantic-request))
+    (error-code
+     (client/dispatch
+      base-state (context "semantic.read") package-root
+      (assoc-in semantic-request [:coordinate :collection] "other")))]
    ["tahto.client/package-revision-mismatch"
     "tahto.client/provider-revision-mismatch"
     "tahto.client/context-not-admitted"
-    "tahto.client/context-not-admitted"])])
+    "tahto.client/context-not-admitted"])
+
+  (test/check
+   "signed route, revision, authority and context substitutions fail before dispatch"
+   (let [route-substitution
+         (assoc-in semantic-request
+                   [:payload :service-request :route :collection]
+                   "other")
+         revision-substitution
+         (assoc-in semantic-request
+                   [:payload :service-request :wire "payload" "expected-revision"]
+                   1)
+         authority-substitution
+         (assoc-in semantic-request
+                   [:payload :service-request :authority :decision-root]
+                   head-root)
+         device-substitution
+         (assoc (context "semantic.read") :device "device.other")]
+     [(error-code
+       (client/dispatch
+        base-state (context "semantic.read") package-root route-substitution))
+      (error-code
+       (client/dispatch
+        base-state (context "semantic.read") package-root revision-substitution))
+      (error-code
+       (client/dispatch
+        base-state (context "semantic.read") package-root authority-substitution))
+      (error-code
+       (client/dispatch
+        base-state device-substitution package-root semantic-request))])
+   ["tahto.client/context-not-admitted"
+    "tahto.client/context-not-admitted"
+    "tahto.client/context-not-admitted"
+    "tahto.client/context-not-admitted"])
+
+  (test/check
+   "the retired second-payload authority shape is not accepted"
+   (let [legacy
+         (request
+          client/semantic-submit-operation
+          {:expected-revision 0
+           :request-verification verification
+           :request-authority authority
+           :input {}
+           :result-verification result-verification})]
+     [(client/semantic-payload? (get legacy :payload))
+      (error-code
+       (client/dispatch
+        base-state
+        (context "semantic.submit")
+        package-root
+        legacy))])
+   [false "tahto.client/context-not-admitted"])])
