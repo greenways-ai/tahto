@@ -3,53 +3,36 @@
             [hoplite.response-source :as portable]
             [std.lib.test :as test]
             [tahto.protocol.validate :as validate]
-            [tahto.store.history :as history]
-            [tahto.store.memory-blob :as memory-blob]
+            [tahto.store.capability :as capability]
             [tahto.store.model :as model]
             [tahto.store.response-source :as response-source]
-            [tahto.store.upload :as upload]
-            [tahto.sync.device :as device]
-            [tahto.sync.session :as session]))
+            [tahto.sync.device :as device]))
 
 (def node "node.home")
-(def app "fixture.transfer")
-(def space "world.shared")
+(def application "fixture.transfer")
+(def namespace-id "world.shared")
 (def collection "objects")
 (def device-a "device.a")
 (def device-b "device.b")
 (def public-key-a "ed25519:device-a-public-key")
 (def public-key-b "ed25519:device-b-public-key")
-(def work-a "work.device-a")
-(def work-b "work.device-b")
 
 (def object-root
   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-(def reference-root
-  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-(def commit-root
-  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
-(def head-root
-  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
-(def receipt-root
-  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 (def approval-a
-  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 (def approval-b
-  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
-(def upload-request-root
-  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
-(def commit-request-root
-  "sha256:3333333333333333333333333333333333333333333333333333333333333333")
-(def head-request-root
-  "sha256:4444444444444444444444444444444444444444444444444444444444444444")
-(def pull-request-root
-  "sha256:5555555555555555555555555555555555555555555555555555555555555555")
-(def ack-request-root
-  "sha256:6666666666666666666666666666666666666666666666666666666666666666")
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def publish-request-root
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def publish-result-root
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 (def read-request-root
-  "sha256:7777777777777777777777777777777777777777777777777777777777777777")
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 (def read-result-root
-  "sha256:8888888888888888888888888888888888888888888888888888888888888888")
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def revoke-root
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
 
 (def object-size 9)
 
@@ -60,36 +43,6 @@
 (defn error-code
   [result]
   (get-in result [:error :code]))
-
-(defn signature
-  [key-id]
-  {:profile "tahto-signature/0-alpha"
-   :algorithm "ed25519"
-   :key-id key-id
-   :value "0123456789abcdef"})
-
-(def reference-fields
-  #{:protocol :root :digest :size :media-type :signature})
-
-(defn object-reference
-  []
-  {:protocol "fixture.object-reference/1"
-   :root reference-root
-   :digest object-root
-   :size object-size
-   :media-type "application/octet-stream"
-   :signature (signature "key.device-a")})
-
-(defn object-reference?
-  [value]
-  (and
-   (validate/exact-record? value reference-fields #{})
-   (= "fixture.object-reference/1" (get value :protocol))
-   (= reference-root (get value :root))
-   (model/canonical-digest? (get value :digest))
-   (model/positive-integer? (get value :size))
-   (model/media-type? (get value :media-type))
-   (validate/signature? (get value :signature))))
 
 (defn device-record
   [id public-key]
@@ -103,19 +56,10 @@
 (defn enrolment
   [record approval]
   {:protocol validate/device-enrolment-protocol
-   :authorized true
+   :approved true
    :node node
    :approval-digest approval
    :device record})
-
-(defn revocation
-  [id]
-  {:protocol validate/device-revocation-protocol
-   :authorized true
-   :node node
-   :device id
-   :revoked-at "2026-08-08T00:30:00Z"
-   :approval-digest approval-b})
 
 (defn enrolled-state
   []
@@ -136,25 +80,33 @@
    :device id
    :public-key public-key
    :operation operation
-   :application app
-   :namespace space
+   :application application
+   :namespace namespace-id
    :collection collection
    :request-digest request-root
    :nonce nonce
    :idempotency-key idempotency-key
    :timestamp timestamp})
 
-(defn authorize
+(defn authority
+  [proof]
+  {:protocol validate/request-authority-protocol
+   :allowed true
+   :device (get proof :device)
+   :operation (get proof :operation)
+   :application (get proof :application)
+   :namespace (get proof :namespace)
+   :collection (get proof :collection)
+   :request-digest (get proof :request-digest)
+   :decision-root (get proof :request-digest)
+   :observed-at (get proof :timestamp)})
+
+(defn admit
   [state id public-key operation request-root nonce idempotency-key timestamp]
-  (device/authorize-request
-   state
-   (request-proof id
-                  public-key
-                  operation
-                  request-root
-                  nonce
-                  idempotency-key
-                  timestamp)))
+  (let [proof
+        (request-proof id public-key operation request-root
+                       nonce idempotency-key timestamp)]
+    (device/admit-request state proof (authority proof))))
 
 (defn complete
   [state id idempotency-key request-root result-root timestamp]
@@ -166,424 +118,135 @@
     :result-digest result-root
     :completed-at timestamp}))
 
-(defn record-proof
-  [protocol digest record]
-  {:protocol validate/verification-protocol
-   :record-protocol protocol
-   :verified true
-   :canonical-digest digest
-   :key-id (get-in record [:signature :key-id])
-   :record record})
+(defn install-published-object
+  [state]
+  (assoc
+   (assoc state
+          :objects
+          (assoc (get state :objects)
+                 object-root
+                 (model/object-record object-root object-size)))
+   :references
+   (assoc (get state :references)
+          (model/namespace-key application namespace-id)
+          #{object-root})))
 
-(defn commit-record
-  []
-  {:protocol model/commit-protocol
-   :root commit-root
-   :application app
-   :namespace space
-   :collection collection
-   :schema "fixture.object-reference"
-   :schema-version 1
-   :device device-a
-   :parents []
-   :objects [reference-root]
-   :tombstones []
-   :sequence 1
-   :timestamp "2026-08-08T00:10:00Z"
-   :signature (signature "key.device-a")})
+(defn source-result
+  [handle]
+  {:protocol capability/result-protocol
+   :operation "object/open-source"
+   :source-handle handle
+   :digest object-root
+   :offset 0
+   :length object-size})
 
-(defn head-record
+(defn revocation
   []
-  {:protocol model/head-protocol
-   :application app
-   :namespace space
-   :collection collection
-   :kind "main"
-   :name "primary"
-   :commits [commit-root]
-   :expected []
-   :updated-at "2026-08-08T00:11:00Z"
-   :signature (signature "key.device-a")})
-
-(defn receipt-record
-  []
-  {:protocol model/receipt-protocol
-   :id receipt-root
+  {:protocol validate/device-revocation-protocol
+   :approved true
    :node node
-   :action "head.update"
-   :subject (model/head-key app space collection "main" "primary")
-   :timestamp "2026-08-08T00:12:00Z"
-   :signature (signature "key.node-home")})
-
-(defn blob-executor
-  [memory work-id]
-  (fn [service operation request]
-    (memory-blob/invoke memory work-id service operation request)))
-
-(defn install-object
-  [state memory upload-id digest size source-handle work-id]
-  (let [registered
-        (memory-blob/register-source!
-         memory
-         source-handle
-         {:work-id work-id
-          :offset 0
-          :length size
-          :object-digest digest
-          :object-size size})
-        invoke (blob-executor memory work-id)
-        begun
-        (upload/begin-with
-         state
-         {:upload-id upload-id
-          :application app
-          :namespace space
-          :digest digest
-          :size size
-          :media-type "application/octet-stream"}
-         invoke)
-        appended
-        (upload/append-with
-         (result-state begun)
-         {:upload-id upload-id
-          :offset 0
-          :length size
-          :body-handle source-handle}
-         invoke)
-        installed
-        (upload/install-with
-         (result-state appended)
-         {:upload-id upload-id}
-         invoke)]
-    {:registered registered
-     :begun begun
-     :appended appended
-     :installed installed
-     :state (result-state installed)}))
-
-(defn run-fixture
-  []
-  (let [memory (memory-blob/create)
-        initial (enrolled-state)
-        upload-authorized
-        (authorize initial
-                   device-a
-                   public-key-a
-                   "object.upload"
-                   upload-request-root
-                   "nonce-upload-a-0001"
-                   "request-upload-a-0001"
-                   "2026-08-08T00:01:00Z")
-        payload
-        (install-object
-         (result-state upload-authorized)
-         memory
-         "upload.payload"
-         object-root
-         object-size
-         17
-         work-a)
-        reference
-        (install-object
-         (get payload :state)
-         memory
-         "upload.reference"
-         reference-root
-         128
-         18
-         work-a)
-        commit-object
-        (install-object
-         (get reference :state)
-         memory
-         "upload.commit"
-         commit-root
-         512
-         19
-         work-a)
-        upload-completed
-        (complete (get commit-object :state)
-                  device-a
-                  "request-upload-a-0001"
-                  upload-request-root
-                  reference-root
-                  "2026-08-08T00:05:00Z")
-        state-with-reference-edge
-        (assoc
-         (result-state upload-completed)
-         :edges
-         (assoc (get (result-state upload-completed) :edges)
-                reference-root
-                [object-root]))
-        commit-authorized
-        (authorize state-with-reference-edge
-                   device-a
-                   public-key-a
-                   "commit.accept"
-                   commit-request-root
-                   "nonce-commit-a-0001"
-                   "request-commit-a-0001"
-                   "2026-08-08T00:09:00Z")
-        commit-value (commit-record)
-        commit-accepted
-        (history/accept-commit
-         (result-state commit-authorized)
-         {:application app :namespace space}
-         (record-proof model/commit-protocol commit-root commit-value))
-        commit-completed
-        (complete (result-state commit-accepted)
-                  device-a
-                  "request-commit-a-0001"
-                  commit-request-root
-                  commit-root
-                  "2026-08-08T00:10:30Z")
-        head-authorized
-        (authorize (result-state commit-completed)
-                   device-a
-                   public-key-a
-                   "head.update"
-                   head-request-root
-                   "nonce-head-a-0001"
-                   "request-head-a-0001"
-                   "2026-08-08T00:10:45Z")
-        head-value (head-record)
-        head-updated
-        (history/update-head
-         (result-state head-authorized)
-         (record-proof model/head-protocol head-root head-value))
-        head-completed
-        (complete (result-state head-updated)
-                  device-a
-                  "request-head-a-0001"
-                  head-request-root
-                  head-root
-                  "2026-08-08T00:11:30Z")
-        receipt-value (receipt-record)
-        receipt-accepted
-        (history/accept-receipt
-         (result-state head-completed)
-         (record-proof model/receipt-protocol receipt-root receipt-value))
-        pull-authorized
-        (authorize (result-state receipt-accepted)
-                   device-b
-                   public-key-b
-                   "sync.pull"
-                   pull-request-root
-                   "nonce-pull-b-0001"
-                   "request-pull-b-0001"
-                   "2026-08-08T00:20:00Z")
-        pull
-        (session/plan-pull
-         (result-state pull-authorized)
-         (get pull-authorized :value)
-         {:known-digests []})
-        ack-authorized
-        (authorize (result-state pull)
-                   device-b
-                   public-key-b
-                   "sync.ack"
-                   ack-request-root
-                   "nonce-ack-b-0001"
-                   "request-ack-b-0001"
-                   "2026-08-08T00:21:00Z")
-        ack
-        (session/acknowledge-pull
-         (result-state ack-authorized)
-         (get ack-authorized :value)
-         {:cursor (get-in pull [:value :cursor])
-          :offer-request-digest pull-request-root
-          :received-digests (get-in pull [:value :missing])})
-        read-authorized
-        (authorize (result-state ack)
-                   device-b
-                   public-key-b
-                   "object.read"
-                   read-request-root
-                   "nonce-read-b-0001"
-                   "request-read-b-0001"
-                   "2026-08-08T00:22:00Z")
-        opened
-        (response-source/open-with
-         (result-state read-authorized)
-         {:application app
-          :namespace space
-          :digest object-root
-          :start 0
-          :end object-size}
-         (blob-executor memory work-b))
-        descriptor (get opened :value)
-        source-handle (portable/source-handle descriptor)
-        output-entry-before
-        (memory-blob/output-source-entry memory source-handle)
-        wrong-owner-close
-        (memory-blob/close-opened-source! memory work-a source-handle)
-        exact-owner-close
-        (memory-blob/close-opened-source! memory work-b source-handle)
-        output-entry-after
-        (memory-blob/output-source-entry memory source-handle)
-        read-completed
-        (complete (result-state opened)
-                  device-b
-                  "request-read-b-0001"
-                  read-request-root
-                  read-result-root
-                  "2026-08-08T00:23:00Z")
-        revoked
-        (device/revoke-device
-         (result-state read-completed)
-         (revocation device-b))
-        denied-after-revocation
-        (authorize (result-state revoked)
-                   device-b
-                   public-key-b
-                   "object.read"
-                   read-request-root
-                   "nonce-read-b-0002"
-                   "request-read-b-0002"
-                   "2026-08-08T00:31:00Z")]
-    {:memory memory
-     :reference-value (object-reference)
-     :payload payload
-     :reference reference
-     :commit-object commit-object
-     :upload-authorized upload-authorized
-     :upload-completed upload-completed
-     :commit-authorized commit-authorized
-     :commit-accepted commit-accepted
-     :commit-completed commit-completed
-     :head-authorized head-authorized
-     :head-updated head-updated
-     :head-completed head-completed
-     :receipt-accepted receipt-accepted
-     :pull pull
-     :ack ack
-     :read-authorized read-authorized
-     :opened opened
-     :descriptor descriptor
-     :source-handle source-handle
-     :output-entry-before output-entry-before
-     :wrong-owner-close wrong-owner-close
-     :exact-owner-close exact-owner-close
-     :output-entry-after output-entry-after
-     :read-completed read-completed
-     :revoked revoked
-     :denied-after-revocation denied-after-revocation
-     :state (result-state revoked)}))
+   :device device-b
+   :revoked-at "2026-08-08T00:30:00Z"
+   :approval-digest revoke-root})
 
 (test/print-results
  [(test/check
-   "device A publishes one signed portable reference through ordinary Tahto history"
-   (let [fixture (run-fixture)
-         state (get fixture :state)
-         stored-commit (model/commit-record state commit-root)
-         stored-head
-         (model/head-record state app space collection "main" "primary")
-         stored-receipt (model/receipt-record state receipt-root)]
-     [(get-in fixture [:upload-authorized :ok])
-      (get-in fixture [:payload :installed :ok])
-      (get-in fixture [:reference :installed :ok])
-      (get-in fixture [:commit-object :installed :ok])
-      (get-in fixture [:upload-completed :ok])
-      (object-reference? (get fixture :reference-value))
-      (get-in fixture [:commit-accepted :ok])
-      (get-in fixture [:head-updated :ok])
-      (get-in fixture [:receipt-accepted :ok])
-      (validate/commit? stored-commit)
-      (validate/head? stored-head)
-      (validate/receipt? stored-receipt)
-      (get stored-commit :objects)
-      (get stored-head :commits)
-      (get stored-receipt :subject)
-      (model/upload state "upload.payload")
-      (has? (get fixture :reference-value) :source-handle)
-      (has? stored-commit :source-handle)
-      (has? stored-head :source-handle)
-      (has? stored-receipt :source-handle)])
-   [true
-    true
-    true
-    true
-    true
-    true
-    true
-    true
-    true
-    true
-    true
-    true
-    [reference-root]
-    [commit-root]
-    (model/head-key app space collection "main" "primary")
-    nil
-    false false false false])
-
-  (test/check
-   "device B receives the exact closure and opens the same digest in its own work scope"
-   (let [fixture (run-fixture)
-         pull (get fixture :pull)
-         ack (get fixture :ack)
-         descriptor (get fixture :descriptor)
-         state (get fixture :state)]
-     [(get pull :ok)
-      (get-in pull [:value :heads])
-      (get-in pull [:value :missing])
-      (get-in pull [:value :complete])
-      (get ack :ok)
-      (get-in ack [:value :received])
-      (get-in ack [:value :cursor])
-      (get-in fixture [:read-authorized :ok])
-      (get-in fixture [:opened :ok])
+   "two devices publish and read one immutable object under supplied authority"
+   (let [initial (enrolled-state)
+         publish
+         (admit initial
+                device-a public-key-a "object.upload"
+                publish-request-root
+                "nonce-publish-a-0001"
+                "request-publish-a-0001"
+                "2026-08-08T00:01:00Z")
+         installed
+         (install-published-object (result-state publish))
+         published
+         (complete installed
+                   device-a
+                   "request-publish-a-0001"
+                   publish-request-root
+                   publish-result-root
+                   "2026-08-08T00:02:00Z")
+         read
+         (admit (result-state published)
+                device-b public-key-b "object.read"
+                read-request-root
+                "nonce-read-b-0001"
+                "request-read-b-0001"
+                "2026-08-08T00:03:00Z")
+         opened
+         (response-source/open-with
+          (result-state read)
+          {:application application
+           :namespace namespace-id
+           :digest object-root
+           :start 0
+           :end object-size}
+          (fn [service operation request]
+            (if (and (= capability/host-service service)
+                     (= "object/open-source" operation)
+                     (= object-root (get request :digest))
+                     (= 0 (get request :offset))
+                     (= object-size (get request :length)))
+              (source-result 41)
+              nil)))
+         descriptor (get opened :value)
+         completed
+         (complete (result-state opened)
+                   device-b
+                   "request-read-b-0001"
+                   read-request-root
+                   read-result-root
+                   "2026-08-08T00:04:00Z")]
+     [(get publish :ok)
+      (get published :ok)
+      (get read :ok)
+      (get opened :ok)
+      (= (result-state read) (result-state opened))
       (portable/response-source? descriptor)
-      (portable/source-offset descriptor)
-      (portable/source-length descriptor)
-      (get (get fixture :output-entry-before) :work-id)
-      (get (get fixture :output-entry-before) :digest)
-      (get (get fixture :output-entry-before) :closed)
-      (model/sync-cursor state device-b app space collection)])
-   [true
-    [commit-root]
-    [object-root reference-root commit-root]
-    true
-    true
-    [object-root reference-root commit-root]
-    1
-    true
-    true
-    true
-    0
-    object-size
-    work-b
-    object-root
-    false
-    1])
+      (get descriptor :service)
+      (get descriptor :source-handle)
+      (get descriptor :offset)
+      (get descriptor :length)
+      (get completed :ok)
+      (get-in completed [:value :status])])
+   [true true true true true true
+    "hoplite.blob" 41 0 object-size true "completed"])
 
   (test/check
-   "source authority cannot cross devices and revocation blocks future reads"
-   (let [fixture (run-fixture)
-         state (get fixture :state)
-         denied (get fixture :denied-after-revocation)]
-     [(get fixture :wrong-owner-close)
-      (get fixture :exact-owner-close)
-      (get (get fixture :output-entry-after) :closed)
-      (get-in fixture [:read-completed :ok])
-      (get-in fixture [:read-completed :value :status])
-      (get-in fixture [:revoked :ok])
-      (get (model/device-record state device-b) :status)
+   "revocation denies the next request before any object source can open"
+   (let [initial (install-published-object (enrolled-state))
+         revoked (device/revoke-device initial (revocation))
+         denied
+         (admit (result-state revoked)
+                device-b public-key-b "object.read"
+                read-request-root
+                "nonce-read-b-0002"
+                "request-read-b-0002"
+                "2026-08-08T00:31:00Z")]
+     [(get revoked :ok)
       (get denied :ok)
       (error-code denied)
-      (validate/commit? (model/commit-record state commit-root))
-      (validate/head?
-       (model/head-record state app space collection "main" "primary"))
-      (validate/receipt? (model/receipt-record state receipt-root))])
-   [false
-    true
-    true
-    true
-    "completed"
-    true
-    "revoked"
-    false
-    "tahto.device/device-revoked"
-    true
-    true
-    true])])
+      (= (result-state revoked) (result-state denied))])
+   [true false "tahto.device/device-revoked" true])
+
+  (test/check
+   "authority and request evidence remain independently substitutable only by exact match"
+   (let [state (enrolled-state)
+         proof
+         (request-proof device-b public-key-b "object.read"
+                        read-request-root
+                        "nonce-read-b-0003"
+                        "request-read-b-0003"
+                        "2026-08-08T00:10:00Z")
+         denied
+         (device/admit-request
+          state
+          proof
+          (assoc (authority proof) :collection "other"))]
+     [(get denied :ok)
+      (error-code denied)
+      (= state (get denied :state))])
+   [false "tahto.device/request-authority-mismatch" true])])
