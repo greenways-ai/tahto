@@ -1,0 +1,446 @@
+(ns tahto.profile.chats.query
+  (:require [std.foundation :refer :all]
+            [tahto.profile.chats.model :as chats]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]))
+
+(def request-protocol "greenways.chats-query/0-alpha")
+(def recent-result-protocol "greenways.chat-summaries/0-alpha")
+(def chat-result-protocol "greenways.chat-detail/0-alpha")
+(def message-page-protocol "greenways.chat-message-page/0-alpha")
+
+(def selectors
+  #{"recent" "chat" "messages"})
+
+(def directions
+  #{"forward" "backward"})
+
+(def recent-request-fields
+  #{:protocol :selector :limit})
+
+(def recent-request-optional-fields
+  #{:cursor})
+
+(def chat-request-fields
+  #{:protocol :selector :chat-id})
+
+(def message-request-fields
+  #{:protocol :selector :chat-id :direction :limit})
+
+(def message-request-optional-fields
+  #{:cursor})
+
+(def recent-result-fields
+  #{:protocol :resource :cursor :next-cursor :items :total})
+
+(def chat-result-fields
+  #{:protocol :resource :chat})
+
+(def page-result-fields
+  #{:protocol :resource :chat-id :direction
+    :cursor :next-cursor :items :total})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn bounded-limit?
+  [value]
+  (truth-value
+   (and
+    (model/positive-integer? value)
+    (<= value chats/max-page-size))))
+
+(defn optional-cursor?
+  [value]
+  (truth-value
+   (or
+    (nil? value)
+    (model/non-negative-integer? value))))
+
+(defn recent-request?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record?
+     value
+     recent-request-fields
+     recent-request-optional-fields)
+    (= request-protocol (get value :protocol))
+    (= "recent" (get value :selector))
+    (bounded-limit? (get value :limit))
+    (optional-cursor? (get value :cursor)))))
+
+(defn chat-request?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record?
+     value chat-request-fields #{})
+    (= request-protocol (get value :protocol))
+    (= "chat" (get value :selector))
+    (chats/chat-id? (get value :chat-id)))))
+
+(defn message-request?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record?
+     value
+     message-request-fields
+     message-request-optional-fields)
+    (= request-protocol (get value :protocol))
+    (= "messages" (get value :selector))
+    (chats/chat-id? (get value :chat-id))
+    (has? directions (get value :direction))
+    (bounded-limit? (get value :limit))
+    (optional-cursor? (get value :cursor)))))
+
+(defn request?
+  [value]
+  (truth-value
+   (or
+    (recent-request? value)
+    (chat-request? value)
+    (message-request? value))))
+
+(defn append-from
+  [output values index]
+  (loop [position index
+         result output]
+    (if
+     (= position (count values))
+     result
+     (recur
+      (inc position)
+      (conj result (nth values position))))))
+
+(defn insert-ordered
+  [values value before?]
+  (loop [position 0
+         output []]
+    (if
+     (= position (count values))
+     (conj output value)
+     (let [current (nth values position)]
+       (if
+        (before? value current)
+        (append-from
+         (conj output value)
+         values
+         position)
+        (recur
+         (inc position)
+         (conj output current)))))))
+
+(defn chat-before?
+  [left right]
+  (let [updated
+        (compare
+         (get left :updated-at)
+         (get right :updated-at))]
+    (truth-value
+     (or
+      (> updated 0)
+      (and
+       (= updated 0)
+       (< (compare
+           (get left :id)
+           (get right :id))
+          0))))))
+
+(defn message-before?
+  [left right]
+  (let [created
+        (compare
+         (get left :created-at)
+         (get right :created-at))]
+    (truth-value
+     (or
+      (< created 0)
+      (and
+       (= created 0)
+       (< (compare
+           (get left :id)
+           (get right :id))
+          0))))))
+
+(defn ordered-chats
+  [values]
+  (reduce
+   (fn [ordered value]
+     (insert-ordered ordered value chat-before?))
+   []
+   values))
+
+(defn ordered-messages
+  [values]
+  (reduce
+   (fn [ordered value]
+     (insert-ordered ordered value message-before?))
+   []
+   values))
+
+(defn slice-values
+  [values start end]
+  (loop [position start
+         output []]
+    (if
+     (or
+      (= position end)
+      (= position (count values)))
+     output
+     (recur
+      (inc position)
+      (conj output (nth values position))))))
+
+(defn valid-chat-vector?
+  [values]
+  (truth-value
+   (and
+    (vector? values)
+    (every? chats/chat? values))))
+
+(defn valid-message-vector?
+  [values]
+  (truth-value
+   (and
+    (vector? values)
+    (every? chats/message? values))))
+
+(defn query-ok
+  [value]
+  {:ok true :value value})
+
+(defn query-fail
+  ([code]
+   (query-fail code {}))
+  ([code details]
+   {:ok false
+    :error {:code code :details details}}))
+
+(defn recent-result?
+  [value]
+  (let [items (get value :items)
+        cursor (get value :cursor)
+        next-cursor (get value :next-cursor)
+        total (get value :total)]
+    (truth-value
+     (and
+      (validate/exact-record?
+       value recent-result-fields #{})
+      (= recent-result-protocol
+         (get value :protocol))
+      (= chats/collection-resource
+         (get value :resource))
+      (model/non-negative-integer? cursor)
+      (optional-cursor? next-cursor)
+      (vector? items)
+      (<= (count items) chats/max-page-size)
+      (every? chats/summary? items)
+      (model/non-negative-integer? total)
+      (<= (count items) total)))))
+
+(defn chat-result?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record?
+     value chat-result-fields #{})
+    (= chat-result-protocol
+       (get value :protocol))
+    (chats/chat-resource?
+     (get value :resource))
+    (or
+     (nil? (get value :chat))
+     (and
+      (chats/chat? (get value :chat))
+      (= (get-in value [:chat :id])
+         (chats/chat-id-from-resource
+          (get value :resource))))))))
+
+(defn message-page?
+  [value]
+  (let [items (get value :items)]
+    (truth-value
+     (and
+      (validate/exact-record?
+       value page-result-fields #{})
+      (= message-page-protocol
+         (get value :protocol))
+      (chats/chat-resource?
+       (get value :resource))
+      (chats/chat-id? (get value :chat-id))
+      (= (chats/chat-resource
+          (get value :chat-id))
+         (get value :resource))
+      (has? directions (get value :direction))
+      (model/non-negative-integer?
+       (get value :cursor))
+      (optional-cursor?
+       (get value :next-cursor))
+      (vector? items)
+      (<= (count items) chats/max-page-size)
+      (every? chats/message? items)
+      (model/non-negative-integer?
+       (get value :total))
+      (<= (count items)
+          (get value :total))))))
+
+(defn page-forward
+  [values cursor limit]
+  (let [total (count values)]
+    (if
+     (> cursor total)
+     (query-fail
+      "greenways.chats/cursor-out-of-range"
+      {:cursor cursor :total total})
+     (let [candidate-end (+ cursor limit)
+           end
+           (if (> candidate-end total)
+             total
+             candidate-end)
+           next-cursor
+           (if (= end total) nil end)]
+       (query-ok
+        {:cursor cursor
+         :next-cursor next-cursor
+         :items (slice-values values cursor end)
+         :total total})))))
+
+(defn page-backward
+  [values cursor limit]
+  (let [total (count values)
+        end (if (nil? cursor) total cursor)]
+    (if
+     (> end total)
+     (query-fail
+      "greenways.chats/cursor-out-of-range"
+      {:cursor end :total total})
+     (let [candidate-start (- end limit)
+           start
+           (if (< candidate-start 0)
+             0
+             candidate-start)
+           next-cursor
+           (if (= start 0) nil start)]
+       (query-ok
+        {:cursor end
+         :next-cursor next-cursor
+         :items (slice-values values start end)
+         :total total})))))
+
+(defn recent
+  [request chats]
+  (cond
+    (not (recent-request? request))
+    (query-fail "greenways.chats/query-invalid")
+
+    (not (valid-chat-vector? chats))
+    (query-fail "greenways.chats/chat-values-invalid")
+
+    :else
+    (let [ordered (ordered-chats chats)
+          cursor
+          (if (nil? (get request :cursor))
+            0
+            (get request :cursor))
+          page
+          (page-forward
+           ordered cursor (get request :limit))]
+      (if
+       (not (get page :ok))
+       page
+       (let [value
+             {:protocol recent-result-protocol
+              :resource chats/collection-resource
+              :cursor (get-in page [:value :cursor])
+              :next-cursor
+              (get-in page [:value :next-cursor])
+              :items
+              (vec
+               (map chats/summary
+                    (get-in page [:value :items])))
+              :total (get-in page [:value :total])}]
+         (if
+          (recent-result? value)
+          (query-ok value)
+          (query-fail
+           "greenways.chats/query-result-invalid")))))))
+
+(defn exact-chat
+  [request chats]
+  (cond
+    (not (chat-request? request))
+    (query-fail "greenways.chats/query-invalid")
+
+    (not (valid-chat-vector? chats))
+    (query-fail "greenways.chats/chat-values-invalid")
+
+    :else
+    (let [id (get request :chat-id)
+          selected
+          (reduce
+           (fn [found chat]
+             (if
+              (not (nil? found))
+              found
+              (if (= id (get chat :id))
+                chat
+                nil)))
+           nil
+           chats)
+          value
+          {:protocol chat-result-protocol
+           :resource (chats/chat-resource id)
+           :chat selected}]
+      (if
+       (chat-result? value)
+       (query-ok value)
+       (query-fail
+        "greenways.chats/query-result-invalid")))))
+
+(defn message-page
+  [request messages]
+  (cond
+    (not (message-request? request))
+    (query-fail "greenways.chats/query-invalid")
+
+    (not (valid-message-vector? messages))
+    (query-fail "greenways.chats/message-values-invalid")
+
+    :else
+    (let [ordered (ordered-messages messages)
+          direction (get request :direction)
+          page
+          (if
+           (= "forward" direction)
+           (page-forward
+            ordered
+            (if (nil? (get request :cursor))
+              0
+              (get request :cursor))
+            (get request :limit))
+           (page-backward
+            ordered
+            (get request :cursor)
+            (get request :limit)))]
+      (if
+       (not (get page :ok))
+       page
+       (let [id (get request :chat-id)
+             value
+             {:protocol message-page-protocol
+              :resource (chats/chat-resource id)
+              :chat-id id
+              :direction direction
+              :cursor (get-in page [:value :cursor])
+              :next-cursor
+              (get-in page [:value :next-cursor])
+              :items (get-in page [:value :items])
+              :total (get-in page [:value :total])}]
+         (if
+          (message-page? value)
+          (query-ok value)
+          (query-fail
+           "greenways.chats/query-result-invalid")))))))
