@@ -32,6 +32,7 @@ test -f src/tahto/semantic/read.hal
 test -f src/tahto/semantic/prepare.hal
 test -f src/tahto/semantic/submit.hal
 test -f src/tahto/semantic/service.hal
+test -f src/tahto/semantic/value_source.hal
 test -f src/tahto/sync/device.hal
 test -f src/tahto/sync/session.hal
 test -f src/tahto/service/state.hal
@@ -58,6 +59,7 @@ test -f test/tahto/semantic/prepare_test.hal
 test -f test/tahto/semantic/submit_test.hal
 test -f test/tahto/semantic/submit_context_test.hal
 test -f test/tahto/semantic/service_test.hal
+test -f test/tahto/semantic/value_source_test.hal
 test -f test/tahto/sync/device_test.hal
 test -f test/tahto/sync/session_test.hal
 test -f test/tahto/sync/two_device_object_test.hal
@@ -79,3 +81,4 @@ test -f protocol/canonical-values.md
 test -f protocol/semantic-read.md
 test -f protocol/semantic-prepare.md
 test -f protocol/semantic-submit.md
+test -f protocol/semantic-value-source.md

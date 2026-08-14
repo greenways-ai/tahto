@@ -14,6 +14,8 @@ grep -F '"tahto.semantic-prepare-result/0-alpha"' src/tahto/semantic/prepare.hal
 grep -F '"tahto.semantic-submit-result/0-alpha"' src/tahto/semantic/submit.hal
 grep -F '(transaction/execute' src/tahto/semantic/submit.hal
 grep -F '(provider/prepare-compare-and-swap' src/tahto/semantic/submit.hal
+grep -F '(ns tahto.semantic.value-source' src/tahto/semantic/value_source.hal
+grep -F '"tahto.semantic-value-source-request/0-alpha"' src/tahto/semantic/value_source.hal
 grep -F '(ns tahto.semantic.model-test' test/tahto/semantic/model_test.hal
 grep -F '(ns tahto.semantic.admission-test' test/tahto/semantic/admission_test.hal
 grep -F '(ns tahto.semantic.index-root-test' test/tahto/semantic/index_root_test.hal
@@ -24,5 +26,6 @@ grep -F '(ns tahto.semantic.prepare-test' test/tahto/semantic/prepare_test.hal
 grep -F '(ns tahto.semantic.submit-test' test/tahto/semantic/submit_test.hal
 grep -F '(ns tahto.semantic.submit-context-test' test/tahto/semantic/submit_context_test.hal
 grep -F '(ns tahto.semantic.service-test' test/tahto/semantic/service_test.hal
+grep -F '(ns tahto.semantic.value-source-test' test/tahto/semantic/value_source_test.hal
 grep -F '(ns tahto.sync.two-device-object-test' test/tahto/sync/two_device_object_test.hal
 grep -F '(vault/accept-install candidate translated)' src/tahto/store/upload.hal
