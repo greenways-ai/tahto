@@ -11,6 +11,8 @@ test -z "$(find src test -type f ! -name '*.hal' ! -name 'README.md' -print)"
 ! grep -R -E 'extern crate|use [A-Za-z0-9_]+::|#include' src test
 
 test -f src/tahto/client.hal
+test -f src/tahto/change_feed.hal
+test -f src/tahto/change_feed/facade.hal
 test -f src/tahto/store/model.hal
 test -f src/tahto/store/host.hal
 test -f src/tahto/store/capability.hal
@@ -40,6 +42,8 @@ test -f src/tahto/service/state.hal
 test -f src/tahto/protocol/validate.hal
 
 test -f test/tahto/client_test.hal
+test -f test/tahto/change_feed_test.hal
+test -f test/tahto/change_feed/facade_test.hal
 test -f test/tahto/store/vault_test.hal
 test -f test/tahto/store/graph_test.hal
 test -f test/tahto/store/history_test.hal
@@ -68,6 +72,7 @@ test -f test/tahto/sync/two_device_object_test.hal
 test -f test/tahto/service/state_test.hal
 
 test -f protocol/client-facade.md
+test -f protocol/semantic-change-feed.md
 test -f protocol/services.md
 test -f protocol/transactions.md
 test -f protocol/metadata-store.md
