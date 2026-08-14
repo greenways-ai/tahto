@@ -1,0 +1,301 @@
+(ns tahto.profile.chats.model
+  (:require [std.foundation :refer :all]
+            [tahto.protocol.validate :as validate]
+            [tahto.semantic.model :as semantic]
+            [tahto.store.model :as model]))
+
+(def profile-protocol "greenways.chats-profile/0-alpha")
+(def source-protocol "greenways.chat-source/0-alpha")
+(def chat-protocol "greenways.chat/0-alpha")
+(def message-protocol "greenways.chat-message/0-alpha")
+(def summary-protocol "greenways.chat-summary/0-alpha")
+
+(def application "greenways.chats")
+(def namespace "local")
+(def collection "chats")
+(def head-kind "main")
+(def head-name "primary")
+
+(def collection-resource "greenways:tahto/collection/chats")
+(def chat-resource-prefix "greenways:tahto/chat/")
+
+(def package-coordinate "hara:greenways/chats-profile")
+(def package-version "0.1.0")
+(def chat-schema "greenways.chat")
+(def message-schema "greenways.chat-message")
+(def schema-version 1)
+(def chat-entry "greenways.chats/chat-spec")
+(def message-entry "greenways.chats/message-spec")
+
+(def chat-message-role "greenways.chat/message")
+(def message-chat-role "greenways.message/chat")
+
+(def max-title-length 512)
+(def max-source-id-length 1024)
+(def max-message-content-length 262144)
+(def max-message-count 100000)
+(def max-page-size 100)
+
+(def roles
+  #{"system" "user" "assistant" "tool"})
+
+(def lowercase-hex
+  #{"0" "1" "2" "3" "4" "5" "6" "7" "8" "9"
+    "a" "b" "c" "d" "e" "f"})
+
+(def source-fields
+  #{:protocol :provider :source-id})
+
+(def chat-fields
+  #{:protocol :id :title :source :created-at :updated-at :message-count})
+
+(def message-fields
+  #{:protocol :id :role :content :created-at})
+
+(def summary-fields
+  #{:protocol :id :uri :title :provider :updated-at :message-count})
+
+(defn truth-value
+  [value]
+  (if value true false))
+
+(defn bounded-string?
+  [value minimum maximum]
+  (truth-value
+   (and
+    (string? value)
+    (<= minimum (count value))
+    (<= (count value) maximum)
+    (not (str/includes? value "\r"))
+    (not (str/includes? value "\n")))))
+
+(defn fixed-lowercase-hex?
+  [value length]
+  (truth-value
+   (and
+    (string? value)
+    (= length (count value))
+    (loop [index 0]
+      (if
+       (= index length)
+       true
+       (if
+        (has? lowercase-hex
+              (str/slice value index (inc index)))
+        (recur (inc index))
+        false))))))
+
+(defn chat-id?
+  [value]
+  (fixed-lowercase-hex? value 32))
+
+(defn message-id?
+  [value]
+  (fixed-lowercase-hex? value 32))
+
+(defn source?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value source-fields #{})
+    (= source-protocol (get value :protocol))
+    (model/identifier? (get value :provider))
+    (bounded-string?
+     (get value :source-id)
+     1 max-source-id-length))))
+
+(defn chat?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value chat-fields #{})
+    (= chat-protocol (get value :protocol))
+    (chat-id? (get value :id))
+    (bounded-string?
+     (get value :title)
+     1 max-title-length)
+    (source? (get value :source))
+    (validate/timestamp? (get value :created-at))
+    (validate/timestamp? (get value :updated-at))
+    (<= (compare
+         (get value :created-at)
+         (get value :updated-at))
+        0)
+    (model/non-negative-integer?
+     (get value :message-count))
+    (<= (get value :message-count)
+        max-message-count))))
+
+(defn message?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value message-fields #{})
+    (= message-protocol (get value :protocol))
+    (message-id? (get value :id))
+    (has? roles (get value :role))
+    (bounded-string?
+     (get value :content)
+     0 max-message-content-length)
+    (validate/timestamp? (get value :created-at)))))
+
+(defn chat-semantic-id
+  [id]
+  (if (chat-id? id)
+    (str "chat/" id)
+    nil))
+
+(defn message-semantic-id
+  [id]
+  (if (message-id? id)
+    (str "message/" id)
+    nil))
+
+(defn chat-resource
+  [id]
+  (if (chat-id? id)
+    (str chat-resource-prefix id)
+    nil))
+
+(defn chat-resource?
+  [value]
+  (truth-value
+   (and
+    (string? value)
+    (= (+ (count chat-resource-prefix) 32)
+       (count value))
+    (= chat-resource-prefix
+       (str/slice
+        value 0 (count chat-resource-prefix)))
+    (chat-id?
+     (str/slice
+      value
+      (count chat-resource-prefix)
+      (count value))))))
+
+(defn chat-id-from-resource
+  [value]
+  (if
+   (chat-resource? value)
+   (str/slice
+    value
+    (count chat-resource-prefix)
+    (count value))
+   nil))
+
+(defn schema-ref-for?
+  [value schema entry]
+  (truth-value
+   (and
+    (semantic/schema-ref? value)
+    (= schema (get value :schema))
+    (= schema-version (get value :schema-version))
+    (= package-coordinate (get value :package))
+    (= package-version (get value :package-version))
+    (= entry (get value :entry)))))
+
+(defn chat-schema-ref?
+  [value]
+  (schema-ref-for? value chat-schema chat-entry))
+
+(defn message-schema-ref?
+  [value]
+  (schema-ref-for? value message-schema message-entry))
+
+(defn chat-link?
+  [value]
+  (let [target-id (get value :target-id)]
+    (truth-value
+     (and
+      (semantic/semantic-link? value)
+      (= chat-message-role (get value :role))
+      (string? target-id)
+      (= 40 (count target-id))
+      (= "message/" (str/slice target-id 0 8))
+      (message-id?
+       (str/slice target-id 8 (count target-id)))))))
+
+(defn message-link?
+  [value]
+  (let [target-id (get value :target-id)]
+    (truth-value
+     (and
+      (semantic/semantic-link? value)
+      (= message-chat-role (get value :role))
+      (string? target-id)
+      (= 37 (count target-id))
+      (= "chat/" (str/slice target-id 0 5))
+      (chat-id?
+       (str/slice target-id 5 (count target-id)))))))
+
+(defn chat-projection?
+  [projection value]
+  (truth-value
+   (and
+    (chat? value)
+    (map? projection)
+    (= (chat-semantic-id (get value :id))
+       (get projection :id))
+    (chat-schema-ref? (get projection :schema-ref))
+    (semantic/semantic-link-vector?
+     (get projection :links))
+    (= (get value :message-count)
+       (count (get projection :links)))
+    (every? chat-link? (get projection :links)))))
+
+(defn message-projection?
+  [projection value chat-id]
+  (truth-value
+   (and
+    (message? value)
+    (chat-id? chat-id)
+    (map? projection)
+    (= (message-semantic-id (get value :id))
+       (get projection :id))
+    (message-schema-ref? (get projection :schema-ref))
+    (semantic/semantic-link-vector?
+     (get projection :links))
+    (= 1 (count (get projection :links)))
+    (message-link? (get-in projection [:links 0]))
+    (= (chat-semantic-id chat-id)
+       (get-in projection [:links 0 :target-id])))))
+
+(defn summary
+  [chat]
+  (if
+   (chat? chat)
+   {:protocol summary-protocol
+    :id (get chat :id)
+    :uri (chat-resource (get chat :id))
+    :title (get chat :title)
+    :provider (get-in chat [:source :provider])
+    :updated-at (get chat :updated-at)
+    :message-count (get chat :message-count)}
+   nil))
+
+(defn summary?
+  [value]
+  (truth-value
+   (and
+    (validate/exact-record? value summary-fields #{})
+    (= summary-protocol (get value :protocol))
+    (chat-id? (get value :id))
+    (= (chat-resource (get value :id))
+       (get value :uri))
+    (bounded-string?
+     (get value :title)
+     1 max-title-length)
+    (model/identifier? (get value :provider))
+    (validate/timestamp? (get value :updated-at))
+    (model/non-negative-integer?
+     (get value :message-count))
+    (<= (get value :message-count)
+        max-message-count))))
+
+(defn exact-coordinate?
+  [value]
+  (truth-value
+   (= [application namespace collection]
+      [(get value :application)
+       (get value :namespace)
+       (get value :collection)])))

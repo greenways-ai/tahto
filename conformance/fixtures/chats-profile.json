@@ -1,0 +1,127 @@
+{
+  "protocol": "greenways.chats-conformance/0-alpha",
+  "coordinate": {
+    "application": "greenways.chats",
+    "namespace": "local",
+    "collection": "chats",
+    "headKind": "main",
+    "headName": "primary"
+  },
+  "resources": {
+    "collection": "greenways:tahto/collection/chats",
+    "chatPrefix": "greenways:tahto/chat/"
+  },
+  "schemas": [
+    {
+      "schema": "greenways.chat",
+      "schemaVersion": 1,
+      "package": "hara:greenways/chats-profile",
+      "packageVersion": "0.1.0",
+      "entry": "greenways.chats/chat-spec"
+    },
+    {
+      "schema": "greenways.chat-message",
+      "schemaVersion": 1,
+      "package": "hara:greenways/chats-profile",
+      "packageVersion": "0.1.0",
+      "entry": "greenways.chats/message-spec"
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "valid-chat",
+      "value": {
+        "protocol": "greenways.chat/0-alpha",
+        "id": "0000000000000000000000000000000a",
+        "title": "First chat",
+        "source": {
+          "protocol": "greenways.chat-source/0-alpha",
+          "provider": "openai.chatgpt",
+          "source-id": "conversation-0001"
+        },
+        "created-at": "2026-08-14T00:00:00Z",
+        "updated-at": "2026-08-14T00:02:00Z",
+        "message-count": 2
+      },
+      "valid": true
+    },
+    {
+      "id": "valid-message",
+      "value": {
+        "protocol": "greenways.chat-message/0-alpha",
+        "id": "1000000000000000000000000000000a",
+        "role": "user",
+        "content": "Hello",
+        "created-at": "2026-08-14T00:01:00Z"
+      },
+      "valid": true
+    },
+    {
+      "id": "uppercase-chat-id",
+      "override": {
+        "id": "0000000000000000000000000000000A"
+      },
+      "valid": false
+    },
+    {
+      "id": "updated-before-created",
+      "override": {
+        "updated-at": "2026-08-13T23:59:59Z"
+      },
+      "valid": false
+    },
+    {
+      "id": "secret-field",
+      "extra": {
+        "credential": "forbidden"
+      },
+      "valid": false
+    },
+    {
+      "id": "recent-order",
+      "selector": "recent",
+      "limit": 2,
+      "orderedIds": [
+        "0000000000000000000000000000000b",
+        "0000000000000000000000000000000c"
+      ],
+      "nextCursor": 2
+    },
+    {
+      "id": "forward-message-page",
+      "selector": "messages",
+      "direction": "forward",
+      "limit": 2,
+      "orderedIds": [
+        "1000000000000000000000000000000a",
+        "1000000000000000000000000000000b"
+      ],
+      "nextCursor": 2
+    },
+    {
+      "id": "backward-message-page",
+      "selector": "messages",
+      "direction": "backward",
+      "limit": 2,
+      "orderedIds": [
+        "1000000000000000000000000000000c",
+        "1000000000000000000000000000000d"
+      ],
+      "nextCursor": 2
+    },
+    {
+      "id": "arbitrary-predicate",
+      "selector": "recent",
+      "extra": {
+        "predicate": "anything"
+      },
+      "valid": false
+    },
+    {
+      "id": "oversized-page",
+      "selector": "messages",
+      "limit": 101,
+      "valid": false
+    }
+  ]
+}
