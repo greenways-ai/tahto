@@ -1,6 +1,7 @@
 (ns tahto.semantic.submit-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.protocol.validate :as validate]
             [tahto.semantic.history :as semantic-history]
             [tahto.semantic.prepare :as prepare]
@@ -398,7 +399,8 @@
   [result]
   (get-in result [:error :code]))
 
-[(test-check
+(test/print-results
+ [(test/check
    "one pure transition accepts the commit and head together"
    (let [state (base-state)
          input (submit-input state)
@@ -433,7 +435,7 @@
     [commit-parent root-candidate]
     true])
 
-  (test-check
+  (test/check
    "commit and head proofs are bound to every prepared field"
    (let [state (base-state)
          input (submit-input state)
@@ -474,7 +476,7 @@
     "tahto.semantic/submit-commit-digest-mismatch"
     true true true])
 
-  (test-check
+  (test/check
    "stale or substituted prepare evidence cannot be submitted"
    (let [state (base-state)
          input (submit-input state)
@@ -498,7 +500,7 @@
     "tahto.semantic/prepare-revision-mismatch"
     true true])
 
-  (test-check
+  (test/check
    "a head failure rolls back the accepted commit sequence and edges"
    (let [state
          (assoc-in (base-state)
@@ -524,7 +526,7 @@
     nil
     true])
 
-  (test-check
+  (test/check
    "TAHTO-7 commits submit authorization completion and one revision"
    (let [state (base-state)
          input (submit-input state)
@@ -551,7 +553,7 @@
     result-digest
     false])
 
-  (test-check
+  (test/check
    "completed submit retries record a fresh nonce without rerunning mutation"
    (let [state (base-state)
          input (submit-input state)
@@ -583,7 +585,7 @@
              next-state "device.a" "submit-replay-nonce-0002")))])
    [true true result-digest 6 2 true true])
 
-  (test-check
+  (test/check
    "the completed transaction prepares one generic durable compare-and-swap"
    (let [state (base-state)
          executed
@@ -617,7 +619,7 @@
     submit-request-digest
     false false])
 
-  (test-check
+  (test/check
    "invalid result evidence rolls back authorization and semantic mutation"
    (let [state (base-state)
          result
@@ -639,7 +641,7 @@
     "tahto.transaction/result-verification-mismatch"
     true nil nil])
 
-  (test-check
+  (test/check
    "closed submit records exclude provider and key authority"
    (let [state (base-state)
          input (submit-input state)
@@ -654,4 +656,4 @@
       (has? value :signature)
       (has? value :private-key)
       (has? value :source-handle)])
-   [true false true false false false false])]
+   [true false true false false false false])])
