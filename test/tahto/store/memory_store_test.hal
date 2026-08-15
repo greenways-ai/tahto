@@ -1,6 +1,7 @@
 (ns tahto.store.memory-store-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.protocol.validate :as validate]
             [tahto.store.memory-store :as memory-store]
             [tahto.store.provider :as provider]
@@ -151,7 +152,8 @@
     transition-result commit-verification)
    (executor memory)))
 
-[(test-check
+(test/print-results
+ [(test/check
    "the generic driver accepts opaque values without learning Tahto state"
    (let [memory (memory-store/create)
          request {:protocol provider/request-protocol
@@ -180,7 +182,7 @@
     nil
     nil])
 
-  (test-check
+  (test/check
    "empty load is a valid absent generic result"
    (let [memory (memory-store/create)
          result
@@ -193,7 +195,7 @@
       (memory-store/snapshot-entry memory)])
    [true initial-state nil nil])
 
-  (test-check
+  (test/check
    "initialize is exact, idempotent and loadable through the HAL client"
    (let [memory (memory-store/create)
          initialized (initialize-memory! memory)
@@ -223,7 +225,7 @@
       (error-code conflicting)])
    [true true true true initial-state false "tahto.provider/result-invalid"])
 
-  (test-check
+  (test/check
    "compare-and-swap atomically stores the next opaque value and receipt"
    (let [memory (memory-store/create)
          initialized (initialize-memory! memory)
@@ -260,7 +262,7 @@
     true
     next-state-digest])
 
-  (test-check
+  (test/check
    "exact retries replay while stale writers and receipt collisions fail closed"
    (let [memory (memory-store/create)
          initialized (initialize-memory! memory)
@@ -308,7 +310,7 @@
     "tahto.provider/result-invalid"
     nil])
 
-  (test-check
+  (test/check
    "a before-commit fault preserves the old value and no receipt"
    (let [memory (memory-store/create)
          initialized (initialize-memory! memory)
@@ -339,7 +341,7 @@
     true
     nil])
 
-  (test-check
+  (test/check
    "an after-commit fault exposes complete new state and replays on recovery"
    (let [memory (memory-store/create)
          initialized (initialize-memory! memory)
@@ -376,7 +378,7 @@
     "replayed"
     true])
 
-  (test-check
+  (test/check
    "stale writers do not consume a pending eligible fault"
    (let [memory (memory-store/create)
          initialized (initialize-memory! memory)
@@ -401,4 +403,4 @@
       injected
       stale-direct
       (get (memory-store/memory-state memory) :fail-next-cas)])
-   [true true true nil "before-commit"])]
+   [true true true nil "before-commit"])])

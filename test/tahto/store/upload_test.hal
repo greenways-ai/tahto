@@ -1,6 +1,7 @@
 (ns tahto.store.upload-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.store.capability :as capability]
             [tahto.store.host :as host]
             [tahto.store.memory-blob :as memory-blob]
@@ -69,7 +70,8 @@
   [result]
   (get-in result [:error :code]))
 
-[(test-check
+(test/print-results
+ [(test/check
    "upload integration commits Tahto state only after exact generic results"
    (let [memory (memory-blob/create)
          first-source
@@ -143,7 +145,7 @@
     true
     0])
 
-  (test-check
+  (test/check
    "a verified provider resume offset is reconciled into the Tahto upload"
    (let [memory (memory-blob/create)
          first-source
@@ -188,7 +190,7 @@
        digest-a)])
    [true true true true true 4 9 true nil true])
 
-  (test-check
+  (test/check
    "a wrong-work source failure rolls back the optimistic append transition"
    (let [memory (memory-blob/create)
          registered
@@ -224,7 +226,7 @@
     false
     0])
 
-  (test-check
+  (test/check
    "incomplete installs fail before dispatch and never leak verifying state"
    (let [memory (memory-blob/create)
          registered
@@ -268,7 +270,7 @@
     "open"
     0])
 
-  (test-check
+  (test/check
    "abort candidate state rolls back on provider failure and commits on success"
    (let [memory (memory-blob/create)
          invoke (executor memory "work.a")
@@ -304,7 +306,7 @@
     nil
     nil])
 
-  (test-check
+  (test/check
    "upload orchestration excludes range effects reserved for the later read path"
    (let [state (model/empty-state)
          calls (atom 0)
@@ -329,4 +331,4 @@
       (error-code result)
       (= state (get result :state))
       @calls])
-   [false false "tahto.upload/effect-invalid" true 0])]
+   [false false "tahto.upload/effect-invalid" true 0])])

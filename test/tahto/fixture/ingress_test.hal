@@ -1,6 +1,7 @@
 (ns tahto.fixture.ingress-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.fixture.ingress :as ingress]
             [tahto.fixture.state :as fixture-state]
             [tahto.fixture.two-device :as fixture]
@@ -68,7 +69,8 @@
   [result]
   (get-in result [:error :code]))
 
-[(test-check
+(test/print-results
+ [(test/check
    "applied Hoplite ingress becomes an ordinary pending Tahto request"
    (let [state (fixture-state/initial-state)
          value
@@ -114,7 +116,7 @@
     request-a
     accepted-at])
 
-  (test-check
+  (test/check
    "an exact Hoplite replay returns the prior request without mutation"
    (let [initial (fixture-state/initial-state)
          applied
@@ -145,7 +147,7 @@
       (get context :replayed)])
    [true true true true request-a true])
 
-  (test-check
+  (test/check
    "replay fails closed when only half of the Tahto ledger remains"
    (let [initial (fixture-state/initial-state)
          applied
@@ -179,7 +181,7 @@
     "tahto.fixture/replay-state-incomplete"
     true])
 
-  (test-check
+  (test/check
    "a replay can recover when Hoplite admitted before Tahto state was written"
    (let [initial (fixture-state/initial-state)
          replayed
@@ -206,7 +208,7 @@
          next-state fixture/device-a request-a)))])
    [true true "pending" true true])
 
-  (test-check
+  (test/check
    "a fingerprint cannot be replayed for another operation"
    (let [initial (fixture-state/initial-state)
          applied
@@ -237,7 +239,7 @@
     "tahto.fixture/replay-conflict"
     true])
 
-  (test-check
+  (test/check
    "revoked devices remain rejected after Hoplite verification"
    (let [initial (fixture-state/initial-state)
          state
@@ -266,7 +268,7 @@
     "tahto.device/device-revoked"
     true])
 
-  (test-check
+  (test/check
    "the bridge rejects widened identity and private wire authority"
    (let [value
          (fixture-identity
@@ -295,7 +297,7 @@
               "fixture.other"))])
    [true false false false false false])
 
-  (test-check
+  (test/check
    "proof projection uses only fixture authority and the canonical fingerprint"
    (let [value
          (fixture-identity
@@ -321,4 +323,4 @@
     request-a
     false
     false
-    false])]
+    false])])

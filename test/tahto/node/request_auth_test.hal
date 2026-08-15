@@ -1,6 +1,8 @@
 (ns tahto.node.request-auth-test
   (:config {})
-  (:require [tahto.node.request-auth :as auth]))
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
+            [tahto.node.request-auth :as auth]))
 
 (def request
   {"protocol" auth/request-protocol
@@ -25,7 +27,8 @@
     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     "value" "aaaaaaaaaaaaaaaa"}})
 
-[(test-check
+(test/print-results
+ [(test/check
    "the signed request wire shape maps to the existing verification proof"
    (let [proof (auth/request-proof request)]
      [(auth/request-shape? request)
@@ -34,7 +37,7 @@
       (get proof :idempotency-key)])
    [true "tahto.request-verification/0-alpha" "sync.pull" "request-00000001"])
 
-  (test-check
+  (test/check
    "request timestamps are accepted only inside the closed five-minute window"
    [(auth/fresh? request 1786233300)
     (auth/fresh? request 1786233900)
@@ -42,7 +45,7 @@
     (auth/fresh? request 1786233901)]
    [true true false false])
 
-  (test-check
+  (test/check
    "the digest covers canonical unsigned request bytes only"
    (auth/unsigned-json request)
    (Json/write
@@ -50,9 +53,9 @@
      (dissoc request "requestDigest")
      "signature")))
 
-  (test-check
+  (test/check
    "unknown or missing envelope fields fail closed"
    [(auth/request-shape? (assoc request "remoteCode" "no"))
     (auth/request-shape? (dissoc request "nonce"))
     (auth/request-shape? (assoc request "algorithm" "ed25519"))]
-   [false false false])]
+   [false false false])])
