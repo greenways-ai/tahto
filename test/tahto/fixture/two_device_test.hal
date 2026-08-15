@@ -1,6 +1,7 @@
 (ns tahto.fixture.two-device-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.fixture.two-device :as fixture]
             [tahto.protocol.validate :as validate]
             [tahto.store.model :as model]))
@@ -14,7 +15,8 @@
 (def request-root
   "sha256:7777777777777777777777777777777777777777777777777777777777777777")
 
-[(test-check
+(test/print-results
+ [(test/check
    "the reusable production fixture descriptor is exact and deterministic"
    (let [descriptor (fixture/descriptor)]
      [(fixture/descriptor? descriptor)
@@ -32,7 +34,7 @@
     69632
     65536])
 
-  (test-check
+  (test/check
    "device and request builders preserve the portable two-device identity law"
    (let [record-a
          (fixture/device-record fixture/device-a
@@ -62,7 +64,7 @@
    [true true true true
     "fixture.transfer" "world.shared" "objects"])
 
-  (test-check
+  (test/check
    "fixture-owned reference, commit, head and receipt remain ordinary records"
    (let [reference
          (fixture/object-reference
@@ -100,7 +102,7 @@
        model/commit-protocol)])
    [true true true true true])
 
-  (test-check
+  (test/check
    "durable fixture records contain no body, source, request or provider authority"
    (let [reference
          (fixture/object-reference
@@ -127,4 +129,4 @@
       (has? commit :provider)
       (has? head :source-handle)
       (has? head :credential)])
-   [false false false false false false false false])]
+   [false false false false false false false false])])
