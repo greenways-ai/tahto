@@ -1,6 +1,7 @@
 (ns tahto.semantic.prepare-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.protocol.validate :as validate]
             [tahto.semantic.history :as semantic-history]
             [tahto.semantic.prepare :as prepare]
@@ -164,7 +165,8 @@
   [result]
   (get-in result [:error :code]))
 
-[(test-check
+(test/print-results
+ [(test/check
    "prepare returns deterministic closed commit and head signing intents"
    (let [state (base-state)
          first (prepare/prepare state context request)
@@ -212,7 +214,7 @@
       :commit-insertion "append-signed-commit"
       :updated-at "2026-08-09T01:11:00Z"}}])
 
-  (test-check
+  (test/check
    "genesis preparation has no current head and sequence one"
    (let [state
          (assoc
@@ -237,7 +239,7 @@
       (= state (result-state result))])
    [true nil 1 [] true])
 
-  (test-check
+  (test/check
    "existing head roots are retained only by explicit application choice"
    (let [state (base-state)
          result
@@ -251,7 +253,7 @@
       (= state (result-state result))])
    [true [parent-commit-root] "append-signed-commit" true])
 
-  (test-check
+  (test/check
    "revision sequence and current-head expectations are exact"
    (let [state (base-state)
          stale-revision
@@ -277,7 +279,7 @@
     "tahto.semantic/prepare-head-expectation-mismatch"
     true true true])
 
-  (test-check
+  (test/check
    "semantic roots and parents must use the exact collection profile"
    (let [state (base-state)
          missing-root
@@ -306,7 +308,7 @@
     "tahto.semantic/prepare-parent-profile-invalid"
     true true true])
 
-  (test-check
+  (test/check
    "retained roots must come from the exact current head"
    (let [state (base-state)
          result
@@ -322,7 +324,7 @@
     [unknown-root]
     true])
 
-  (test-check
+  (test/check
    "configured parent and future-head bounds fail before intent construction"
    (let [parent-bounded
          (assoc-in (base-state)
@@ -346,7 +348,7 @@
     "tahto.semantic/prepare-head-too-wide"
     true true])
 
-  (test-check
+  (test/check
    "contexts must be pending semantic.prepare requests from the same enrolled device"
    (let [state (base-state)
          completed
@@ -383,7 +385,7 @@
     "tahto.semantic/prepare-context-not-admitted"
     true true true true])
 
-  (test-check
+  (test/check
    "malformed context and request values fail before nested inspection"
    (let [state (base-state)
          missing-context
@@ -405,7 +407,7 @@
     "tahto.semantic/prepare-request-invalid"
     true true true])
 
-  (test-check
+  (test/check
    "request and intent records reject widened authority and fabricated signatures"
    (let [value
          (get
@@ -424,4 +426,4 @@
       (has? (get value :commit-intent) :signature)
       (has? (get value :head-intent) :commits)
       (has? (get value :head-intent) :signature)])
-   [true false false false false false false false false])]
+   [true false false false false false false false false])])
