@@ -1,6 +1,7 @@
 (ns tahto.semantic.history-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.protocol.validate :as validate]
             [tahto.semantic.history :as semantic-history]
             [tahto.store.model :as model]
@@ -270,7 +271,8 @@
    :state-digest state-digest
    :completed-at "2026-08-09T00:03:00Z"})
 
-[(test-check
+(test/print-results
+ [(test/check
    "semantic genesis and linear successors remain ordinary commits"
    (let [genesis-result (accept-commit (base-state) genesis)
          linear-result (accept-commit (result-state genesis-result) left)]
@@ -286,7 +288,7 @@
     1
     left])
 
-  (test-check
+  (test/check
    "semantic commits require exactly one admitted coordinate-matching root"
    (let [state (base-state)
          wrong-schema (assoc genesis :schema "fixture.other")
@@ -311,7 +313,7 @@
     "tahto.semantic/commit-root-not-admitted"
     "tahto.semantic/commit-root-coordinate-mismatch"])
 
-  (test-check
+  (test/check
    "semantic parents must use the same profile and collection"
    (let [genesis-result (accept-commit (base-state) genesis)
          state (result-state genesis-result)
@@ -336,7 +338,7 @@
    ["tahto.semantic/commit-parent-profile-invalid"
     "tahto.semantic/commit-parent-profile-invalid"])
 
-  (test-check
+  (test/check
    "two sibling commits remain divergent until an application merge commit exists"
    (let [genesis-result (accept-commit (base-state) genesis)
          left-result (accept-commit (result-state genesis-result) left)
@@ -372,7 +374,7 @@
     [commit-merge-root]
     [commit-left-root commit-right-root]])
 
-  (test-check
+  (test/check
    "head compare-and-swap cannot silently discard divergence"
    (let [state (accepted-history)
          divergent
@@ -396,7 +398,7 @@
       (= (result-state first) (result-state rejected))])
    [false "tahto.history/head-compare-failed" true])
 
-  (test-check
+  (test/check
    "heads reject ordinary or cross-collection commits"
    (let [state (accepted-history)
          ordinary
@@ -426,7 +428,7 @@
    ["tahto.semantic/head-commit-profile-invalid"
     "tahto.semantic/head-commit-profile-invalid"])
 
-  (test-check
+  (test/check
    "semantic commits compose through TAHTO-7 and the generic hoplite.store plan"
    (let [execution
          (execute-commit
@@ -460,7 +462,7 @@
     "hoplite.store-request/0-alpha"
     0 1 plan-digest false false])
 
-  (test-check
+  (test/check
    "completed semantic transaction replay does not rerun history mutation"
    (let [first
          (execute-commit
@@ -482,4 +484,4 @@
       (transaction/current-revision (result-state replay))
       (= genesis
          (model/commit-record (result-state replay) commit-genesis-root))])
-   [true true result-digest 2 true])]
+   [true true result-digest 2 true])])
