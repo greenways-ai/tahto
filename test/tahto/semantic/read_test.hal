@@ -1,6 +1,7 @@
 (ns tahto.semantic.read-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.protocol.validate :as validate]
             [tahto.semantic.history :as semantic-history]
             [tahto.semantic.read :as read]
@@ -193,7 +194,8 @@
   [result]
   (get-in result [:error :code]))
 
-[(test-check
+(test/print-results
+ [(test/check
    "semantic reads preserve divergent head order without selecting a winner"
    (let [state (base-state)
          result (read/read state context request)
@@ -223,7 +225,7 @@
     true
     true])
 
-  (test-check
+  (test/check
    "one stable ID is resolved independently in every branch"
    (let [state (base-state)
          result
@@ -245,7 +247,7 @@
     object-right value-right
     true])
 
-  (test-check
+  (test/check
    "an absent stable ID remains absent per branch without widening the result"
    (let [result
          (read/read
@@ -259,7 +261,7 @@
                 (get-in result [:value :branches])))])
    [true "entity/missing" [nil nil]])
 
-  (test-check
+  (test/check
    "head width is rejected rather than truncated"
    (let [state (base-state)
          too-narrow
@@ -280,7 +282,7 @@
     "tahto.semantic/read-request-invalid"
     true true])
 
-  (test-check
+  (test/check
    "contexts must be pending semantic.read requests from an enrolled device"
    (let [state (base-state)
          completed
@@ -308,7 +310,7 @@
     "tahto.semantic/read-context-not-admitted"
     true true true])
 
-  (test-check
+  (test/check
    "missing and non-semantic heads fail closed"
    (let [state (base-state)
          missing
@@ -326,7 +328,7 @@
     "tahto.semantic/read-head-profile-invalid"
     true true])
 
-  (test-check
+  (test/check
    "missing index and selected object projections are explicit failures"
    (let [state (base-state)
          no-index
@@ -351,7 +353,7 @@
     object-left
     true true])
 
-  (test-check
+  (test/check
    "request and result profiles reject widened or inconsistent values"
    [(read/request? request)
     (read/request? (assoc request :provider "filesystem"))
@@ -366,4 +368,4 @@
       (read/result?
        (assoc result
               :requested-id "entity/other")))]
-   [true false false false])]
+   [true false false false])])
