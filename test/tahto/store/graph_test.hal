@@ -1,6 +1,7 @@
 (ns tahto.store.graph-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.store.graph :as graph]
             [tahto.store.host :as store-host]
             [tahto.store.model :as model]
@@ -65,7 +66,8 @@
     :total-size total-size
     :chunks chunks}))
 
-[(test-check
+(test/print-results
+ [(test/check
    "manifest verification is a bounded host effect without object bytes"
    (let [requested
          (graph/request-manifest
@@ -78,7 +80,7 @@
       (store-host/effect? effect)])
    ["manifest/verify" 16384 false true])
 
-  (test-check
+  (test/check
    "manifest planning does not disclose global object presence"
    (let [state (fixture-state)
          present-elsewhere
@@ -97,7 +99,7 @@
     "tahto.store/object-out-of-scope"
     [] []])
 
-  (test-check
+  (test/check
    "manifest proofs reject hidden transport fields in chunk records"
    (let [rejected
          (graph/accept-manifest
@@ -115,7 +117,7 @@
      [(get rejected :ok) (error-code rejected)])
    [false "tahto.store/manifest-verification-failed"])
 
-  (test-check
+  (test/check
    "manifest metadata is accepted only from a matching trusted proof"
    (let [rejected
          (graph/accept-manifest
@@ -131,7 +133,7 @@
      [(get rejected :ok) (error-code rejected)])
    [false "tahto.store/manifest-verification-failed"])
 
-  (test-check
+  (test/check
    "chunk manifests preserve repeated children by ordinal"
    (let [registered (accept-fixture-manifest
                      (fixture-state) manifest-chunks 9)]
@@ -139,7 +141,7 @@
       (get-in registered [:value :chunks])])
    [true manifest-chunks])
 
-  (test-check
+  (test/check
    "manifest children must exist and be authorized in the namespace"
    (let [detached
          (vault/detach-object
@@ -150,7 +152,7 @@
      [(get rejected :ok) (error-code rejected)])
    [false "tahto.store/manifest-child-invalid"])
 
-  (test-check
+  (test/check
    "closure verification reports a complete unique reachable set"
    (let [registered (accept-fixture-manifest
                      (fixture-state) manifest-chunks 9)
@@ -160,7 +162,7 @@
       (get-in report [:value :missing])])
    [true #{digest-a digest-b digest-c} []])
 
-  (test-check
+  (test/check
    "closure traversal reports missing objects and stops at its bound"
    (let [initial (fixture-state {:max-closure-objects 2})
          state (assoc initial :manifests
@@ -174,7 +176,7 @@
       (get-in report [:value :visited])])
    [false true [digest-c digest-a]])
 
-  (test-check
+  (test/check
    "a pinned root preserves closure access after direct references detach"
    (let [registered (accept-fixture-manifest
                      (fixture-state) manifest-chunks 9)
@@ -216,7 +218,7 @@
       (get-in plan [:value :candidates])])
    [true 69 "tahto.store/quota-below-usage" false [digest-d]])
 
-  (test-check
+  (test/check
    "garbage collection refuses an incomplete rooted closure"
    (let [initial (fixture-state)
          state (assoc initial :manifests
@@ -225,4 +227,4 @@
                              [{:digest digest-e :size 2}]))
          plan (graph/gc-plan state)]
      [(get plan :ok) (error-code plan)])
-   [false "tahto.store/gc-closure-incomplete"])]
+   [false "tahto.store/gc-closure-incomplete"])])
