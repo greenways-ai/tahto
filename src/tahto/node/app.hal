@@ -137,6 +137,34 @@
    :headers public-headers
    :body ""})
 
+(defn signal-proof
+  [request]
+  (let [encoded (get (get request :headers) "x-tahto-request")]
+    (if (string? encoded)
+      (request-auth/verify
+       (request-auth/decode-envelope encoded)
+       (request-auth/host-call "now" []))
+      nil)))
+
+(defn signal-authorize
+  "Nchan authorization hook. A paired device signs each subscribe or publish
+   attempt; the channel token remains an ephemeral bearer capability."
+  [request]
+  (let [proof (signal-proof request)]
+    (if (and proof
+             (has? #{"signal.subscribe" "signal.publish"}
+                   (get proof :operation)))
+      {:status 200 :headers {"cache-control" "no-store"} :body ""}
+      {:status 403 :headers {"cache-control" "no-store"} :body ""})))
+
+(defn signal-admit
+  "Nchan publisher hook. 304 preserves the bounded original message body."
+  [request]
+  (let [proof (signal-proof request)]
+    (if (and proof (= "signal.publish" (get proof :operation)))
+      {:status 304 :headers {"cache-control" "no-store"} :body ""}
+      {:status 403 :headers {"cache-control" "no-store"} :body ""})))
+
 (defn pairing-header
   [request]
   (get (get request :headers) "x-tahto-pairing"))
@@ -229,6 +257,18 @@
 (def app
   (h/app
     {:name "tahto"
+     :channels
+     [(h/channel
+       {:name :signals
+        :path "/tahto/0-alpha/signals/:channel"
+        :profile :ephemeral
+        :authorize #'signal-authorize
+        :admit #'signal-admit
+        :transports #{:websocket :sse}
+        :message-buffer 8
+        :message-timeout-seconds 30
+        :max-channel-id-bytes 128
+        :max-subscribers 4})]
      :resources
      [["/"
        {:get {:name :tahto/root

@@ -1,0 +1,42 @@
+(ns tahto.sync.signal
+  (:config {})
+  (:require
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]))
+
+(def signal-protocol "tahto.signal/0-alpha")
+(def signal-kinds #{"offer" "answer" "candidate" "close"})
+
+(def required-fields
+  #{:protocol :session :from :to :sequence :kind :payload})
+
+(def optional-fields
+  #{:reply-to})
+
+(defn signal?
+  "Recognises one bounded, directed WebRTC signalling record. Signalling is
+   ephemeral; durable authority and sync state remain outside this record."
+  [value]
+  (and
+   (validate/exact-record? value required-fields optional-fields)
+   (= signal-protocol (get value :protocol))
+   (model/identifier? (get value :session))
+   (model/identifier? (get value :from))
+   (model/identifier? (get value :to))
+   (model/positive-integer? (get value :sequence))
+   (has? signal-kinds (get value :kind))
+   (map? (get value :payload))
+   (or (nil? (get value :reply-to))
+       (model/positive-integer? (get value :reply-to)))))
+
+(defn addressed?
+  [signal device]
+  (and (signal? signal)
+       (= device (get signal :to))
+       (not (= device (get signal :from)))))
+
+(defn next-sequence?
+  "Rejects replay and reordering without making the Nchan queue durable."
+  [last-sequence signal]
+  (and (signal? signal)
+       (> (get signal :sequence) last-sequence)))

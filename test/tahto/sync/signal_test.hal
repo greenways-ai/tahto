@@ -1,0 +1,26 @@
+(ns tahto.sync.signal-test
+  (:config {})
+  (:require [tahto.sync.signal :as signal]))
+
+(def offer
+  {:protocol signal/signal-protocol
+   :session "session.one"
+   :from "device.a"
+   :to "device.b"
+   :sequence 1
+   :kind "offer"
+   :payload {:sdp "bounded-test-offer"}})
+
+[(test-check
+  "signalling records are closed, directed, and sequenced"
+  [(signal/signal? offer)
+   (signal/addressed? offer "device.b")
+   (signal/next-sequence? 0 offer)
+   (signal/next-sequence? 1 offer)]
+  [true true true false])
+
+ (test-check
+  "unknown signalling fields and kinds are rejected"
+  [(signal/signal? (assoc offer :kind "renegotiate"))
+   (signal/signal? (assoc offer :nginx/directive "unsafe"))]
+  [false false])]
