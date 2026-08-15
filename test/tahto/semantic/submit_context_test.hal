@@ -1,6 +1,7 @@
 (ns tahto.semantic.submit-context-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.protocol.validate :as validate]
             [tahto.semantic.submit :as submit]
             [tahto.store.model :as model]))
@@ -43,7 +44,8 @@
           :status "revoked"
           :revoked-at "2026-08-09T00:10:00Z")))
 
-[(test-check
+(test/print-results
+ [(test/check
    "semantic submit requires a current enrolled device at the context boundary"
    [(submit/admitted-context? enrolled-state context)
     (submit/admitted-context? revoked-state context)
@@ -57,4 +59,4 @@
             :status "completed"
             :result-digest request-digest))
     (submit/admitted-context? enrolled-state nil)]
-   [true false false false false false])]
+   [true false false false false false])])
