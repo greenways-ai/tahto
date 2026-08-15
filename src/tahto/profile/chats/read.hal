@@ -335,7 +335,7 @@
                (get queried :ok)
                (available-branch
                 branch (get queried :value))
-               queried))))))))
+               queried)))))))))
 
 (defn read-chat-with
   [state branch invoke]
@@ -382,7 +382,7 @@
          (get queried :ok)
          (available-branch
           branch (get queried :value))
-         queried))))
+         queried)))))
 
 (defn process-messages-with
   [state request branch invoke]
