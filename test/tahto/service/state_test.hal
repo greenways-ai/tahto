@@ -1,6 +1,7 @@
 (ns tahto.service.state-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.protocol.validate :as validate]
             [tahto.service.state :as service]
             [tahto.store.model :as model]
@@ -213,14 +214,15 @@
     :output-roots output-roots)
    :updated-at "2026-08-07T00:04:00Z"))
 
-[(test-check
+(test/print-results
+ [(test/check
    "service descriptors are closed inert records"
    [(service/service? (descriptor))
     (service/service?
      (assoc (descriptor) :command "run-unreviewed-worker"))]
    [true false])
 
-  (test-check
+  (test/check
    "registration stores an exact digest-pinned descriptor"
    (let [result
          (register (fixture-state)
@@ -236,7 +238,7 @@
       (get-in result [:value :service :artifact-digest])])
    [true true "service.register" artifact-a])
 
-  (test-check
+  (test/check
    "a context for another operation cannot register a service"
    (let [admitted
          (admit (fixture-state)
@@ -252,7 +254,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.service/context-not-admitted"])
 
-  (test-check
+  (test/check
    "a service id cannot be rebound to a different artifact"
    (let [first
          (register (fixture-state)
@@ -269,7 +271,7 @@
      [(get conflict :ok) (error-code conflict)])
    [false "tahto.service/descriptor-conflict"])
 
-  (test-check
+  (test/check
    "disabling a service prevents it from accepting new jobs"
    (let [state (registered-state)
          disable-admitted
@@ -295,7 +297,7 @@
       (error-code attempted)])
    ["disabled" false "tahto.job/service-ineligible"])
 
-  (test-check
+  (test/check
    "enqueue is durable and idempotent for the exact signed request"
    (let [job (queued-job)
          first
@@ -314,7 +316,7 @@
       (count (service/jobs (result-state retry)))])
    [true true true 1])
 
-  (test-check
+  (test/check
    "one job idempotency key cannot identify different work"
    (let [first-job
          (queued-job "job.one" "job-idempotency-0001" [object-a])
@@ -333,7 +335,7 @@
      [(get conflict :ok) (error-code conflict)])
    [false "tahto.job/idempotency-conflict"])
 
-  (test-check
+  (test/check
    "job inputs cannot cross their admitted namespace"
    (let [job
          (queued-job "job.hidden"
@@ -347,7 +349,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.job/input-closure-out-of-scope"])
 
-  (test-check
+  (test/check
    "claiming queued work increments the durable attempt exactly once"
    (let [queued (queued-job)
          enqueued
@@ -367,7 +369,7 @@
       (get-in claimed [:value :job :attempt])])
    [true "running" 1])
 
-  (test-check
+  (test/check
    "attempt counters cannot jump when work is claimed"
    (let [queued (queued-job)
          enqueued
@@ -386,7 +388,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.job/attempt-invalid"])
 
-  (test-check
+  (test/check
    "completed outputs must be a complete admitted closure"
    (let [queued (queued-job)
          enqueued
@@ -412,7 +414,7 @@
       (get-in completed [:value :job :output-roots])])
    [true "completed" [object-b]])
 
-  (test-check
+  (test/check
    "a hidden output cannot be published as a completed job result"
    (let [queued (queued-job)
          enqueued
@@ -436,7 +438,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.job/output-closure-out-of-scope"])
 
-  (test-check
+  (test/check
    "completed and cancelled jobs are terminal"
    (let [queued (queued-job)
          enqueued
@@ -472,7 +474,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.job/job-terminal"])
 
-  (test-check
+  (test/check
    "a disabled service may settle already-running work but cannot retry it"
    (let [queued (queued-job)
          enqueued
@@ -509,7 +511,7 @@
       (get-in completed [:value :job :state])])
    [true "completed"])
 
-  (test-check
+  (test/check
    "service and job tables fail closed at configured bounds"
    (let [service-limited
          (register (fixture-state {:max-services 0})
@@ -526,4 +528,4 @@
      [(error-code service-limited)
       (error-code job-limited)])
    ["tahto.service/service-limit-reached"
-    "tahto.job/job-limit-reached"])]
+    "tahto.job/job-limit-reached"])])
