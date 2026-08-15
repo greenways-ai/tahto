@@ -1,6 +1,7 @@
 (ns tahto.store.history-test
   (:config {})
-  (:require
+  (:require [std.foundation :refer :all]
+            [std.lib.test :as test]
             [tahto.protocol.validate :as validate]
             [tahto.store.graph :as graph]
             [tahto.store.history :as history]
@@ -139,7 +140,8 @@
    :retention-label retention
    :signature signature})
 
-[(test-check
+(test/print-results
+ [(test/check
    "stored commit verification is content-addressed and bounded"
    (let [requested
          (history/request-commit
@@ -158,7 +160,7 @@
     1048576
     true])
 
-  (test-check
+  (test/check
    "record verification does not disclose objects outside one namespace"
    (let [state (add-object (model/empty-state) app "other" commit-a 32)
          result
@@ -168,7 +170,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.history/record-out-of-scope"])
 
-  (test-check
+  (test/check
    "accepted commits bind signature proof, device sequence and object edges"
    (let [record (commit-record commit-a "device-a" 1 [] [object-a])
          result (accept-commit (fixture-state) record)
@@ -181,7 +183,7 @@
       (get-in result [:value :receipt-action])])
    [true commit-a 1 commit-a [object-a] "commit.accept"])
 
-  (test-check
+  (test/check
    "commit acceptance is idempotent for one immutable root"
    (let [record (commit-record commit-a "device-a" 1 [] [object-a])
          first (accept-commit (fixture-state) record)
@@ -190,7 +192,7 @@
       (= (result-state first) (result-state second))])
    [true true])
 
-  (test-check
+  (test/check
    "device sequence gaps and reuse are rejected before state mutation"
    (let [first-record (commit-record commit-a "device-a" 1 [] [object-a])
          first (accept-commit (fixture-state) first-record)
@@ -201,14 +203,14 @@
       (nil? (model/commit-record (result-state gap) commit-b))])
    [false "tahto.history/sequence-not-next" true])
 
-  (test-check
+  (test/check
    "commit parents must already exist in the same collection coordinate"
    (let [record (commit-record commit-b "device-b" 1 [missing] [object-b])
          result (accept-commit (fixture-state) record)]
      [(get result :ok) (error-code result)])
    [false "tahto.history/commit-parent-invalid"])
 
-  (test-check
+  (test/check
    "commit payload roots require namespace authority and complete closure"
    (let [initial (model/empty-state)
          with-commit (add-object initial app namespace-id commit-a 512)
@@ -218,7 +220,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.history/object-out-of-scope"])
 
-  (test-check
+  (test/check
    "a verification key must match the signed record key"
    (let [record (commit-record commit-a "device-a" 1 [] [object-a])
          invalid
@@ -236,7 +238,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.history/verification-invalid"])
 
-  (test-check
+  (test/check
    "head updates use signed compare-and-swap"
    (let [state (state-with-three-commits)
          first-record (head-record [commit-b] [] "2026-08-07T00:01:00Z")
@@ -266,7 +268,7 @@
       (error-code stale)])
    [true true [commit-b] "tahto.history/head-compare-failed"])
 
-  (test-check
+  (test/check
    "a head preserves divergent valid commits without selecting a winner"
    (let [state (state-with-three-commits)
          record
@@ -283,7 +285,7 @@
       (get-in next-state [:roots root-id :digests])])
    [[commit-b commit-c] [commit-b commit-c]])
 
-  (test-check
+  (test/check
    "replaying the same signed head update is idempotent"
    (let [state (state-with-three-commits)
          record (head-record [commit-b] [] "2026-08-07T00:02:00Z")
@@ -294,7 +296,7 @@
       (= (result-state first) (result-state replay))])
    [true true])
 
-  (test-check
+  (test/check
    "heads cannot pin an incomplete object closure"
    (let [state (state-with-three-commits)
          broken (assoc state :objects
@@ -307,7 +309,7 @@
      [(get result :ok) (error-code result)])
    [false "tahto.history/head-closure-incomplete"])
 
-  (test-check
+  (test/check
    "immutable backups pin the complete commit and object closure"
    (let [state (state-with-three-commits)
          record (backup-record [commit-b commit-c] "daily")
@@ -330,7 +332,7 @@
       (has? (into #{} (get-in plan [:value :objects])) backup-a)])
    [true [backup-a] true true true true])
 
-  (test-check
+  (test/check
    "one backup digest cannot acquire different retention meaning"
    (let [state (state-with-three-commits)
          first-record (backup-record [commit-b] "daily")
@@ -348,7 +350,7 @@
      [(get changed :ok) (error-code changed)])
    [false "tahto.history/backup-conflict"])
 
-  (test-check
+  (test/check
    "releasing retention removes the root but preserves immutable backup evidence"
    (let [state (state-with-three-commits)
          record (backup-record [commit-b] "daily")
@@ -367,7 +369,7 @@
       (= record (model/backup-record next-state backup-a))])
    [true true true])
 
-  (test-check
+  (test/check
    "signed receipts are immutable evidence records"
    (let [record
          {:protocol model/receipt-protocol
@@ -383,4 +385,4 @@
           (proof model/receipt-protocol receipt-a record))]
      [(get accepted :ok)
       (= record (model/receipt-record (result-state accepted) receipt-a))])
-   [true true])]
+   [true true])])
