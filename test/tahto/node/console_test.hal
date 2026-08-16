@@ -51,6 +51,22 @@
     ["status" "health" "diagnostics" "pairing.invitation.issue"]])
 
  (test-check
+  "the worker envelope admits no caller-selected routing fields"
+  [(contract/request-envelope?
+    {:grant grant :command "status" :input {}})
+   (contract/request-envelope?
+    {:grant grant
+     :command "status"
+     :input {}
+     :handler "tahto.node.app/status"})
+   (contract/request-envelope?
+    {:grant grant
+     :command "status"
+     :input {}
+     :source "(runtime/eval)"})]
+  [true false false])
+
+ (test-check
   "status health and diagnostics results contain aggregate projections only"
   (let [status (console/status-with inspection)
         health (console/health-with inspection)
