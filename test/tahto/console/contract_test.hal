@@ -1,0 +1,145 @@
+(ns tahto.console.contract-test
+  (:config {})
+  (:require
+            [tahto.console.contract :as contract]
+            [tahto.sync.pairing :as pairing]))
+
+(def read-grant
+  {:protocol contract/grant-protocol
+   :console "console.read"
+   :commands #{"status" "health" "diagnostics" "pairing.invitation.issue"}
+   :write false})
+
+(def write-grant
+  (assoc read-grant :console "console.write" :write true))
+
+(def status-only-grant
+  {:protocol contract/grant-protocol
+   :console "console.status"
+   :commands #{"status"}
+   :write false})
+
+(def invitation
+  {:protocol pairing/invitation-protocol
+   :id "invite.console"
+   :node "node.home"
+   :token-digest
+   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   :approval-digest
+   "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   :created-at "2026-08-17T00:00:00Z"
+   :expires-at "2026-08-17T00:05:00Z"
+   :created-seconds 1786924800
+   :expires-seconds 1786925100
+   :status "open"})
+
+(defn immutable-hta-value?
+  [value]
+  (cond
+    (or (nil? value)
+        (boolean? value)
+        (number? value)
+        (string? value)
+        (keyword? value))
+    true
+
+    (vector? value)
+    (every? immutable-hta-value? value)
+
+    (set? value)
+    (every? immutable-hta-value? value)
+
+    (map? value)
+    (every?
+     (fn [entry]
+       (and (immutable-hta-value? (key entry))
+            (immutable-hta-value? (val entry))))
+     value)
+
+    :else false))
+
+[(test-check
+   "command descriptors are immutable HTA data with explicit effects"
+   [(count contract/command-descriptors)
+    (every? contract/descriptor? contract/command-descriptors)
+    (immutable-hta-value? contract/command-descriptors)
+    (map (fn [descriptor]
+           [(get descriptor :command) (get descriptor :effect)])
+         contract/command-descriptors)]
+   [4
+    true
+    true
+    [["status" :read]
+     ["health" :read]
+     ["diagnostics" :read]
+     ["pairing.invitation.issue" :write]]])
+
+ (test-check
+  "read-only grants omit write descriptors even when named"
+  (map (fn [descriptor]
+         (get descriptor :command))
+       (contract/granted-commands read-grant))
+  ["status" "health" "diagnostics"])
+
+ (test-check
+  "an unlisted command and a command absent from the grant are distinct"
+  [(get-in
+    (contract/validate-call read-grant "runtime.eval" {})
+    [:error :code])
+   (get-in
+    (contract/validate-call status-only-grant "health" {})
+    [:error :code])]
+  ["tahto.console/command-unlisted"
+   "tahto.console/command-not-granted"])
+
+ (test-check
+  "write commands require the explicit per-console write grant"
+  [(get-in
+    (contract/validate-call
+     read-grant "pairing.invitation.issue" invitation)
+    [:error :code])
+   (get
+    (contract/validate-call
+     write-grant "pairing.invitation.issue" invitation)
+    :ok)]
+  ["tahto.console/write-not-granted" true])
+
+ (test-check
+  "both read and write command inputs are exact and bounded"
+  [(get (contract/validate-call read-grant "status" {}) :ok)
+   (get-in
+    (contract/validate-call read-grant "status" {:extra true})
+    [:error :code])
+   (get
+    (contract/validate-call
+     read-grant
+     "diagnostics"
+     {:checked-at "2026-08-17T00:00:00Z"})
+    :ok)
+   (get-in
+    (contract/validate-call
+     read-grant
+     "diagnostics"
+     {:checked-at "not-a-time"})
+    [:error :code])
+   (get-in
+    (contract/validate-call
+     write-grant
+     "pairing.invitation.issue"
+     (dissoc invitation :approval-digest))
+    [:error :code])]
+  [true
+   "tahto.console/input-invalid"
+   true
+   "tahto.console/input-invalid"
+   "tahto.console/input-invalid"])
+
+ (test-check
+  "grants cannot smuggle arbitrary command names into the allowlist"
+  (get-in
+   (contract/validate-call
+    (assoc read-grant :commands #{"status" "tahto.node.app/quit"})
+    "status"
+    {})
+   [:error :code])
+  "tahto.console/grant-invalid")]
