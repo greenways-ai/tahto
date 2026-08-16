@@ -1,0 +1,157 @@
+(ns tahto.console.contract
+  (:config {})
+  (:require
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.sync.pairing :as pairing]))
+
+(def descriptor-protocol "tahto.console-command/0-alpha")
+(def grant-protocol "hoplite.console-grant/0-alpha")
+(def request-protocol "tahto.console-request/0-alpha")
+
+(def status-command
+  {:protocol descriptor-protocol
+   :command "status"
+   :effect :read
+   :input {:type :map :required #{} :optional #{}}
+   :output {:type :hta}
+   :summary "Report installed Tahto fabric components"})
+
+(def health-command
+  {:protocol descriptor-protocol
+   :command "health"
+   :effect :read
+   :input {:type :map :required #{} :optional #{}}
+   :output {:type :hta}
+   :summary "Report bounded Tahto control-plane readiness"})
+
+(def diagnostics-command
+  {:protocol descriptor-protocol
+   :command "diagnostics"
+   :effect :read
+   :input {:type :map
+           :required #{:checked-at}
+           :optional #{}
+           :fields {:checked-at :timestamp}}
+   :output {:type :hta}
+   :summary "Report aggregate diagnostics without stored records"})
+
+(def pairing-issue-command
+  {:protocol descriptor-protocol
+   :command "pairing.invitation.issue"
+   :effect :write
+   :input {:type :map
+           :required
+           #{:protocol :id :node :token-digest :approval-digest
+             :created-at :expires-at :created-seconds :expires-seconds :status}
+           :optional #{}}
+   :output {:type :hta}
+   :summary "Issue one bounded pairing invitation"})
+
+(def command-descriptors
+  [status-command
+   health-command
+   diagnostics-command
+   pairing-issue-command])
+
+(def command-names
+  #{"status" "health" "diagnostics" "pairing.invitation.issue"})
+
+(defn descriptor
+  [command]
+  (reduce
+   (fn [found candidate]
+     (if (= command (get candidate :command)) candidate found))
+   nil
+   command-descriptors))
+
+(defn command?
+  [command]
+  (and (string? command) (has? command-names command)))
+
+(defn descriptor?
+  [value]
+  (and
+   (validate/exact-record?
+    value
+    #{:protocol :command :effect :input :output :summary}
+    #{})
+   (= descriptor-protocol (get value :protocol))
+   (command? (get value :command))
+   (has? #{:read :write} (get value :effect))
+   (map? (get value :input))
+   (= {:type :hta} (get value :output))
+   (string? (get value :summary))))
+
+(defn grant?
+  [grant]
+  (and
+   (validate/exact-record?
+    grant
+    #{:protocol :console :commands :write}
+    #{})
+   (= grant-protocol (get grant :protocol))
+   (model/identifier? (get grant :console))
+   (set? (get grant :commands))
+   (every? command? (get grant :commands))
+   (model/boolean-value? (get grant :write))))
+
+(defn empty-input?
+  [input]
+  (validate/exact-record? input #{} #{}))
+
+(defn diagnostics-input?
+  [input]
+  (and
+   (validate/exact-record? input #{:checked-at} #{})
+   (validate/timestamp? (get input :checked-at))))
+
+(defn input-valid?
+  [command input]
+  (cond
+    (= command "status") (empty-input? input)
+    (= command "health") (empty-input? input)
+    (= command "diagnostics") (diagnostics-input? input)
+    (= command "pairing.invitation.issue") (pairing/invitation? input)
+    :else false))
+
+(defn granted?
+  [grant descriptor]
+  (and
+   (grant? grant)
+   (descriptor? descriptor)
+   (has? (get grant :commands) (get descriptor :command))
+   (or (= :read (get descriptor :effect))
+       (= true (get grant :write)))))
+
+(defn granted-commands
+  [grant]
+  (if
+   (grant? grant)
+   (vec (filter (fn [candidate]
+                  (granted? grant candidate))
+                command-descriptors))
+   []))
+
+(defn validate-call
+  [grant command input]
+  (let [candidate (descriptor command)]
+    (cond
+      (not (grant? grant))
+      (model/fail {} "tahto.console/grant-invalid")
+
+      (nil? candidate)
+      (model/fail {} "tahto.console/command-unlisted")
+
+      (not (has? (get grant :commands) command))
+      (model/fail {} "tahto.console/command-not-granted")
+
+      (and (= :write (get candidate :effect))
+           (not (= true (get grant :write))))
+      (model/fail {} "tahto.console/write-not-granted")
+
+      (not (input-valid? command input))
+      (model/fail {} "tahto.console/input-invalid")
+
+      :else
+      (model/ok {} candidate))))

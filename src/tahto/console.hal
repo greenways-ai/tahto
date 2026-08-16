@@ -1,0 +1,28 @@
+(ns tahto.console
+  (:config {}))
+
+(def request-protocol "tahto.console-request/0-alpha")
+(def broker-service "hoplite.console")
+
+(defn commands
+  "Returns the immutable descriptors granted to this evaluator connection.
+   The supervisor supplies these over the evaluator's single pre-opened broker
+   channel; this namespace never discovers application state or handlers."
+  []
+  (deref
+   (std.native.Host/call
+    broker-service
+    "commands"
+    [])))
+
+(defn call
+  "Invokes one public named command through the console broker.
+   The result is a Promise<Result>; command authority and input validation are
+   enforced again by both Hoplite and the Tahto application dispatcher."
+  [command input]
+  (std.native.Host/call
+   broker-service
+   "call"
+   [{:protocol request-protocol
+     :command command
+     :input input}]))

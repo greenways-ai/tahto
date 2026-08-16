@@ -1,0 +1,96 @@
+(ns tahto.node.console-test
+  (:config {})
+  (:require
+            [tahto.console.contract :as contract]
+            [tahto.node.console :as console]
+            [tahto.store.model :as model]
+            [tahto.sync.pairing :as pairing]))
+
+(def grant
+  {:protocol contract/grant-protocol
+   :console "console.test"
+   :commands #{"status" "health" "diagnostics" "pairing.invitation.issue"}
+   :write true})
+
+(def inspection
+  {:protocol "tahto.monitor-probe/0-alpha"
+   :state "ready"
+   :metadata "ready"
+   :object "ready"
+   :error nil
+   :object-error nil
+   :revision 2
+   :counts {:devices 1 :objects 3 :commits 1 :heads 1 :backups 0}})
+
+(def invitation
+  {:protocol pairing/invitation-protocol
+   :id "invite.console"
+   :node "node.home"
+   :token-digest
+   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   :approval-digest
+   "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   :created-at "2026-08-17T00:00:00Z"
+   :expires-at "2026-08-17T00:05:00Z"
+   :created-seconds 1786924800
+   :expires-seconds 1786925100
+   :status "open"})
+
+[(test-check
+   "the app command-list result contains only granted immutable descriptors"
+   (let [result (console/commands grant)]
+     [(get result :ok)
+      (get result :state)
+      (get result :effects)
+      (map (fn [descriptor]
+             (get descriptor :command))
+           (get result :value))])
+   [true
+    {}
+    []
+    ["status" "health" "diagnostics" "pairing.invitation.issue"]])
+
+ (test-check
+  "status health and diagnostics results contain aggregate projections only"
+  (let [status (console/status-with inspection)
+        health (console/health-with inspection)
+        diagnostics
+        (console/diagnostics-with
+         inspection
+         {:checked-at "2026-08-17T00:00:00Z"})]
+    [(get status :state)
+     (get status :effects)
+     (get-in status [:value "fabric" "metadataProvider"])
+     (get-in health [:value "status"])
+     (get-in diagnostics [:value :counts :objects])
+     (has? (get diagnostics :value) :devices)])
+  [{} [] "ready" "ready" 3 false])
+
+ (test-check
+  "pairing issuance strips application state and secret digests from output"
+  (let [result
+        (console/bounded-pairing-result
+         (model/ok {:secret-state true} invitation))]
+    [(get result :ok)
+     (get result :state)
+     (get result :effects)
+     (get-in result [:value "id"])
+     (get-in result [:value "status"])
+     (has? (get result :value) "tokenDigest")
+     (has? (get result :value) "approvalDigest")])
+  [true {} [] "invite.console" "open" false false])
+
+ (test-check
+  "pairing failures retain only the public error code"
+  (let [result
+        (console/bounded-pairing-result
+         (model/fail
+          {:secret-state true}
+          "tahto.pairing/invitation-conflict"
+          {:secret "not projected"}))]
+    [(get result :ok)
+     (get result :state)
+     (get result :effects)
+     (get-in result [:error :code])
+     (get-in result [:error :details])])
+  [false {} [] "tahto.pairing/invitation-conflict" {}])]
