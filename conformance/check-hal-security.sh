@@ -12,6 +12,12 @@ grep -F '"semanticFabric" "kernel-ready:service-pending"' src/tahto/protocol/des
 grep -F '"semanticRoutes" "not-exposed"' src/tahto/protocol/descriptor.hal
 grep -F '"canonicalValueProvider" "not-installed"' src/tahto/protocol/descriptor.hal
 
+grep -F '[tahto.node.console :as console]' src/tahto/node/app.hal
+grep -F ":console #'console/dispatch" src/tahto/node/app.hal
+grep -F '(defn request-envelope?' src/tahto/console/contract.hal
+grep -F '(not (contract/request-envelope? request))' src/tahto/node/console.hal
+! grep -F '[grant command input]' src/tahto/node/console.hal
+
 ! grep -R -F '(def native-abi' src/tahto
 ! grep -R -F ':native-abi' src/tahto
 ! grep -R -F '(def host-service "tahto.' src/tahto
