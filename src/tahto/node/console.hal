@@ -1,0 +1,109 @@
+(ns tahto.node.console
+  (:config {})
+  (:require
+            [tahto.console.contract :as contract]
+            [tahto.monitor :as monitor]
+            [tahto.node.pairing-service :as pairing-service]
+            [tahto.node.pairing-wire :as pairing-wire]
+            [tahto.protocol.descriptor :as descriptor]
+            [tahto.store.capability :as capability]
+            [tahto.store.model :as model]
+            [tahto.store.provider :as provider]))
+
+(defn commands
+  "Returns only descriptors admitted by one immutable per-console grant."
+  [grant]
+  (if
+   (contract/grant? grant)
+   (model/ok {} (contract/granted-commands grant))
+   (model/fail {} "tahto.console/grant-invalid")))
+
+(defn ^:async inspection
+  []
+  (let [state (model/empty-state)
+        metadata-call (get (provider/prepare-load state) :value)
+        metadata-native
+        (co/await
+         (host/call
+          (get metadata-call :service)
+          (get metadata-call :operation)
+          (provider/call-request metadata-call)))
+        metadata-result
+        (provider/accept-result state metadata-call metadata-native)
+        object-call (capability/host-call (capability/probe-request))
+        object-native
+        (co/await
+         (host/call
+          (get object-call :service)
+          (get object-call :operation)
+          (capability/call-request object-call)))
+        object-result
+        (capability/accept-result state object-call object-native)]
+    (monitor/inspect-results metadata-result object-result)))
+
+(defn status-with
+  [inspection]
+  (model/ok {} (descriptor/status-with inspection)))
+
+(defn health-with
+  [inspection]
+  (model/ok {} (descriptor/health-with inspection)))
+
+(defn diagnostics-with
+  [inspection input]
+  (model/ok
+   {}
+   (monitor/diagnostics inspection (get input :checked-at))))
+
+(defn bounded-pairing-result
+  [result]
+  (if
+   (get result :ok)
+   (model/ok {} (pairing-wire/issue-result (get result :value)))
+   (model/fail {} (get-in result [:error :code]))))
+
+(defn ^:async status
+  [_input]
+  (status-with (co/await (inspection))))
+
+(defn ^:async health
+  [_input]
+  (health-with (co/await (inspection))))
+
+(defn ^:async diagnostics
+  [input]
+  (diagnostics-with (co/await (inspection)) input))
+
+(defn ^:async pairing-invitation-issue
+  [input]
+  (bounded-pairing-result
+   (co/await
+    (pairing-service/execute
+     "pairing.issue"
+     input
+     (get input :created-at)))))
+
+(defn ^:async dispatch
+  "Validates the public command and input, then invokes one fixed prepared HAL
+   function. No source, symbol, Var, handler identifier, or function name from
+   the caller is ever resolved."
+  [grant command input]
+  (let [validated (contract/validate-call grant command input)]
+    (if
+     (not (get validated :ok))
+     validated
+     (cond
+       (= command "status")
+       (co/await (status input))
+
+       (= command "health")
+       (co/await (health input))
+
+       (= command "diagnostics")
+       (co/await (diagnostics input))
+
+       (= command "pairing.invitation.issue")
+       (co/await (pairing-invitation-issue input))
+
+       :else
+       (model/fail {} "tahto.console/command-unlisted")))))
