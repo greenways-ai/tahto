@@ -1,5 +1,6 @@
 (ns tahto.node.app
   (:require [hoplite.core :as h]
+            [tahto.node.console :as console]
             [tahto.node.pairing-service :as pairing-service]
             [tahto.node.pairing-wire :as pairing-wire]
             [tahto.node.request-auth :as request-auth]
@@ -257,6 +258,7 @@
 (def app
   (h/app
     {:name "tahto"
+     :console #'console/dispatch
      :channels
      [(h/channel
        {:name :signals

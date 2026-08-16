@@ -69,6 +69,12 @@
   [command]
   (and (string? command) (has? command-names command)))
 
+(defn request-envelope?
+  "Accepts only the immutable app-worker envelope. Handler names, source,
+   symbols, Vars, and other caller-selected routing fields are not admitted."
+  [value]
+  (validate/exact-record? value #{:grant :command :input} #{}))
+
 (defn descriptor?
   [value]
   (and
