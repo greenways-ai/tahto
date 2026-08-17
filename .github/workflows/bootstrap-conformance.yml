@@ -83,20 +83,11 @@ jobs:
             --root . conformance/check-console-bundle.hal
       - name: Stage the Hoplite-owned portable contracts
         run: |
-          mkdir -p .conformance-src/hoplite
-          cp .dependencies/technology/hoplite-value/core/lib/src/hoplite/value.hal .conformance-src/hoplite/value.hal
-          cp .dependencies/technology/hoplite/core/lib/src/hoplite/response_source.hal .conformance-src/hoplite/response_source.hal
+          mkdir -p src/hoplite
+          cp .dependencies/technology/hoplite-value/core/lib/src/hoplite/value.hal src/hoplite/value.hal
+          cp .dependencies/technology/hoplite/core/lib/src/hoplite/response_source.hal src/hoplite/response_source.hal
       - name: Run the Hoplite-backed state conformance suites
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("project.edn")
-          source = path.read_text()
-          source = source.replace(':project/source-paths ["src"]', ':project/source-paths ["src" ".conformance-src"]')
-          if source == path.read_text():
-              raise SystemExit("project.edn source paths were not updated")
-          path.write_text(source)
-          PY
           .dependencies/technology/hara/core/rust/target/release/hara-test --root . \
             test/tahto/semantic/canonical_value_test.hal \
             test/tahto/semantic/value_source_test.hal \
