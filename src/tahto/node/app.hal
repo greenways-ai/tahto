@@ -1,5 +1,6 @@
 (ns tahto.node.app
   (:require [hoplite.core :as h]
+            [tahto.console.contract :as console-contract]
             [tahto.node.console :as console]
             [tahto.node.pairing-service :as pairing-service]
             [tahto.node.pairing-wire :as pairing-wire]
@@ -258,7 +259,15 @@
 (def app
   (h/app
     {:name "tahto"
-     :console #'console/dispatch
+     :console
+     {:handler #'console/dispatch
+      :client "tahto.console"
+      :descriptors console-contract/command-descriptors
+      :grant
+      {:protocol console-contract/grant-protocol
+       :console "console.template"
+       :commands console-contract/command-names
+       :write false}}
      :channels
      [(h/channel
        {:name :signals
