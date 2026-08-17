@@ -97,7 +97,11 @@ jobs:
               raise SystemExit("project.edn source paths were not updated")
           path.write_text(source)
           PY
-          .dependencies/technology/hara/core/rust/target/release/hara test
+          .dependencies/technology/hara/core/rust/target/release/hara-test --root . \
+            test/tahto/semantic/canonical_value_test.hal \
+            test/tahto/semantic/value_source_test.hal \
+            test/tahto/store/response_source_test.hal \
+            test/tahto/sync/two_device_object_test.hal
 
   native-migration-source:
     name: Transitional native metadata migration source
