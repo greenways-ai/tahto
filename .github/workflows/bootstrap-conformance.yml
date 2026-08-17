@@ -33,8 +33,8 @@ jobs:
   hoplite-state:
     runs-on: ubuntu-latest
     env:
-      HARA_REVISION: 45eebddeca2a61e490337c90821b30b2328749e0
-      HOPLITE_REVISION: 12796b70166d03b1e17d5b00bfa2817d7ab3a672
+      HARA_REVISION: 2b3efd14451e96e9e79cd9645fb7e10d9e3782d6
+      HOPLITE_REVISION: 58cc7a471ace6fdcc30307e9f972089f6f027291
       CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +61,18 @@ jobs:
         with:
           toolchain: 1.85.0
       - name: Build the reviewed Hara test runner
-        run: cargo build --locked --release --manifest-path .dependencies/technology/hara/core/rust/Cargo.toml --bin hara
+        run: cargo build --locked --release --manifest-path .dependencies/technology/hara/core/rust/Cargo.toml --bin hara --bin hara-test
+      - name: Build the reviewed immutable console-bundle tool
+        run: cargo build --locked --release --manifest-path .dependencies/technology/hoplite/core/Cargo.toml --features application-console --bin hoplite-console-bundle
+      - name: Reproduce the Tahto console bundle exactly
+        run: |
+          mkdir -p .bundle-repro
+          .dependencies/technology/hoplite/core/target/release/hoplite-console-bundle \
+            --namespace tahto.console \
+            --source src/tahto/console.hal \
+            --output .bundle-repro/tahto-console.hcb
+          .dependencies/technology/hara/core/rust/target/release/hara-test \
+            --root . conformance/check-console-bundle.hal
       - name: Stage the Hoplite-owned portable contracts
         run: |
           mkdir -p .conformance-src/hoplite

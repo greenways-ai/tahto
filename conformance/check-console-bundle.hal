@@ -1,0 +1,51 @@
+(ns tahto.conformance.console-bundle
+  (:config {})
+  (:require
+            [std.foundation.string :as str]))
+
+(def artifact-path "packaging/console/tahto-console.hcb")
+(def reproduced-path ".bundle-repro/tahto-console.hcb")
+(def manifest-path "packaging/console/manifest.hta")
+
+(def expected-manifest-keys
+  #{:protocol :format :digest :bytes :exported-namespace :console-contract})
+
+(defn read-bytes
+  [path]
+  (deref (File/read path)))
+
+(defn check-result
+  [name actual expected]
+  {:pass (= actual expected)
+   :name name
+   :actual actual
+   :expected expected})
+
+(let [artifact (read-bytes artifact-path)
+      reproduced (read-bytes reproduced-path)
+      manifest
+      (Edn/read
+       (str/decode-utf8 (read-bytes manifest-path)))
+      digest (str "sha256:" (Crypto/sha256 artifact))]
+  [(check-result
+    "the manifest contains only the immutable bundle-reference fields"
+    (set (keys manifest))
+    expected-manifest-keys)
+   (check-result
+    "the manifest identifies the Tahto HCB0 console contract"
+    [(get manifest :protocol)
+     (get manifest :format)
+     (get manifest :exported-namespace)
+     (get manifest :console-contract)]
+    ["tahto.console-bundle/0-alpha"
+     "hoplite.console-client/0-alpha"
+     "tahto.console"
+     "tahto.console-request/0-alpha"])
+   (check-result
+    "the reviewed builder reproduces every HCB0 byte"
+    (= artifact reproduced)
+    true)
+   (check-result
+    "the manifest binds the exact byte length and SHA-256"
+    [(count artifact) digest]
+    [(get manifest :bytes) (get manifest :digest)])])
