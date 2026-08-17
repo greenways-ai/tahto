@@ -35,6 +35,7 @@ jobs:
     env:
       HARA_REVISION: 2b3efd14451e96e9e79cd9645fb7e10d9e3782d6
       HOPLITE_REVISION: 58cc7a471ace6fdcc30307e9f972089f6f027291
+      HOPLITE_VALUE_REVISION: d51c5954e427ea84439477135b970a3e1145c190
       CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +57,13 @@ jobs:
           ref: ${{ env.HOPLITE_REVISION }}
           path: .dependencies/technology/hoplite
           persist-credentials: false
+      - name: Check out the quarantined hoplite.value contract
+        uses: actions/checkout@v4
+        with:
+          repository: greenways-ai/hoplite
+          ref: ${{ env.HOPLITE_VALUE_REVISION }}
+          path: .dependencies/technology/hoplite-value
+          persist-credentials: false
       - name: Install the Cargo toolchain required by the locked graph
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -76,7 +84,7 @@ jobs:
       - name: Stage the Hoplite-owned portable contracts
         run: |
           mkdir -p .conformance-src/hoplite
-          cp .dependencies/technology/hoplite/migration/value/src/hoplite/value.hal .conformance-src/hoplite/value.hal
+          cp .dependencies/technology/hoplite-value/core/lib/src/hoplite/value.hal .conformance-src/hoplite/value.hal
           cp .dependencies/technology/hoplite/core/lib/src/hoplite/response_source.hal .conformance-src/hoplite/response_source.hal
       - name: Run the Hoplite-backed state conformance suites
         run: |
