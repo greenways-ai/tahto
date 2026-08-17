@@ -1,0 +1,159 @@
+(ns tahto.console.bundle-test
+  (:config {})
+  (:require
+            [tahto.console.contract :as contract]
+            [tahto.protocol.validate :as validate]
+            [tahto.store.model :as model]
+            [tahto.sync.pairing :as pairing]))
+
+(def manifest
+  {:protocol "tahto.console-bundle/0-alpha"
+   :format "hoplite.console-client/0-alpha"
+   :digest "sha256:c01dec6a46ed0fd90a5e273061493541d9e338efe7645433bc66fe456323bf38"
+   :bytes 886
+   :exported-namespace "tahto.console"
+   :console-contract contract/request-protocol})
+
+(def read-grant
+  {:protocol contract/grant-protocol
+   :console "console.bundle.read"
+   :commands #{"status" "health" "diagnostics" "pairing.invitation.issue"}
+   :write false})
+
+(def write-grant
+  (assoc read-grant :console "console.bundle.write" :write true))
+
+(def invitation
+  {:protocol pairing/invitation-protocol
+   :id "invite.console"
+   :node "node.home"
+   :token-digest
+   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   :approval-digest
+   "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   :created-at "2026-08-17T00:00:00Z"
+   :expires-at "2026-08-17T00:05:00Z"
+   :created-seconds 100
+   :expires-seconds 200
+   :status "open"})
+
+(def call-fixtures
+  [{:grant read-grant :command "status" :input {}}
+   {:grant read-grant :command "health" :input {}}
+   {:grant read-grant
+    :command "diagnostics"
+    :input {:checked-at "2026-08-17T00:00:00Z"}}
+   {:grant write-grant
+    :command "pairing.invitation.issue"
+    :input invitation}])
+
+(def rejection-fixtures
+  [{:name :unknown-command
+    :request {:grant read-grant :command "runtime.eval" :input {}}}
+   {:name :malformed-input
+    :request {:grant read-grant :command "status" :input {:extra true}}}
+   {:name :inadequate-grant
+    :request {:grant read-grant
+              :command "pairing.invitation.issue"
+              :input invitation}}
+   {:name :caller-handler
+    :request {:grant read-grant
+              :command "status"
+              :input {}
+              :handler "tahto.node.console/status"}}
+   {:name :arbitrary-namespace
+    :request {:grant read-grant
+              :command "status"
+              :input {}
+              :namespace "std.native"}}
+   {:name :arbitrary-callable
+    :request {:grant read-grant
+              :command "status"
+              :input {}
+              :callable "std.native.Runtime/eval"}}])
+
+(defn immutable-hta-value?
+  [value]
+  (cond
+    (or (nil? value)
+        (boolean? value)
+        (number? value)
+        (string? value)
+        (keyword? value))
+    true
+
+    (vector? value)
+    (every? immutable-hta-value? value)
+
+    (set? value)
+    (every? immutable-hta-value? value)
+
+    (map? value)
+    (every?
+     (fn [entry]
+       (and (immutable-hta-value? (key entry))
+            (immutable-hta-value? (val entry))))
+     value)
+
+    :else false))
+
+(defn validate-fixture
+  [request]
+  (if
+   (contract/request-envelope? request)
+   (contract/validate-call
+    (get request :grant)
+    (get request :command)
+    (get request :input))
+   (model/fail {} "tahto.console/request-invalid")))
+
+[(test-check
+   "the bundle manifest is an exact inert SandboxSpec bundle reference"
+   [(validate/exact-record?
+     manifest
+     #{:protocol :format :digest :bytes :exported-namespace :console-contract}
+     #{})
+    (get manifest :protocol)
+    (get manifest :format)
+    (model/canonical-digest? (get manifest :digest))
+    (get manifest :exported-namespace)
+    (get manifest :console-contract)
+    (immutable-hta-value? manifest)]
+   [true
+    "tahto.console-bundle/0-alpha"
+    "hoplite.console-client/0-alpha"
+    true
+    "tahto.console"
+    "tahto.console-request/0-alpha"
+    true])
+
+ (test-check
+  "status health diagnostics and pairing fixtures use only the fixed envelope"
+  [(map (fn [request]
+          [(contract/request-envelope? request)
+           (get (validate-fixture request) :ok)])
+        call-fixtures)
+   (immutable-hta-value? call-fixtures)]
+  [[[true true] [true true] [true true] [true true]] true])
+
+ (test-check
+  "unlisted malformed and inadequately granted calls are rejected"
+  (map
+   (fn [fixture]
+     [(get fixture :name)
+      (get-in (validate-fixture (get fixture :request)) [:error :code])])
+   (take 3 rejection-fixtures))
+  [[:unknown-command "tahto.console/command-unlisted"]
+   [:malformed-input "tahto.console/input-invalid"]
+   [:inadequate-grant "tahto.console/write-not-granted"]])
+
+ (test-check
+  "caller routing namespace and callable fields are rejected at the envelope"
+  (map
+   (fn [fixture]
+     [(get fixture :name)
+      (get-in (validate-fixture (get fixture :request)) [:error :code])])
+   (drop 3 rejection-fixtures))
+  [[:caller-handler "tahto.console/request-invalid"]
+   [:arbitrary-namespace "tahto.console/request-invalid"]
+   [:arbitrary-callable "tahto.console/request-invalid"]])]
