@@ -59,7 +59,7 @@ jobs:
       - name: Install the Cargo toolchain required by the locked graph
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85.0
+          toolchain: 1.88.0
       - name: Build the reviewed Hara test runner
         run: cargo build --locked --release --manifest-path .dependencies/technology/hara/core/rust/Cargo.toml --bin hara --bin hara-test
       - name: Build the reviewed immutable console-bundle tool
