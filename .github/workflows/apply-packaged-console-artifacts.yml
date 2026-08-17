@@ -1,0 +1,30 @@
+name: Apply packaged application console artifacts
+
+on:
+  push:
+    branches:
+      - feat/package-application-console-artifacts
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/package-application-console-artifacts
+      - name: Apply the exact packaged console declaration
+        run: python conformance/apply-packaged-console-artifacts.py
+      - name: Prove the fixed read-only declaration
+        run: bash conformance/check-hal-security.sh
+      - name: Commit the Tahto package declaration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/tahto/node/app.hal conformance/check-hal-security.sh
+          git diff --cached --check
+          git commit -m "Package the Tahto application console artifacts"
+          git push origin HEAD:feat/package-application-console-artifacts
