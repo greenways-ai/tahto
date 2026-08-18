@@ -35,6 +35,7 @@ jobs:
     env:
       HARA_REVISION: 2b3efd14451e96e9e79cd9645fb7e10d9e3782d6
       HOPLITE_REVISION: 58cc7a471ace6fdcc30307e9f972089f6f027291
+      HOPLITE_VALUE_REVISION: d51c5954e427ea84439477135b970a3e1145c190
       CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
@@ -56,10 +57,17 @@ jobs:
           ref: ${{ env.HOPLITE_REVISION }}
           path: .dependencies/technology/hoplite
           persist-credentials: false
+      - name: Check out the quarantined hoplite.value contract
+        uses: actions/checkout@v4
+        with:
+          repository: greenways-ai/hoplite
+          ref: ${{ env.HOPLITE_VALUE_REVISION }}
+          path: .dependencies/technology/hoplite-value
+          persist-credentials: false
       - name: Install the Cargo toolchain required by the locked graph
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85.0
+          toolchain: 1.88.0
       - name: Build the reviewed Hara test runner
         run: cargo build --locked --release --manifest-path .dependencies/technology/hara/core/rust/Cargo.toml --bin hara --bin hara-test
       - name: Build the reviewed immutable console-bundle tool
@@ -75,21 +83,16 @@ jobs:
             --root . conformance/check-console-bundle.hal
       - name: Stage the Hoplite-owned portable contracts
         run: |
-          mkdir -p .conformance-src/hoplite
-          cp .dependencies/technology/hoplite/migration/value/src/hoplite/value.hal .conformance-src/hoplite/value.hal
-          cp .dependencies/technology/hoplite/core/lib/src/hoplite/response_source.hal .conformance-src/hoplite/response_source.hal
+          mkdir -p src/hoplite
+          cp .dependencies/technology/hoplite-value/core/lib/src/hoplite/value.hal src/hoplite/value.hal
+          cp .dependencies/technology/hoplite/core/lib/src/hoplite/response_source.hal src/hoplite/response_source.hal
       - name: Run the Hoplite-backed state conformance suites
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("project.edn")
-          source = path.read_text()
-          source = source.replace(':project/source-paths ["src"]', ':project/source-paths ["src" ".conformance-src"]')
-          if source == path.read_text():
-              raise SystemExit("project.edn source paths were not updated")
-          path.write_text(source)
-          PY
-          .dependencies/technology/hara/core/rust/target/release/hara test
+          .dependencies/technology/hara/core/rust/target/release/hara-test --root . \
+            test/tahto/semantic/canonical_value_test.hal \
+            test/tahto/semantic/value_source_test.hal \
+            test/tahto/store/response_source_test.hal \
+            test/tahto/sync/two_device_object_test.hal
 
   native-migration-source:
     name: Transitional native metadata migration source
