@@ -33,7 +33,7 @@ jobs:
   hoplite-state:
     runs-on: ubuntu-latest
     env:
-      HARA_REVISION: 2b3efd14451e96e9e79cd9645fb7e10d9e3782d6
+      HARA_REVISION: e1ecbd0f7275a64806ac95c48ac1803b357afcae
       HOPLITE_REVISION: 58cc7a471ace6fdcc30307e9f972089f6f027291
       HOPLITE_VALUE_REVISION: d51c5954e427ea84439477135b970a3e1145c190
       CARGO_INCREMENTAL: '0'
@@ -86,13 +86,17 @@ jobs:
           mkdir -p src/hoplite
           cp .dependencies/technology/hoplite-value/core/lib/src/hoplite/value.hal src/hoplite/value.hal
           cp .dependencies/technology/hoplite/core/lib/src/hoplite/response_source.hal src/hoplite/response_source.hal
-      - name: Run the Hoplite-backed state conformance suites
+      - name: Run each Hoplite-backed state suite in a fresh native process
         run: |
-          .dependencies/technology/hara/core/rust/target/release/hara-test --root . \
+          for suite in \
             test/tahto/semantic/canonical_value_test.hal \
             test/tahto/semantic/value_source_test.hal \
             test/tahto/store/response_source_test.hal \
             test/tahto/sync/two_device_object_test.hal
+          do
+            .dependencies/technology/hara/core/rust/target/release/hara-test \
+              --root . "$suite"
+          done
 
   native-migration-source:
     name: Transitional native metadata migration source
