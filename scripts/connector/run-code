@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+scope="${1:?usage: scripts/connector/run-code <protocol|native|website>}"
+
+case "$scope" in
+  protocol)
+    python3 conformance/check-bootstrap.py
+    python3 conformance/check-protocol.py
+    python3 -m py_compile conformance/check-bootstrap.py conformance/check-protocol.py
+    bash conformance/check-hal-layout.sh
+    bash conformance/check-hal-contracts-a.sh
+    bash conformance/check-hal-contracts-b.sh
+    bash conformance/check-hal-security.sh
+    ;;
+  native)
+    cargo fmt --manifest-path native/Cargo.toml --all -- --check
+    cargo test --locked --quiet --manifest-path native/Cargo.toml --workspace
+    ;;
+  website)
+    git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"
+    git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
+    git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+    npm --prefix site ci
+    npm --prefix site run build
+    ;;
+  *)
+    printf 'unknown connector scope: %s\n' "$scope" >&2
+    exit 64
+    ;;
+esac
